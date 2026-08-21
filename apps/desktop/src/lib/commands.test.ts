@@ -11,6 +11,7 @@ import {
   checkBibleDatasetIntegrity,
   createManualPresentation,
   getAppConfig,
+  getIntelligenceCapabilities,
   importBibleDataset,
   listContentRegistry,
   previewPresentation,
@@ -141,5 +142,14 @@ describe("commands.ts Tauri IPC guard", () => {
     await checkBibleDatasetIntegrity("KJV");
 
     expect(invokeMock).toHaveBeenCalledWith("check_bible_dataset_integrity", { translationId: "KJV" });
+  });
+
+  it("getIntelligenceCapabilities calls get_intelligence_capabilities with no arguments (Phase 2.0)", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await getIntelligenceCapabilities();
+
+    expect(invokeMock).toHaveBeenCalledWith("get_intelligence_capabilities", undefined);
   });
 });

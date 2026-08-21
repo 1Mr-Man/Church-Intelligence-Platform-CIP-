@@ -23,6 +23,7 @@ use cip_core_bible::{
 };
 use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
 use cip_core_content::{ContentMetadata, ContentRegistryError, ContentStatus, ContentType};
+use cip_core_intelligence::{EngineCapability, IntelligenceDomain};
 use cip_core_presentation::{PresentationContent, PresentationItem, PresentationItemStatus};
 use cip_core_service::{
     AudioChunk, AudioChunkSink, AudioDevice, AudioEngineStatus, ScriptureDetection, ServiceSession,
@@ -1537,6 +1538,52 @@ pub fn check_bible_dataset_integrity(
         .map_err(log_and_return)
 }
 
+// --- intelligence (Phase 2.0) -------------------------------------------------
+
+/// One [`IntelligenceDomain`]'s real capability, for the diagnostic
+/// "Intelligence Status" panel - see `intelligence.rs`'s module docs.
+/// `engineId`/`engineVersion` are `None` for a domain with no registered
+/// engine at all (Music/Sermon/Content/CrossDomain in Phase 2.0), never a
+/// placeholder value.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DomainCapabilityReport {
+    pub domain: IntelligenceDomain,
+    pub capability: EngineCapability,
+    pub engine_id: Option<String>,
+    pub engine_version: Option<String>,
+}
+
+/// Minimal diagnostic command (Phase 2.0 spec section 41): reports each
+/// reserved [`IntelligenceDomain`]'s real capability from the registry
+/// built in `intelligence::build_registry`. Never calls `analyze()` on
+/// anything - this only reads identity/capability.
+#[tauri::command]
+pub fn get_intelligence_capabilities(state: State<'_, AppState>) -> Vec<DomainCapabilityReport> {
+    crate::intelligence::ALL_DOMAINS
+        .iter()
+        .map(
+            |domain| match state.intelligence_registry.resolve(*domain) {
+                Some(engine) => {
+                    let identity = engine.identity();
+                    DomainCapabilityReport {
+                        domain: *domain,
+                        capability: engine.capability(),
+                        engine_id: Some(identity.engine_id),
+                        engine_version: Some(identity.engine_version),
+                    }
+                }
+                None => DomainCapabilityReport {
+                    domain: *domain,
+                    capability: EngineCapability::Unavailable,
+                    engine_id: None,
+                    engine_version: None,
+                },
+            },
+        )
+        .collect()
+}
+
 // --- live status -------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1958,5 +2005,27 @@ mod tests {
         assert!(value.get("databaseStatus").is_some());
         assert_eq!(value["serviceStatus"], "planned");
         assert_eq!(value["audio"]["isCapturing"], false);
+    }
+
+    #[test]
+    fn domain_capability_report_serializes_camel_case_with_null_engine_for_unregistered_domains() {
+        let registered = DomainCapabilityReport {
+            domain: IntelligenceDomain::Bible,
+            capability: EngineCapability::Available,
+            engine_id: Some("bible".to_string()),
+            engine_version: Some("1.0".to_string()),
+        };
+        let unregistered = DomainCapabilityReport {
+            domain: IntelligenceDomain::Music,
+            capability: EngineCapability::Unavailable,
+            engine_id: None,
+            engine_version: None,
+        };
+        let registered_json = serde_json::to_value(&registered).unwrap();
+        let unregistered_json = serde_json::to_value(&unregistered).unwrap();
+        assert_eq!(registered_json["engineId"], "bible");
+        assert_eq!(registered_json["capability"], "available");
+        assert!(unregistered_json["engineId"].is_null());
+        assert_eq!(unregistered_json["capability"], "unavailable");
     }
 }

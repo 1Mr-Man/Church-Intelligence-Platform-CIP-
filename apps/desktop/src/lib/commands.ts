@@ -20,6 +20,7 @@ import type {
   BibleTranslation,
   ContentMetadata,
   ContentType,
+  DomainCapabilityReport,
   ImportReport,
   IntegrityReport,
   LiveStatus,
@@ -262,6 +263,14 @@ export function importBibleDataset(datasetJson: string): Promise<ImportReport> {
 
 export function checkBibleDatasetIntegrity(translationId: string): Promise<IntegrityReport> {
   return invokeCommand("check_bible_dataset_integrity", { translationId });
+}
+
+// --- intelligence (Phase 2.0) --------------------------------------------------
+
+/** Reports each reserved intelligence domain's real capability - never
+ * fabricates a capability for a domain with no registered engine. */
+export function getIntelligenceCapabilities(): Promise<DomainCapabilityReport[]> {
+  return invokeCommand("get_intelligence_capabilities");
 }
 
 // --- live status --------------------------------------------------------------

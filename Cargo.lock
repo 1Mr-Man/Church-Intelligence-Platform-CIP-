@@ -481,6 +481,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cip-core-intelligence"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "cip-core-ai",
+ "cip-core-bible",
+ "cip-core-confidence",
+ "cip-core-content",
+ "cip-core-service",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "uuid",
+]
+
+[[package]]
 name = "cip-core-music"
 version = "0.1.0"
 dependencies = [
@@ -544,6 +560,7 @@ dependencies = [
  "cip-core-bible",
  "cip-core-confidence",
  "cip-core-content",
+ "cip-core-intelligence",
  "cip-core-presentation",
  "cip-core-service",
  "cip-database",

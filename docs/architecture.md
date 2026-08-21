@@ -41,6 +41,7 @@ not replace the operator's judgment.
 | ------------------------ | ------------------------------------------------------------------ |
 | `core/bible`            | `BibleProvider`, `ScriptureReference`, text normalization, reference detection, verse-range retrieval, local search, the dataset integrity checker, the Scripture Context Manager (see below) |
 | `core/content`          | `ContentRegistry` - what local content exists, and its provenance/licensing (Phase 1.5) |
+| `core/intelligence`     | The shared intelligence architecture (Phase 2.0) - `IntelligenceContext`, `IntelligenceEngine`, `IntelligenceFinding`, the engine registry, and the Bible compatibility adapter |
 | `core/service`          | `ServiceSession` lifecycle, `AudioEngine` capture contract        |
 | `core/ai`               | `SpeechEngine` transcription contract, `Suggestion`                |
 | `core/presentation`     | `PresentationItem` - *what* is shown, not how it's rendered       |
@@ -49,9 +50,16 @@ not replace the operator's judgment.
 | `core/music`, `core/sermon` | Placeholders reserving the architectural boundary for Phase 2+ |
 
 `core/confidence` is the one crate every other domain may depend on; the
-rest do not depend on each other except through `core/service`, which
-composes `ServiceSession` state that other domains reference by id
-(`service_id`) rather than by direct type dependency.
+rest do not depend on each other except through two documented
+composition points: `core/service` (composing `core/bible` + `core/ai`
+into the Bible Intelligence Core pipeline) and, one level up the same
+stack, `core/intelligence` (Phase 2.0), which composes `core/bible` +
+`core/ai` + `core/service` + `core/content` into the shared
+`IntelligenceContext`/`IntelligenceEngine` contracts - reusing
+`ScriptureContext`/`TranscriptSegment`/`ServiceStatus`/`ContentMetadata`
+exactly rather than duplicating them. See
+[`docs/intelligence-architecture.md`](intelligence-architecture.md) for
+why this dependency shape was chosen.
 
 ## Provider/adaptor implementations
 
@@ -123,7 +131,14 @@ the Bible dataset importer/integrity checker, verse-range retrieval, and
 local search - again without changing the Bible Intelligence Core's own
 detection/context/resolution behavior; see
 [`docs/bible-datasets.md`](bible-datasets.md) and
-[`docs/content-registry.md`](content-registry.md).
+[`docs/content-registry.md`](content-registry.md). Phase 2.0 wraps this
+same, unchanged pipeline in a thin `IntelligenceEngine` compatibility
+adapter (`core/intelligence::bible_adapter::BibleIntelligenceEngine`) so
+it can sit behind the new shared intelligence architecture alongside
+future Music/Sermon/Content engines - `core/bible` and `core/service`
+were not modified, and every existing Bible Intelligence Core test still
+passes unmodified; see
+[`docs/intelligence-architecture.md`](intelligence-architecture.md).
 
 ## Event architecture
 
@@ -191,6 +206,16 @@ consistently before the error crosses the IPC boundary.
   that links a Bible translation to its registry entry lives in the
   composition layer (`apps/desktop/src-tauri/src/content.rs`), not in
   either domain crate.
+- `core/intelligence` (Phase 2.0) is the one exception alongside
+  `core/service`: it depends on `core/bible`, `core/ai`, `core/service`,
+  and `core/content` directly, reusing their types
+  (`ScriptureContext`/`TranscriptSegment`/`ServiceStatus`/`ContentMetadata`)
+  rather than duplicating them - the same "one documented composition
+  point per layer" pattern `core/service` already established, one level
+  up the same stack. It still depends on nothing outside `core/*` and
+  `cip-core-confidence` - no `tauri`, no SQLite implementation, no
+  network client. See
+  [`docs/intelligence-architecture.md`](intelligence-architecture.md#23-offline-operation).
 - `integrations/*` and `ai/*` depend on `core/*` (to implement its
   traits) and on `database` where they need storage - never the reverse.
 - `apps/desktop/src-tauri` is the only crate allowed to depend on `tauri`

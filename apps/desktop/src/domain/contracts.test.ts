@@ -16,6 +16,11 @@ import type {
 import type { ConfidenceResult } from "./confidence";
 import type { ProcessedSegment, ScriptureDetection, Suggestion, TranscriptSegment } from "./ai";
 import type { ContentMetadata, ImportReport, IntegrityReport } from "./content";
+import type {
+  DomainCapabilityReport,
+  IntelligenceCorrelation,
+  IntelligenceFinding,
+} from "./intelligence";
 import type { PresentationItem, PresentationPreview, RenderedSlide } from "./presentation";
 import type { ServiceSession } from "./service";
 import type { LiveStatus, TimelineEntry } from "./live";
@@ -267,5 +272,53 @@ describe("domain contracts", () => {
     const textMatch: BibleSearchResult = { ...exactMatch, relevance: null };
     expect(exactMatch.relevance).toBe(1.0);
     expect(textMatch.relevance).toBeNull();
+  });
+
+  it("constructs an IntelligenceFinding distinguishing inferred context from a suggested reference (Phase 2.0)", () => {
+    const confidence: ConfidenceResult = { score: 0.9, level: "high", source: "heuristic", reason: null };
+    const inferredContext: IntelligenceFinding = {
+      id: "11111111-1111-1111-1111-111111111111",
+      serviceId: "22222222-2222-2222-2222-222222222222",
+      domain: "bible",
+      kind: "scripture",
+      assertionLevel: "inferred",
+      status: "detected",
+      priority: "normal",
+      confidence,
+      summary: "Active Scripture Context: ROM 8",
+      transcriptSegmentIds: ["33333333-3333-3333-3333-333333333333"],
+      evidence: [{ kind: "transcript", segmentIds: ["33333333-3333-3333-3333-333333333333"], excerpt: "Romans chapter eight" }],
+      provenance: { contentId: "bible:KJV", note: null },
+      engineId: "bible",
+      engineVersion: "1.0",
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    const suggestedVerse: IntelligenceFinding = { ...inferredContext, assertionLevel: "suggested", summary: "ROM 8:28" };
+
+    expect(inferredContext.assertionLevel).toBe("inferred");
+    expect(suggestedVerse.assertionLevel).toBe("suggested");
+    expect(inferredContext.status).toBe("detected");
+    expect(inferredContext.provenance.contentId).toBe("bible:KJV");
+  });
+
+  it("constructs an IntelligenceCorrelation referencing more than one finding", () => {
+    const confidence: ConfidenceResult = { score: 0.6, level: "medium", source: "heuristic", reason: null };
+    const correlation: IntelligenceCorrelation = {
+      id: "44444444-4444-4444-4444-444444444444",
+      sourceFindingIds: ["11111111-1111-1111-1111-111111111111", "55555555-5555-5555-5555-555555555555"],
+      kind: { kind: "temporal_proximity" },
+      confidence,
+      evidence: [],
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    expect(correlation.sourceFindingIds).toHaveLength(2);
+    expect(correlation.kind.kind).toBe("temporal_proximity");
+  });
+
+  it("constructs a DomainCapabilityReport leaving engine identity null for an unregistered domain (Phase 2.0)", () => {
+    const bible: DomainCapabilityReport = { domain: "bible", capability: "available", engineId: "bible", engineVersion: "1.0" };
+    const music: DomainCapabilityReport = { domain: "music", capability: "unavailable", engineId: null, engineVersion: null };
+    expect(bible.capability).toBe("available");
+    expect(music.engineId).toBeNull();
   });
 });

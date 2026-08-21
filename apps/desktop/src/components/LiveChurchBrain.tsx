@@ -4,6 +4,7 @@ import type {
   BibleSearchResult,
   BibleTranslation,
   ContentMetadata,
+  DomainCapabilityReport,
   ImportReport,
   IntegrityReport,
   LiveStatus,
@@ -90,6 +91,10 @@ export function LiveChurchBrain() {
   const [integrityByTranslation, setIntegrityByTranslation] = useState<Record<string, IntegrityReport>>({});
   const [importResult, setImportResult] = useState<ImportReport | null>(null);
   const [importFileName, setImportFileName] = useState<string | null>(null);
+  // Intelligence Status (Phase 2.0) - a diagnostic-only view of which
+  // intelligence domains have a real engine registered. Not
+  // service-scoped: loads once on mount.
+  const [intelligenceCapabilities, setIntelligenceCapabilities] = useState<DomainCapabilityReport[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -132,6 +137,10 @@ export function LiveChurchBrain() {
   useEffect(() => {
     refreshContentRegistry();
   }, [refreshContentRegistry]);
+
+  useEffect(() => {
+    commands.getIntelligenceCapabilities().then(setIntelligenceCapabilities).catch(() => {});
+  }, []);
 
   const activeServiceId = status?.service?.id;
   useEffect(() => {
@@ -911,6 +920,29 @@ export function LiveChurchBrain() {
             </div>
           )}
         </details>
+      </section>
+
+      <section className="live-brain__panel">
+        <h2>Intelligence Status</h2>
+        <p className="live-brain__hint">
+          The Phase 2.0 shared intelligence architecture. Only Bible has a real engine behind it - the rest reserve
+          the shape future phases will fill in, and are honestly reported as not installed rather than faked.
+        </p>
+        <ul className="live-brain__content-items">
+          {intelligenceCapabilities.map((report) => (
+            <li key={report.domain}>
+              <div className="live-brain__suggestion-header">
+                <strong>{report.domain}</strong>
+                <span className="live-brain__confidence">{report.capability.toUpperCase()}</span>
+              </div>
+              {report.engineId && (
+                <p className="live-brain__hint">
+                  {report.engineId} v{report.engineVersion}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
       </section>
 
       <section className="live-brain__panel">

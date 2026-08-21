@@ -8,8 +8,9 @@ contains **Phase 1 - Foundation**, **Phase 1.1 - Bible Intelligence Core**,
 **Phase 1.2 - Live Speech Foundation**, **Phase 1.2.1 - Runtime
 Compatibility**, **Phase 1.3 - Live Service Intelligence & Operator
 Workflow**, **Phase 1.4 - Presentation Foundation & Real-Service
-Validation**, and **Phase 1.5 - Content/Dataset Foundation &
-Full-Service Validation**.
+Validation**, **Phase 1.5 - Content/Dataset Foundation &
+Full-Service Validation**, and **Phase 2.0 - Intelligence Architecture &
+Unified Intelligence Context**.
 
 ## Approved architecture
 
@@ -41,6 +42,9 @@ local content exists and its provenance/licensing,
 importer/integrity checker and the licensing policy governing them,
 [`docs/full-service-validation.md`](docs/full-service-validation.md) for
 the realistic full-service validation results,
+[`docs/intelligence-architecture.md`](docs/intelligence-architecture.md)
+for the shared intelligence contracts future Bible/Music/Sermon/Content
+engines are built on,
 [`docs/development.md`](docs/development.md) to get running locally, and
 [`docs/database.md`](docs/database.md) for the SQLite/migration story.
 
@@ -136,6 +140,24 @@ realistic scripted service. See
 [`docs/bible-datasets.md`](docs/bible-datasets.md), and
 [`docs/full-service-validation.md`](docs/full-service-validation.md).
 
+**Phase 2.0 (Intelligence Architecture & Unified Intelligence Context)**
+built the shared architecture future intelligence engines will sit
+behind, without implementing any of them. A new `core/intelligence` crate
+defines `IntelligenceDomain`/`FindingKind`/`FindingStatus`, the mandatory
+observed/inferred/suggested/generated distinction, an evidence/provenance
+model tied to the Phase 1.5 Content Registry, a deterministic (confidence
+is not urgency) priority model, a bounded `IntelligenceContext` (proven to
+stay bounded even fed 10,000 synthetic transcript segments), the
+`IntelligenceEngine` contract, an in-process engine registry with
+panic-safe failure isolation, a correlation-model foundation, and an
+in-memory finding queue. The one real engine is a thin compatibility
+adapter over the unchanged Bible Intelligence Core - `core/bible` and
+`core/service` were not modified by this phase, and every existing Bible
+regression test still passes unmodified. Music, Sermon, and Content
+intelligence remain **not implemented** - `IntelligenceDomain` only
+reserves the shape they will occupy. See
+[`docs/intelligence-architecture.md`](docs/intelligence-architecture.md).
+
 Still deliberately **not** implemented: song recognition, sermon
 intelligence, semantic/paraphrase Bible search, automatic bullet
 extraction, a web research engine, online Bible fallback, content
@@ -154,8 +176,9 @@ apps/desktop/          Tauri + React + TypeScript desktop application
 core/                  Domain logic and contracts, one crate per domain
   bible/               BibleProvider, text normalization, reference detection, verse-range/search, integrity checker, Scripture Context Manager
   content/              ContentRegistry - what local content exists, and its provenance/licensing
-  music/                (placeholder - Phase 2+)
-  sermon/               (placeholder - Phase 2+)
+  intelligence/          Shared intelligence architecture (Phase 2.0) - IntelligenceContext/Engine/Finding, the Bible compatibility adapter
+  music/                (placeholder - Phase 2+ engine implementation)
+  sermon/               (placeholder - Phase 2+ engine implementation)
   service/              ServiceSession + AudioEngine
   presentation/         PresentationItem
   search/               SearchEngine

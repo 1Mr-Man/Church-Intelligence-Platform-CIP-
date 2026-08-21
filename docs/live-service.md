@@ -31,7 +31,15 @@ authority) end to end, again without changing the service lifecycle,
 timeline, or suggestion workflow this document describes - see
 [`docs/content-registry.md`](content-registry.md),
 [`docs/bible-datasets.md`](bible-datasets.md), and
-[`docs/full-service-validation.md`](full-service-validation.md).
+[`docs/full-service-validation.md`](full-service-validation.md). Phase 2.0
+established the shared intelligence architecture (`core/intelligence`)
+that future Music/Sermon/Content engines will sit behind - the live
+transcript pipeline this document describes
+(`pipeline.rs::handle_final_transcript`) is completely unchanged; the one
+real intelligence engine (a Bible compatibility adapter) is exercised only
+by a diagnostic command and its own tests, not by anything in the live
+service path - see
+[`docs/intelligence-architecture.md`](intelligence-architecture.md).
 
 ## Service lifecycle
 

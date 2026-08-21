@@ -3,6 +3,7 @@ mod config;
 mod content;
 mod errors;
 pub mod events;
+mod intelligence;
 pub mod logging;
 mod persistence;
 mod pipeline;
@@ -103,6 +104,19 @@ pub fn run() {
                 content::register_dev_seed_content_if_missing(content_registry.as_ref())?;
             }
 
+            // Phase 2.0: the intelligence engine registry gets its own
+            // BibleProvider connection too, mirroring `bible_conn`/
+            // `content_conn` above - an independent read path for the
+            // Bible compatibility adapter's own Scripture Context state,
+            // never contending with the live pipeline's connection.
+            let intelligence_bible_conn = cip_database::open(&config.database_path)?;
+            let intelligence_registry = intelligence::build_registry(
+                Box::new(cip_integrations_bible::SqliteBibleProvider::new(
+                    intelligence_bible_conn,
+                )),
+                state::DEFAULT_TRANSLATION_ID,
+            );
+
             let audio_engine: Box<dyn cip_core_service::AudioEngine> =
                 Box::new(cip_integrations_audio::CpalAudioEngine::new());
             let speech_engine = create_speech_engine(&config);
@@ -112,6 +126,7 @@ pub fn run() {
                 db,
                 bible_provider,
                 content_registry,
+                intelligence_registry,
                 audio_engine,
                 speech_engine,
             ));
@@ -147,6 +162,7 @@ pub fn run() {
             commands::set_content_enabled,
             commands::import_bible_dataset,
             commands::check_bible_dataset_integrity,
+            commands::get_intelligence_capabilities,
             commands::get_live_status,
             commands::list_timeline,
             commands::list_service_history,

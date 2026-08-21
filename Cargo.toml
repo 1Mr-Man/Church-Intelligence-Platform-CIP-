@@ -12,6 +12,7 @@ members = [
   "core/search",
   "core/ai",
   "core/confidence",
+  "core/intelligence",
 
   "database",
 
@@ -63,6 +64,7 @@ cip-core-presentation = { path = "core/presentation" }
 cip-core-search = { path = "core/search" }
 cip-core-ai = { path = "core/ai" }
 cip-core-confidence = { path = "core/confidence" }
+cip-core-intelligence = { path = "core/intelligence" }
 cip-database = { path = "database" }
 cip-integrations-audio = { path = "integrations/audio" }
 cip-integrations-bible = { path = "integrations/bible" }

@@ -1,0 +1,22 @@
+[package]
+name = "cip-core-intelligence"
+description = "Shared intelligence architecture: the unified IntelligenceContext, IntelligenceEngine contract, and IntelligenceFinding model future Bible/Music/Sermon/Content engines are built on."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+cip-core-confidence.workspace = true
+cip-core-bible.workspace = true
+cip-core-ai.workspace = true
+cip-core-service.workspace = true
+cip-core-content.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
