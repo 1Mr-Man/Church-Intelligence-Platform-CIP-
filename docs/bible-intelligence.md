@@ -256,27 +256,26 @@ what lets context survive intervening segments). It has no idea whether
 `text` came from a human typing a test fixture, a fixed transcript file, or
 eventually a real `SpeechEngine` - and that's the point.
 
-### How Phase 1.2's `SpeechEngine` will plug in
+### How Phase 1.2's `SpeechEngine` plugs in
 
-`cip_core_ai::SpeechEngine::feed_audio` already returns
-`Vec<TranscriptSegment>` (Phase 1.0). Phase 1.2's job is almost entirely
-outside this module: implement a real `SpeechEngine` (`ai/speech`,
-currently only `NullSpeechEngine`), wire `AudioEngine` capture to it, and
-call `process_transcript_segment` once per emitted `TranscriptSegment.text`
-- the same call this document's examples already make by hand. No change
-to the Bible Intelligence Core itself should be required; if one turns out
-to be, that's a sign the pipeline's input contract needs revisiting, not
-that Phase 1.2 should reach around it.
+Implemented in Phase 1.2: a real `SpeechEngine` (`ai/speech`, now also
+`ScriptedSpeechEngine` and `WhisperSpeechEngine` alongside
+`NullSpeechEngine`), `AudioEngine` capture wired to it
+(`integrations/audio::CpalAudioEngine`), and a call to
+`process_transcript_segment` once per emitted final `TranscriptSegment.text`
+- the same call this document's examples already make by hand. As
+predicted, no change to the Bible Intelligence Core itself was required;
+`process_transcript_segment` and everything above it in this document are
+unchanged from Phase 1.1.
 
 Persisting `ScriptureDetection`s/`Suggestion`s into `scripture_detections`
-/`ai_suggestions` (the schema already supports both, see
-[`docs/database.md`](database.md)) and emitting `SCRIPTURE_DETECTED` /
-`SCRIPTURE_UPDATED` / `SUGGESTION_CREATED` (already defined in
-`apps/desktop/src-tauri/src/events.rs`) are also deferred to that
-integration point - both are thin, Tauri/SQLite-aware wiring around a
-`ProcessedSegment`, not Bible Intelligence Core logic, so they belong in
-the app shell alongside the real `SpeechEngine`/Tauri command that will
-call this pipeline in practice, not in `core/service`.
+/`ai_suggestions` and emitting `SCRIPTURE_DETECTED` / `SCRIPTURE_UPDATED` /
+`SUGGESTION_CREATED` now happens in
+`apps/desktop/src-tauri/src/pipeline.rs` and `commands.rs` - thin, Tauri/
+SQLite-aware wiring around a `ProcessedSegment`, kept out of `core/service`
+as planned. See [`docs/live-speech.md`](live-speech.md) for the full
+pipeline, the real `AudioEngine`/`SpeechEngine` implementations, and the
+Live Church Brain UI that reviews what this produces.
 
 ## Testing
 

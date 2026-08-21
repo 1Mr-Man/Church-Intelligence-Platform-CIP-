@@ -65,35 +65,44 @@ export interface BibleProvider {
   search(query: string, translationId: string): Promise<BibleVerse[]>;
 }
 
-// --- Scripture Context Manager: interface boundary only (Phase 1) --------
+// --- Scripture Context Manager (implemented in Phase 1.1) -----------------
 //
-// Planned behavior (not implemented yet):
-//   "Romans 8"            -> ACTIVE SCRIPTURE CONTEXT = Romans 8
-//   "verse 28"             -> resolves to Romans 8:28
-//   "verse 31"              -> resolves to Romans 8:31
-//   "go back to verse 18"   -> resolves to Romans 8:18
-// See `core/bible/src/context.rs` for the full rationale. Nothing calls
-// this yet - it exists to reserve the architectural boundary, not to
-// prescribe a final wire format - so `ContextResolution` here models the
-// domain shape, not the literal (not yet camelCase-normalized) serde
-// encoding of the Rust enum. Finalize both sides together when the
-// resolution algorithm is actually implemented.
+// Models how pastors actually speak: "Romans chapter 8" establishes a
+// context; "verse 28" resolves against it even across unrelated
+// intervening speech; a new chapter reference replaces it. See
+// `docs/bible-intelligence.md` for the full behavior and
+// `core/bible/src/context_manager.rs` (Rust) for the implementation this
+// mirrors.
 
+/** Mirrors `core/bible::ScriptureContext` (Rust). */
 export interface ScriptureContext {
-  reference: ScriptureReference;
+  translationId: string;
+  /** Canonical book code (e.g. `"ROM"`), never a display name. */
+  book: string;
+  chapter: number;
+  /** The most recently resolved verse in this context, or `null` right
+   * after a bare chapter reference - no verse is ever invented. */
+  lastVerse: number | null;
   confidence: ConfidenceResult;
   establishedAt: string; // ISO-8601
+  valid: boolean;
 }
 
-export type ContextResolution =
-  | { type: "established"; context: ScriptureContext }
-  | { type: "resolved"; reference: ScriptureReference; confidence: ConfidenceResult }
-  | { type: "replaced"; previous: ScriptureContext; current: ScriptureContext }
-  | { type: "ambiguous"; candidates: ScriptureReference[] }
-  | { type: "unresolved" };
+/** One candidate offered when a bare verse is ambiguous between the
+ * active context and a just-replaced one. Mirrors
+ * `core/bible::AmbiguousCandidate`. */
+export interface AmbiguousCandidate {
+  reference: ScriptureReference;
+  confidence: ConfidenceResult;
+}
+
+// `ContextResolution` (the Scripture Context Manager's internal
+// resolve() outcome) is not exposed over IPC - only the higher-level
+// `ScriptureDetection` (see `ai.ts`) is. See `core/bible/src/context.rs`
+// for that internal type if you need it.
 
 export interface ScriptureContextManager {
-  resolve(fragment: PartialScriptureReference): ContextResolution;
+  resolve(fragment: PartialScriptureReference): unknown;
   activeContext(): ScriptureContext | null;
   recentReferences(limit: number): ScriptureReference[];
   confirmActive(): void;

@@ -59,9 +59,14 @@ composes `ServiceSession` state that other domains reference by id
   contract end to end. `integrations/music`, `integrations/web`,
   `integrations/obs`, `integrations/vmix` are placeholders for later
   phases.
+- `integrations/audio` - Phase 1.2's `AudioEngine` implementation
+  (`CpalAudioEngine`, over the cross-platform `cpal` crate).
 - `ai/speech`, `ai/embeddings`, `ai/classifiers` - AI backend
-  implementations. Phase 1 ships only `NullSpeechEngine` (a stub proving
-  `SpeechEngine` is wireable); no real transcription exists yet.
+  implementations. Phase 1.2 ships three `SpeechEngine`s:
+  `NullSpeechEngine` (the safe default), `ScriptedSpeechEngine`
+  (deterministic test/demo adapter), and `WhisperSpeechEngine` (a real
+  local backend over whisper-rs/whisper.cpp, behind a `whisper` Cargo
+  feature) - see [`docs/live-speech.md`](live-speech.md).
   `ai/models` is not a crate - it's where local model artifacts are placed
   at runtime (never committed to the repository).
 - `presentation/renderer` - turns a `PresentationItem` into on-screen
@@ -88,7 +93,10 @@ Pastor: "go back to verse 18"   -> resolves to Romans 8:18
 
 See [`docs/bible-intelligence.md`](bible-intelligence.md) for the full
 pipeline, the context model, ambiguity handling, and the transcript test
-harness that stands in for a real `SpeechEngine` until Phase 1.2.
+harness. Phase 1.2 connects this to a real live-service input path - real
+audio capture, a replaceable speech-to-text boundary, persistence, IPC/
+event wiring, and an operator UI - without changing any of the above; see
+[`docs/live-speech.md`](live-speech.md).
 
 ## Event architecture
 

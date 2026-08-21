@@ -10,11 +10,18 @@ struct Migration {
     sql: &'static str,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "0001_initial_schema",
-    sql: include_str!("../migrations/0001_initial_schema.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "0001_initial_schema",
+        sql: include_str!("../migrations/0001_initial_schema.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "0002_live_speech_detail",
+        sql: include_str!("../migrations/0002_live_speech_detail.sql"),
+    },
+];
 
 /// A migration that was applied during this call to [`run_migrations`].
 /// (Migrations already applied in a previous run are not included.)
@@ -99,6 +106,34 @@ mod tests {
             )
             .unwrap();
         assert_eq!(table_count, 1);
+    }
+
+    #[test]
+    fn phase_1_2_columns_exist_after_migration() {
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+
+        let has_column = |table: &str, column: &str| -> bool {
+            conn.prepare(&format!("PRAGMA table_info({table})"))
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .filter_map(Result::ok)
+                .any(|name| name == column)
+        };
+
+        for column in ["sequence_number", "language", "speaker_id"] {
+            assert!(
+                has_column("transcript_segments", column),
+                "missing transcript_segments.{column}"
+            );
+        }
+        for column in ["detection_type", "source_text"] {
+            assert!(
+                has_column("scripture_detections", column),
+                "missing scripture_detections.{column}"
+            );
+        }
     }
 
     #[test]

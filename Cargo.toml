@@ -14,6 +14,7 @@ members = [
 
   "database",
 
+  "integrations/audio",
   "integrations/bible",
   "integrations/music",
   "integrations/web",
@@ -49,6 +50,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 log = "0.4"
 regex = "1"
+cpal = "0.15"
 
 cip-core-bible = { path = "core/bible" }
 cip-core-music = { path = "core/music" }
@@ -59,6 +61,7 @@ cip-core-search = { path = "core/search" }
 cip-core-ai = { path = "core/ai" }
 cip-core-confidence = { path = "core/confidence" }
 cip-database = { path = "database" }
+cip-integrations-audio = { path = "integrations/audio" }
 cip-integrations-bible = { path = "integrations/bible" }
 cip-integrations-music = { path = "integrations/music" }
 cip-integrations-web = { path = "integrations/web" }

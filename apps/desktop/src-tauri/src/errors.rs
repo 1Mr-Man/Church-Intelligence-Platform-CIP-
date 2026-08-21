@@ -8,6 +8,7 @@
 
 use crate::config::ConfigError;
 use crate::logging::LogCategory;
+use crate::persistence::PersistError;
 use serde::Serialize;
 use thiserror::Error;
 
@@ -19,6 +20,16 @@ pub enum AppError {
     Database(#[from] cip_database::DatabaseError),
     #[error(transparent)]
     BibleProvider(#[from] cip_core_bible::BibleProviderError),
+    #[error(transparent)]
+    Persistence(#[from] PersistError),
+    #[error(transparent)]
+    AudioEngine(#[from] cip_core_service::AudioEngineError),
+    #[error(transparent)]
+    SpeechEngine(#[from] cip_core_ai::SpeechEngineError),
+    #[error("no service is currently active - start one first")]
+    NoActiveService,
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
 }
 
 impl AppError {
@@ -27,6 +38,11 @@ impl AppError {
             AppError::Config(_) => LogCategory::App,
             AppError::Database(_) => LogCategory::Database,
             AppError::BibleProvider(_) => LogCategory::Bible,
+            AppError::Persistence(_) => LogCategory::Database,
+            AppError::AudioEngine(_) => LogCategory::Audio,
+            AppError::SpeechEngine(_) => LogCategory::Speech,
+            AppError::NoActiveService => LogCategory::App,
+            AppError::InvalidInput(_) => LogCategory::App,
         }
     }
 }
@@ -62,5 +78,27 @@ mod tests {
             "boom".into(),
         ));
         assert_eq!(err.category(), LogCategory::Bible);
+    }
+
+    #[test]
+    fn audio_engine_errors_are_categorized_under_audio() {
+        let err = AppError::AudioEngine(cip_core_service::AudioEngineError::NoDevice);
+        assert_eq!(err.category(), LogCategory::Audio);
+    }
+
+    #[test]
+    fn speech_engine_errors_are_categorized_under_speech() {
+        let err = AppError::SpeechEngine(cip_core_ai::SpeechEngineError::NotInitialized);
+        assert_eq!(err.category(), LogCategory::Speech);
+    }
+
+    #[test]
+    fn no_active_service_serializes_to_a_clear_message() {
+        let err = AppError::NoActiveService;
+        let value = serde_json::to_value(&err).unwrap();
+        assert!(value
+            .as_str()
+            .unwrap()
+            .contains("no service is currently active"));
     }
 }

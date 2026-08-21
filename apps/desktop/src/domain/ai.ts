@@ -2,19 +2,32 @@
  * AI domain contracts. Mirrors `core/ai` (Rust).
  */
 import type { ConfidenceResult } from "./confidence";
+import type { AmbiguousCandidate, ScriptureContext, ScriptureReference } from "./bible";
 
+/** Mirrors `core/ai::TranscriptSegment` (Rust). */
 export interface TranscriptSegment {
+  id: string;
+  /** Monotonically increasing per capture session; interim revisions of
+   * the same segment do not consume a new number. */
+  sequence: number;
   text: string;
   isFinal: boolean;
   confidence: ConfidenceResult;
+  /** Audio-relative milliseconds since capture started - not wall-clock
+   * time. See `core/ai::TranscriptSegment`'s doc comment. */
   startMs: number;
   endMs: number;
+  language: string | null;
+  /** Never invented - `null` unless the engine performs speaker ID
+   * (none of Phase 1.2's engines do). */
+  speakerId: string | null;
 }
 
 /**
  * The provider/adaptor contract for speech-to-text. Mirrors `SpeechEngine`
- * in `core/ai` - no implementation exists yet (speech recognition is
- * explicitly out of scope for Phase 1).
+ * in `core/ai`. The frontend never talks to an engine directly - it calls
+ * `start_listening`/`stop_listening` and receives `TRANSCRIPT_UPDATED`
+ * events - but keeps this shape for documentation/type parity.
  */
 export interface SpeechEngine {
   isReady(): boolean;
@@ -41,4 +54,36 @@ export interface Suggestion {
   status: SuggestionStatus;
   confidence: ConfidenceResult;
   createdAt: string; // ISO-8601
+}
+
+/**
+ * How a piece of transcript text relates to a Bible reference. Mirrors
+ * `core/bible::ReferenceKind` (Rust) - see its doc comments for exactly
+ * which pipeline stage assigns which variant.
+ */
+export type ReferenceKind = "direct" | "chapter" | "verse" | "sequential" | "ambiguous" | "unresolved";
+
+/**
+ * One reference candidate after context resolution and Bible validation -
+ * the Bible Intelligence Core's per-candidate output. Mirrors
+ * `core/service::ScriptureDetection` (Rust).
+ */
+export interface ScriptureDetection {
+  kind: ReferenceKind;
+  /** Only present for `direct`/`verse`/`sequential` - never for `chapter`
+   * (no verse is ever invented), `ambiguous`, or `unresolved`. */
+  reference: ScriptureReference | null;
+  context: ScriptureContext | null;
+  /** Populated only for `ambiguous` detections. */
+  candidates: AmbiguousCandidate[];
+  confidence: ConfidenceResult;
+  rawText: string;
+}
+
+/** Mirrors `core/service::ProcessedSegment` (Rust) - the result of running
+ * one transcript segment through the full Bible Intelligence Core pipeline. */
+export interface ProcessedSegment {
+  serviceId: string;
+  detections: ScriptureDetection[];
+  suggestions: Suggestion[];
 }

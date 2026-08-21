@@ -3,12 +3,46 @@ mod config;
 mod errors;
 pub mod events;
 pub mod logging;
+mod persistence;
+mod pipeline;
 mod state;
 
+use cip_core_ai::SpeechEngine;
 use config::AppConfig;
 use logging::LogCategory;
 use state::AppState;
 use tauri::Manager;
+
+/// Choose a `SpeechEngine`: a local Whisper model if the `whisper` feature
+/// is compiled in *and* a model file is actually present at the
+/// configured path, `NullSpeechEngine` otherwise. Missing/no model is
+/// never fatal - see `docs/live-speech.md`'s "model absence" section.
+#[cfg_attr(not(feature = "whisper"), allow(unused_variables))]
+fn create_speech_engine(config: &AppConfig) -> Box<dyn SpeechEngine> {
+    #[cfg(feature = "whisper")]
+    {
+        let model_path = config.model_dir.join(config::WHISPER_MODEL_FILENAME);
+        match cip_ai_speech::WhisperSpeechEngine::load(&model_path) {
+            Ok(engine) => {
+                log::info!(target: LogCategory::Speech.target(), "loaded local speech model from {}", model_path.display());
+                return Box::new(engine);
+            }
+            Err(e) => {
+                log::warn!(
+                    target: LogCategory::Speech.target(),
+                    "local speech model not available ({e}); live transcription is unavailable until one is configured"
+                );
+            }
+        }
+    }
+    #[cfg(not(feature = "whisper"))]
+    log::info!(
+        target: LogCategory::Speech.target(),
+        "built without the `whisper` feature; live transcription is unavailable (manual operation still works)"
+    );
+
+    Box::new(cip_ai_speech::NullSpeechEngine)
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -52,13 +86,31 @@ pub fn run() {
             let bible_conn = cip_database::open(&config.database_path)?;
             let bible_provider = Box::new(cip_integrations_bible::SqliteBibleProvider::new(bible_conn));
 
-            app.manage(AppState::new(config, db, bible_provider));
+            let audio_engine: Box<dyn cip_core_service::AudioEngine> =
+                Box::new(cip_integrations_audio::CpalAudioEngine::new());
+            let speech_engine = create_speech_engine(&config);
+
+            app.manage(AppState::new(config, db, bible_provider, audio_engine, speech_engine));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_app_config,
             commands::app_health_check,
             commands::list_bible_translations,
+            commands::start_service,
+            commands::end_service,
+            commands::list_audio_devices,
+            commands::start_listening,
+            commands::stop_listening,
+            commands::process_test_transcript,
+            commands::list_transcript,
+            commands::list_suggestions,
+            commands::approve_suggestion,
+            commands::edit_suggestion,
+            commands::reject_suggestion,
+            commands::prepare_presentation,
+            commands::search_bible,
+            commands::get_live_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

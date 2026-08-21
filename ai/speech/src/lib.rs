@@ -1,11 +1,28 @@
 //! `SpeechEngine` implementations.
 //!
-//! Phase 1 explicitly excludes real speech recognition. This crate ships
-//! only [`NullSpeechEngine`], a stub that satisfies `cip_core_ai::SpeechEngine`
-//! so the rest of the application (Tauri command wiring, event emission)
-//! can be built and tested against a real trait object today. A local model
-//! backend (e.g. whisper.cpp) will replace it without changing any caller,
-//! since callers depend on the trait, not this crate.
+//! - [`NullSpeechEngine`] - the safe default: reports itself not ready,
+//!   rejects audio. What the application uses whenever no real engine is
+//!   configured/available, so "no speech model" is never fatal.
+//! - [`ScriptedSpeechEngine`] - a deterministic test/demo adapter (see its
+//!   module docs) for exercising the audio -> speech -> Bible Intelligence
+//!   wiring without a microphone or model.
+//! - `WhisperSpeechEngine` (module `whisper`, behind the `whisper` Cargo
+//!   feature) - a real local backend using whisper-rs/whisper.cpp. Off by
+//!   default because compiling vendored whisper.cpp costs real build time
+//!   this crate shouldn't impose on every default build; see its module
+//!   docs and `docs/live-speech.md` for the model-download blocker
+//!   encountered in this development environment.
+//!
+//! All three satisfy the same `cip_core_ai::SpeechEngine` trait - callers
+//! never know which one they're holding.
+
+mod scripted;
+#[cfg(feature = "whisper")]
+mod whisper;
+
+pub use scripted::ScriptedSpeechEngine;
+#[cfg(feature = "whisper")]
+pub use whisper::WhisperSpeechEngine;
 
 use cip_core_ai::{SpeechEngine, SpeechEngineError, TranscriptSegment};
 

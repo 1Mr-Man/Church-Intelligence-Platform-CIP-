@@ -27,6 +27,12 @@ Adding a migration: add a new `NNNN_description.sql` file, add a matching
 entry to the `MIGRATIONS` array in `database/src/migrations.rs`. Never edit
 an already-applied migration file - add a new one.
 
+`0002_live_speech_detail.sql` (Phase 1.2) added the columns the live
+pipeline needed that Phase 1.0's schema didn't yet have:
+`transcript_segments.sequence_number`/`.language`/`.speaker_id` and
+`scripture_detections.detection_type`/`.source_text` - see
+[`docs/live-speech.md`](live-speech.md).
+
 ## Schema
 
 See [`database/schema/README.md`](../database/schema/README.md) for the

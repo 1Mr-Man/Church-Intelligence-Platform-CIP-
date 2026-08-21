@@ -4,8 +4,8 @@ CIP is a desktop application that assists a live church service: as
 scripture is spoken, it detects the reference, brings up the verse text,
 and queues it for presentation - reviewed and approved by a human operator,
 never auto-applied. It is being built in phases; this repository currently
-contains **Phase 1 - Foundation** and **Phase 1.1 - Bible Intelligence
-Core**.
+contains **Phase 1 - Foundation**, **Phase 1.1 - Bible Intelligence Core**,
+and **Phase 1.2 - Live Speech Foundation**.
 
 ## Approved architecture
 
@@ -25,9 +25,11 @@ Core**.
 
 See [`docs/architecture.md`](docs/architecture.md) for the full picture,
 [`docs/bible-intelligence.md`](docs/bible-intelligence.md) for the
-transcript-to-suggestion pipeline, [`docs/development.md`](docs/development.md)
-to get running locally, and [`docs/database.md`](docs/database.md) for the
-SQLite/migration story.
+transcript-to-suggestion pipeline, [`docs/live-speech.md`](docs/live-speech.md)
+for real audio capture, the speech-to-text boundary, and the Live Church
+Brain UI, [`docs/development.md`](docs/development.md) to get running
+locally, and [`docs/database.md`](docs/database.md) for the SQLite/migration
+story.
 
 ## What's implemented (and what isn't)
 
@@ -48,11 +50,22 @@ scoring, and `Suggestion` creation - all driven by a deterministic
 transcript-input test harness, with no real audio or speech model
 involved. See [`docs/bible-intelligence.md`](docs/bible-intelligence.md).
 
-Still deliberately **not** implemented: real speech recognition (no
-Whisper or other backend - `ai/speech` still ships only a
-`NullSpeechEngine`), song recognition, sermon intelligence, cloud sync,
-OBS/vMix integration, and the full presentation designer. Those are later
-phases.
+**Phase 1.2 (Live Speech Foundation)** connects that pipeline to a real
+live-service input path: a real cross-platform `AudioEngine`
+(`integrations/audio::CpalAudioEngine`, over `cpal`), a replaceable
+`SpeechEngine` boundary with three implementations (`NullSpeechEngine`,
+`ScriptedSpeechEngine` for deterministic testing, and a real local
+`WhisperSpeechEngine` behind a `whisper` Cargo feature), transcript/
+detection/suggestion persistence, Tauri IPC and event wiring, a manual
+text-entry fallback, online/offline and AI-availability status reporting,
+and a v0.1 "Live Church Brain" operator UI. See
+[`docs/live-speech.md`](docs/live-speech.md), including the documented
+model-download blocker in this development environment and how to verify
+real transcription with network access to a model host.
+
+Still deliberately **not** implemented: song recognition, sermon
+intelligence, semantic/paraphrase Bible search, cloud sync, OBS/vMix
+integration, and the full presentation designer. Those are later phases.
 
 ## Repository layout
 
@@ -72,7 +85,7 @@ core/                  Domain logic and contracts, one crate per domain
   confidence/            ConfidenceResult (shared by every domain above)
 
 database/              Local-first SQLite: migrations, schema docs, seeds
-integrations/          Provider/adaptor implementations (bible, music, web, obs, vmix)
+integrations/          Provider/adaptor implementations (bible, audio, music, web, obs, vmix)
 ai/                    AI backend implementations (speech, embeddings, classifiers, models)
 presentation/          Rendering subsystem (renderer, templates, outputs)
 tests/                 Cross-crate integration tests

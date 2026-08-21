@@ -1,0 +1,177 @@
+.live-brain {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 4rem;
+  font-family: system-ui, sans-serif;
+}
+
+.live-brain__header h1 {
+  margin-bottom: 0.25rem;
+}
+
+.live-brain__error {
+  color: #b00020;
+  font-weight: 600;
+}
+
+.live-brain__status-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0 1.5rem;
+}
+
+.live-brain__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid #ccc;
+  font-size: 0.85rem;
+  text-transform: capitalize;
+}
+
+.live-brain__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: #999;
+}
+
+.live-brain__badge--good {
+  border-color: #2e7d32;
+  color: #1b5e20;
+}
+.live-brain__badge--good .live-brain__dot {
+  background: #2e7d32;
+}
+
+.live-brain__badge--neutral {
+  border-color: #999;
+  color: #555;
+}
+
+.live-brain__panel {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.live-brain__panel h2 {
+  margin-top: 0;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #444;
+}
+
+.live-brain__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.live-brain__row input,
+.live-brain__row select {
+  flex: 1 1 auto;
+  min-width: 10rem;
+  padding: 0.4rem 0.6rem;
+}
+
+.live-brain__notice {
+  background: #fff8e1;
+  border: 1px solid #ffca28;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  margin: 0.5rem 0;
+}
+
+.live-brain__hint {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.live-brain__manual-entry {
+  margin-top: 0.75rem;
+}
+
+.live-brain__transcript {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+.live-brain__transcript li {
+  padding: 0.25rem 0;
+  border-bottom: 1px solid #eee;
+  font-style: italic;
+  color: #333;
+}
+
+.live-brain__active-context {
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin: 0.25rem 0 0;
+}
+
+.live-brain__suggestions {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.live-brain__suggestion-card {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.live-brain__suggestion-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.4rem;
+}
+
+.live-brain__confidence {
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.live-brain__search-results {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.live-brain__search-results li {
+  font-size: 0.9rem;
+}
+
+button {
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: #f5f5f5;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button:not(:disabled):hover {
+  background: #e8e8e8;
+}

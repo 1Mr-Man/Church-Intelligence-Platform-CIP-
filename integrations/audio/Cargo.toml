@@ -1,0 +1,13 @@
+[package]
+name = "cip-integrations-audio"
+description = "Real AudioEngine implementation using cpal (cross-platform audio I/O: ALSA/CoreAudio/WASAPI)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cip-core-service.workspace = true
+cpal.workspace = true
+log.workspace = true

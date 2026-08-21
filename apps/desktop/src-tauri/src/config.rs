@@ -11,6 +11,14 @@ use serde::Serialize;
 use std::path::PathBuf;
 use thiserror::Error;
 
+/// Expected filename of a local ggml/gguf Whisper model under
+/// `AppConfig::model_dir`, if one has been installed. Not bundled with
+/// CIP and never downloaded automatically - see `docs/live-speech.md` for
+/// where to get one, its license, and why this environment could not
+/// verify one end to end.
+#[allow(dead_code)] // only read when built with the `whisper` feature
+pub const WHISPER_MODEL_FILENAME: &str = "ggml-tiny.en.bin";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AppEnvironment {

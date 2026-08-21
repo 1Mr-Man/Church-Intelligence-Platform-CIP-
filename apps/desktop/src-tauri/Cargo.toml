@@ -22,12 +22,27 @@ serde.workspace = true
 log.workspace = true
 thiserror.workspace = true
 rusqlite.workspace = true
+chrono.workspace = true
+uuid.workspace = true
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 
 cip-database.workspace = true
 cip-core-bible.workspace = true
+cip-core-ai.workspace = true
+cip-core-service.workspace = true
+cip-core-confidence.workspace = true
+cip-core-presentation.workspace = true
 cip-integrations-bible.workspace = true
+cip-integrations-audio.workspace = true
+cip-ai-speech.workspace = true
+
+[features]
+# Off by default - see ai/speech's Cargo.toml and docs/live-speech.md for
+# why the real whisper.cpp backend is opt-in rather than a default build
+# dependency. Enable with `cargo tauri build --features whisper` once a
+# local model is actually configured.
+whisper = ["cip-ai-speech/whisper"]
 
 [dev-dependencies]
 tempfile = "3"

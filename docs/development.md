@@ -41,6 +41,8 @@ Run from the repository root unless noted.
 | `cargo test -p cip-core-bible`                          | Run normalization/detection/context-manager unit tests    |
 | `cargo test -p cip-core-service`                        | Run the Bible Intelligence Core orchestrator's unit tests  |
 | `cargo test -p cip-database`                           | Run only the migration/seed tests                          |
+| `cargo test -p cip-integrations-audio`                  | Run the real `CpalAudioEngine`'s tests                      |
+| `cargo build -p cip-desktop --features whisper`         | Build with real local speech recognition (compiles whisper.cpp - slower, off by default) |
 | `cargo fmt --all`                                       | Format all Rust code                                        |
 
 ## Environment
@@ -87,6 +89,13 @@ Test coverage by layer:
   `pnpm --filter @cip/desktop test`) cover the TypeScript mirrors of the
   Rust domain contracts and the event name registry; `tsc -b` is the type
   test for everything else.
+- **Live speech (Phase 1.2)** - `integrations/audio`, `ai/speech`,
+  `apps/desktop/src-tauri`'s `persistence.rs`/`pipeline.rs`/`commands.rs`
+  each carry their own unit/integration tests over real SQLite and a real
+  (if hardware-less) `cpal` device list; see
+  [`docs/live-speech.md`](live-speech.md#testing) for what each covers and
+  why real local speech decoding is a manual/documented verification step
+  rather than a CI test.
 
 Run everything before pushing:
 
