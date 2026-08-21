@@ -1,25 +1,59 @@
-import { useCallback, useEffect, useState } from "react";
-import type { AudioDevice, BibleVerse, LiveStatus, ScriptureContext, Suggestion, TranscriptSegment } from "../domain";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type {
+  AudioDevice,
+  BibleVerse,
+  LiveStatus,
+  ScriptureContext,
+  ScriptureDetection,
+  ScriptureReference,
+  ServiceSession,
+  Suggestion,
+  TimelineEntry,
+  TranscriptSegment,
+} from "../domain";
 import * as commands from "../lib/commands";
 import * as liveEvents from "../lib/liveEvents";
+import { formatClockTime } from "../lib/format";
+import { describeTimelineEntry } from "../lib/timelineFormat";
+import { shouldHandleShortcut } from "../lib/keyboardShortcuts";
 import "./LiveChurchBrain.css";
 
 const STATUS_POLL_MS = 3000;
 const TRANSCRIPT_LIMIT = 20;
+const TIMELINE_LIMIT = 50;
+const RECENT_REFERENCES_LIMIT = 8;
+const AMBIGUOUS_LIMIT = 5;
+
+function referenceDisplay(ref: ScriptureReference): string {
+  return `${ref.book} ${ref.chapter}:${ref.verseStart}`;
+}
 
 /**
- * Live Church Brain v0.1 - functional, not visually elaborate (per Phase
- * 1.2 scope). Deliberately keeps transcript / active context / detected
- * suggestion / approved content / projected content visually distinct -
- * "Do not merge these concepts." There is no projected-content control
- * anywhere here: preparing a presentation item is as far as this phase
- * goes (see `docs/live-speech.md`).
+ * Live Church Brain - the operator workspace (Phase 1.3). Deliberately
+ * keeps CURRENT (active context / most recent reference) distinct from
+ * RECENT (a bounded list) distinct from HISTORY (the full service
+ * timeline, and the separate service archive) - see
+ * `docs/live-service.md`'s "current/recent/history" section for why these
+ * are three different things, not one collapsed "what's happening" view.
+ * There is still no projected-content control anywhere here: preparing a
+ * presentation item is as far as this phase goes.
  */
 export function LiveChurchBrain() {
   const [status, setStatus] = useState<LiveStatus | null>(null);
   const [activeContext, setActiveContext] = useState<ScriptureContext | null>(null);
+  const [lastReference, setLastReference] = useState<ScriptureReference | null>(null);
+  const [recentReferences, setRecentReferences] = useState<ScriptureReference[]>([]);
+  const [ambiguous, setAmbiguous] = useState<ScriptureDetection[]>([]);
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
+  // `TranscriptSegment` carries no wall-clock timestamp (`startMs`/`endMs`
+  // are audio-relative, not clock time - see its domain doc comment), so
+  // this records the one honest timestamp available: when this frontend
+  // actually received the segment. A segment loaded from persisted
+  // history (before any live event fired) has no entry here and simply
+  // shows no time, rather than a fabricated one.
+  const [transcriptReceivedAt, setTranscriptReceivedAt] = useState<Record<string, string>>({});
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [serviceTitle, setServiceTitle] = useState("Sunday Morning Service");
   const [devices, setDevices] = useState<AudioDevice[]>([]);
@@ -30,6 +64,14 @@ export function LiveChurchBrain() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [correctionBook, setCorrectionBook] = useState("");
+  const [correctionChapter, setCorrectionChapter] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState<ServiceSession[]>([]);
+  const [historyDetail, setHistoryDetail] = useState<{ service: ServiceSession; timeline: TimelineEntry[] } | null>(
+    null,
+  );
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const refreshStatus = useCallback(() => {
     commands.getLiveStatus().then(setStatus).catch((e) => setError(String(e)));
@@ -50,25 +92,56 @@ export function LiveChurchBrain() {
     if (activeServiceId) {
       commands.listSuggestions("pending").then(setSuggestions).catch(() => {});
       commands.listTranscript(TRANSCRIPT_LIMIT).then(setTranscript).catch(() => {});
+      commands.listTimeline(TIMELINE_LIMIT).then(setTimeline).catch(() => {});
     } else {
       setSuggestions([]);
       setTranscript([]);
+      setTranscriptReceivedAt({});
+      setTimeline([]);
       setActiveContext(null);
+      setLastReference(null);
+      setRecentReferences([]);
+      setAmbiguous([]);
     }
   }, [activeServiceId]);
+
+  // Timeline is periodically refreshed alongside status - it's a
+  // secondary/history view, not something every single event needs to
+  // push into individually.
+  useEffect(() => {
+    if (!activeServiceId) return;
+    const interval = window.setInterval(() => {
+      commands.listTimeline(TIMELINE_LIMIT).then(setTimeline).catch(() => {});
+    }, STATUS_POLL_MS);
+    return () => window.clearInterval(interval);
+  }, [activeServiceId]);
+
+  const recordDetection = useCallback((detection: ScriptureDetection) => {
+    if (detection.kind === "ambiguous") {
+      setAmbiguous((prev) => [detection, ...prev].slice(0, AMBIGUOUS_LIMIT));
+      return;
+    }
+    if (detection.context) setActiveContext(detection.context);
+    if (detection.reference) {
+      const reference = detection.reference;
+      setLastReference(reference);
+      setRecentReferences((prev) => {
+        const display = referenceDisplay(reference);
+        if (prev[0] && referenceDisplay(prev[0]) === display) return prev;
+        return [reference, ...prev].slice(0, RECENT_REFERENCES_LIMIT);
+      });
+    }
+  }, []);
 
   useEffect(() => {
     const subscriptions = [
       liveEvents.onTranscriptUpdated((segment) => {
         if (!segment.isFinal) return; // interim text is not added to the permanent feed
         setTranscript((prev) => [...prev.slice(-(TRANSCRIPT_LIMIT - 1)), segment]);
+        setTranscriptReceivedAt((prev) => ({ ...prev, [segment.id]: new Date().toISOString() }));
       }),
-      liveEvents.onScriptureDetected((detection) => {
-        if (detection.context) setActiveContext(detection.context);
-      }),
-      liveEvents.onScriptureUpdated((detection) => {
-        if (detection.context) setActiveContext(detection.context);
-      }),
+      liveEvents.onScriptureDetected(recordDetection),
+      liveEvents.onScriptureUpdated(recordDetection),
       liveEvents.onSuggestionCreated((s) => setSuggestions((prev) => [s, ...prev])),
       liveEvents.onSuggestionApproved((s) => setSuggestions((prev) => prev.filter((x) => x.id !== s.id))),
       liveEvents.onSuggestionRejected((s) => setSuggestions((prev) => prev.filter((x) => x.id !== s.id))),
@@ -77,7 +150,7 @@ export function LiveChurchBrain() {
     return () => {
       subscriptions.forEach((p) => p.then((unlisten) => unlisten()));
     };
-  }, []);
+  }, [recordDetection]);
 
   const withBusy = useCallback(async (key: string, action: () => Promise<void>) => {
     setBusy(key);
@@ -92,6 +165,66 @@ export function LiveChurchBrain() {
   }, []);
 
   const isBusy = (key: string) => busy === key;
+
+  const firstPending = suggestions[0];
+
+  // Phase 1.3 keyboard shortcuts (section 31): A/R/E/P act on the first
+  // pending suggestion, S focuses the search box. Guarded so typing in
+  // any input never accidentally triggers one - see `shouldHandleShortcut`.
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const eventLike = {
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        altKey: event.altKey,
+        target: target ? { tagName: target.tagName, isContentEditable: target.isContentEditable } : null,
+      };
+      if (!shouldHandleShortcut(eventLike)) return;
+      const key = event.key.toLowerCase();
+      if (key === "s") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+      if (!firstPending || busy === `approve-${firstPending.id}` || busy === `reject-${firstPending.id}`) return;
+      if (key === "a") {
+        void withBusy(`approve-${firstPending.id}`, async () => {
+          await commands.approveSuggestion(firstPending.id);
+        });
+      } else if (key === "r") {
+        void withBusy(`reject-${firstPending.id}`, async () => {
+          await commands.rejectSuggestion(firstPending.id);
+        });
+      } else if (key === "e") {
+        setEditingId(firstPending.id);
+        setEditValue(firstPending.kind.type === "scripture" ? firstPending.kind.reference : "");
+      } else if (key === "p") {
+        void withBusy(`prepare-${firstPending.id}`, async () => {
+          await commands.preparePresentation(firstPending.id);
+        });
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [firstPending, withBusy, busy]);
+
+  const openHistory = () => {
+    setHistoryOpen((open) => !open);
+    if (!historyOpen && history.length === 0) {
+      commands.listServiceHistory(20).then(setHistory).catch((e) => setError(String(e)));
+    }
+  };
+
+  // Opening a past service's detail is read-only and entirely separate
+  // state from the live view above - it must never overwrite
+  // activeContext/lastReference/suggestions (section 20).
+  const viewHistoryService = (service: ServiceSession) => {
+    commands
+      .listTimeline(TIMELINE_LIMIT, service.id)
+      .then((entries) => setHistoryDetail({ service, timeline: entries }))
+      .catch((e) => setError(String(e)));
+  };
 
   return (
     <div className="live-brain">
@@ -119,10 +252,12 @@ export function LiveChurchBrain() {
             <button
               type="button"
               disabled={isBusy("start-service")}
-              onClick={() => withBusy("start-service", async () => {
-                await commands.startService(serviceTitle);
-                refreshStatus();
-              })}
+              onClick={() =>
+                withBusy("start-service", async () => {
+                  await commands.startService(serviceTitle);
+                  refreshStatus();
+                })
+              }
             >
               Start Service
             </button>
@@ -132,13 +267,43 @@ export function LiveChurchBrain() {
             <span>
               {status.service.title} &mdash; <strong>{status.serviceStatus.toUpperCase()}</strong>
             </span>
+            {status.serviceStatus === "live" && (
+              <button
+                type="button"
+                disabled={isBusy("pause-service")}
+                onClick={() =>
+                  withBusy("pause-service", async () => {
+                    await commands.pauseService();
+                    refreshStatus();
+                  })
+                }
+              >
+                Pause
+              </button>
+            )}
+            {status.serviceStatus === "paused" && (
+              <button
+                type="button"
+                disabled={isBusy("resume-service")}
+                onClick={() =>
+                  withBusy("resume-service", async () => {
+                    await commands.resumeService();
+                    refreshStatus();
+                  })
+                }
+              >
+                Resume
+              </button>
+            )}
             <button
               type="button"
               disabled={isBusy("end-service")}
-              onClick={() => withBusy("end-service", async () => {
-                await commands.endService();
-                refreshStatus();
-              })}
+              onClick={() =>
+                withBusy("end-service", async () => {
+                  await commands.endService();
+                  refreshStatus();
+                })
+              }
             >
               End Service
             </button>
@@ -152,6 +317,12 @@ export function LiveChurchBrain() {
           <p className="live-brain__notice">
             SPEECH UNAVAILABLE &mdash; manual operation remains available (search, prepare, approve below).
           </p>
+        )}
+        {status?.audioStatus === "error" && (
+          <p className="live-brain__notice">AUDIO ERROR &mdash; retry below. The service remains live.</p>
+        )}
+        {status?.speechStatus === "error" && (
+          <p className="live-brain__notice">SPEECH ERROR &mdash; recorded, will clear on the next successful chunk.</p>
         )}
         {devices.length === 0 && <p className="live-brain__notice">NO_AUDIO_DEVICE &mdash; connect or select an audio input device.</p>}
         <div className="live-brain__row">
@@ -168,10 +339,12 @@ export function LiveChurchBrain() {
             <button
               type="button"
               disabled={isBusy("stop-listening")}
-              onClick={() => withBusy("stop-listening", async () => {
-                await commands.stopListening();
-                refreshStatus();
-              })}
+              onClick={() =>
+                withBusy("stop-listening", async () => {
+                  await commands.stopListening();
+                  refreshStatus();
+                })
+              }
             >
               Stop Listening
             </button>
@@ -179,12 +352,14 @@ export function LiveChurchBrain() {
             <button
               type="button"
               disabled={!status?.service || status.speechStatus === "unavailable" || isBusy("start-listening")}
-              onClick={() => withBusy("start-listening", async () => {
-                await commands.startListening(selectedDevice || undefined);
-                refreshStatus();
-              })}
+              onClick={() =>
+                withBusy("start-listening", async () => {
+                  await commands.startListening(selectedDevice || undefined);
+                  refreshStatus();
+                })
+              }
             >
-              Start Listening
+              {status?.audioStatus === "error" ? "Retry" : "Start Listening"}
             </button>
           )}
         </div>
@@ -205,10 +380,12 @@ export function LiveChurchBrain() {
             <button
               type="button"
               disabled={!status?.service || !manualText.trim() || isBusy("manual-transcript")}
-              onClick={() => withBusy("manual-transcript", async () => {
-                await commands.processTestTranscript(manualText.trim());
-                setManualText("");
-              })}
+              onClick={() =>
+                withBusy("manual-transcript", async () => {
+                  await commands.processTestTranscript(manualText.trim());
+                  setManualText("");
+                })
+              }
             >
               Submit
             </button>
@@ -217,63 +394,175 @@ export function LiveChurchBrain() {
       </section>
 
       <section className="live-brain__panel">
+        <h2>Current Scripture</h2>
+        <div className="live-brain__current-scripture">
+          <div>
+            <span className="live-brain__label">Current reference</span>
+            <p className="live-brain__active-context">{lastReference ? referenceDisplay(lastReference) : "—"}</p>
+          </div>
+          <div>
+            <span className="live-brain__label">Active context</span>
+            <p>
+              {activeContext ? (
+                <>
+                  {activeContext.book} {activeContext.chapter}
+                  <span className="live-brain__confidence"> &mdash; confidence {activeContext.confidence.level}</span>
+                </>
+              ) : (
+                "No active context"
+              )}
+            </p>
+          </div>
+        </div>
+
+        <details className="live-brain__manual-entry">
+          <summary>Correct active context</summary>
+          <p className="live-brain__hint">If CIP misunderstood the pastor, set the correct book and chapter here.</p>
+          <div className="live-brain__row">
+            <input
+              value={correctionBook}
+              onChange={(e) => setCorrectionBook(e.target.value)}
+              placeholder="e.g. ROM"
+              aria-label="Correction book"
+            />
+            <input
+              value={correctionChapter}
+              onChange={(e) => setCorrectionChapter(e.target.value)}
+              placeholder="e.g. 8"
+              inputMode="numeric"
+              aria-label="Correction chapter"
+            />
+            <button
+              type="button"
+              disabled={!status?.service || !correctionBook.trim() || !correctionChapter.trim() || isBusy("correct-context")}
+              onClick={() =>
+                withBusy("correct-context", async () => {
+                  const chapter = Number.parseInt(correctionChapter, 10);
+                  const corrected = await commands.correctScriptureContext(correctionBook.trim().toUpperCase(), chapter);
+                  setActiveContext(corrected);
+                  setCorrectionBook("");
+                  setCorrectionChapter("");
+                })
+              }
+            >
+              Correct
+            </button>
+          </div>
+        </details>
+
+        {recentReferences.length > 0 && (
+          <div className="live-brain__recent-references">
+            <span className="live-brain__label">Recent references</span>
+            <ul>
+              {recentReferences.map((ref, i) => (
+                <li key={`${referenceDisplay(ref)}-${i}`}>{referenceDisplay(ref)}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
+
+      {ambiguous.length > 0 && (
+        <section className="live-brain__panel live-brain__panel--ambiguous">
+          <h2>Ambiguous Scripture</h2>
+          {ambiguous.map((detection, i) => (
+            <AmbiguousCard
+              key={`${detection.rawText}-${i}`}
+              detection={detection}
+              busy={busy}
+              onSelect={(candidate) =>
+                withBusy(`resolve-ambiguous-${i}`, async () => {
+                  await commands.resolveAmbiguousReference(
+                    candidate.reference.book,
+                    candidate.reference.chapter,
+                    candidate.reference.verseStart,
+                    detection.rawText,
+                    detection.candidates.map((c) => referenceDisplay(c.reference)),
+                  );
+                  setAmbiguous((prev) => prev.filter((_, index) => index !== i));
+                })
+              }
+              onDismiss={() => setAmbiguous((prev) => prev.filter((_, index) => index !== i))}
+            />
+          ))}
+        </section>
+      )}
+
+      <section className="live-brain__panel">
         <h2>Live Transcript</h2>
         {transcript.length === 0 ? (
           <p className="live-brain__hint">Nothing transcribed yet.</p>
         ) : (
           <ul className="live-brain__transcript">
             {transcript.map((segment) => (
-              <li key={segment.id}>&ldquo;{segment.text}&rdquo;</li>
+              <li key={segment.id}>
+                {transcriptReceivedAt[segment.id] && (
+                  <span className="live-brain__timestamp">{formatClockTime(transcriptReceivedAt[segment.id])}</span>
+                )}
+                &ldquo;{segment.text}&rdquo;
+                {segment.confidence && (
+                  <span className="live-brain__confidence"> ({Math.round(segment.confidence.score * 100)}%)</span>
+                )}
+              </li>
             ))}
           </ul>
         )}
       </section>
 
       <section className="live-brain__panel">
-        <h2>Active Scripture</h2>
-        {activeContext ? (
-          <p className="live-brain__active-context">
-            {activeContext.book} {activeContext.chapter}
-            {activeContext.lastVerse ? `:${activeContext.lastVerse}` : ""}
-          </p>
+        <h2>
+          Pending Suggestions <span className="live-brain__hint">(A/R/E/P act on the first one)</span>
+        </h2>
+        {suggestions.length === 0 ? (
+          <p className="live-brain__hint">No pending suggestions.</p>
         ) : (
-          <p className="live-brain__hint">No active context.</p>
+          <SuggestionGroups
+            suggestions={suggestions}
+            busy={busy}
+            editingId={editingId}
+            editValue={editValue}
+            onEditValueChange={setEditValue}
+            onStartEdit={(id, currentReference) => {
+              setEditingId(id);
+              setEditValue(currentReference);
+            }}
+            onCancelEdit={() => setEditingId(null)}
+            onApprove={(id) =>
+              withBusy(`approve-${id}`, async () => {
+                await commands.approveSuggestion(id);
+              })
+            }
+            onSaveEdit={(id) =>
+              withBusy(`edit-${id}`, async () => {
+                await commands.editSuggestion(id, editValue.trim());
+                setEditingId(null);
+              })
+            }
+            onReject={(id) =>
+              withBusy(`reject-${id}`, async () => {
+                await commands.rejectSuggestion(id);
+              })
+            }
+            onPrepare={(id) =>
+              withBusy(`prepare-${id}`, async () => {
+                await commands.preparePresentation(id);
+              })
+            }
+          />
         )}
       </section>
 
       <section className="live-brain__panel">
-        <h2>Scripture Detected</h2>
-        {suggestions.length === 0 ? (
-          <p className="live-brain__hint">No pending suggestions.</p>
+        <h2>Service Timeline</h2>
+        {timeline.length === 0 ? (
+          <p className="live-brain__hint">No timeline events yet.</p>
         ) : (
-          <ul className="live-brain__suggestions">
-            {suggestions.map((s) => (
-              <SuggestionCard
-                key={s.id}
-                suggestion={s}
-                busy={busy}
-                editingId={editingId}
-                editValue={editValue}
-                onEditValueChange={setEditValue}
-                onStartEdit={(id, currentReference) => {
-                  setEditingId(id);
-                  setEditValue(currentReference);
-                }}
-                onCancelEdit={() => setEditingId(null)}
-                onApprove={(id) => withBusy(`approve-${id}`, async () => {
-                  await commands.approveSuggestion(id);
-                })}
-                onSaveEdit={(id) => withBusy(`edit-${id}`, async () => {
-                  await commands.editSuggestion(id, editValue.trim());
-                  setEditingId(null);
-                })}
-                onReject={(id) => withBusy(`reject-${id}`, async () => {
-                  await commands.rejectSuggestion(id);
-                })}
-                onPrepare={(id) => withBusy(`prepare-${id}`, async () => {
-                  await commands.preparePresentation(id);
-                })}
-              />
+          <ul className="live-brain__timeline">
+            {timeline.map((entry) => (
+              <li key={entry.id}>
+                <span className="live-brain__timestamp">{formatClockTime(entry.createdAt)}</span>
+                {describeTimelineEntry(entry)}
+              </li>
             ))}
           </ul>
         )}
@@ -284,6 +573,7 @@ export function LiveChurchBrain() {
         <p className="live-brain__hint">Works with no speech model, no audio device, and no internet connection.</p>
         <div className="live-brain__row">
           <input
+            ref={searchInputRef}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="e.g. Romans 8:28"
@@ -292,10 +582,12 @@ export function LiveChurchBrain() {
           <button
             type="button"
             disabled={!searchQuery.trim() || isBusy("search")}
-            onClick={() => withBusy("search", async () => {
-              const results = await commands.searchBible(searchQuery.trim());
-              setSearchResults(results);
-            })}
+            onClick={() =>
+              withBusy("search", async () => {
+                const results = await commands.searchBible(searchQuery.trim());
+                setSearchResults(results);
+              })
+            }
           >
             Search
           </button>
@@ -318,6 +610,49 @@ export function LiveChurchBrain() {
         <h2>Current Output</h2>
         <p className="live-brain__hint">Nothing projected. CIP never projects content automatically.</p>
       </section>
+
+      <section className="live-brain__panel">
+        <h2>
+          Service History{" "}
+          <button type="button" onClick={openHistory}>
+            {historyOpen ? "Hide" : "Show"}
+          </button>
+        </h2>
+        {historyOpen && (
+          <>
+            {history.length === 0 ? (
+              <p className="live-brain__hint">No completed services yet.</p>
+            ) : (
+              <ul className="live-brain__history-list">
+                {history.map((service) => (
+                  <li key={service.id}>
+                    <button type="button" onClick={() => viewHistoryService(service)}>
+                      {service.title} &mdash; {formatClockTime(service.startedAt)}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {historyDetail && (
+              <div className="live-brain__history-detail">
+                <h3>{historyDetail.service.title}</h3>
+                <p className="live-brain__hint">
+                  Started {formatClockTime(historyDetail.service.startedAt)}
+                  {historyDetail.service.endedAt ? ` — ended ${formatClockTime(historyDetail.service.endedAt)}` : ""}
+                </p>
+                <ul className="live-brain__timeline">
+                  {historyDetail.timeline.map((entry) => (
+                    <li key={entry.id}>
+                      <span className="live-brain__timestamp">{formatClockTime(entry.createdAt)}</span>
+                      {describeTimelineEntry(entry)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+      </section>
     </div>
   );
 }
@@ -326,10 +661,12 @@ function StatusBar({ status }: { status: LiveStatus | null }) {
   if (!status) return <p className="live-brain__hint">Connecting to backend&hellip;</p>;
   return (
     <div className="live-brain__status-bar">
+      <StatusBadge label="Runtime" value="tauri" good={["tauri"]} />
       <StatusBadge label="Network" value={status.networkStatus} good={["online"]} />
       <StatusBadge label="Audio" value={status.audioStatus} good={["ready", "listening"]} />
       <StatusBadge label="Speech" value={status.speechStatus} good={["ready"]} />
       <StatusBadge label="AI" value={status.aiStatus} good={["available"]} />
+      <StatusBadge label="Database" value={status.databaseStatus} good={["connected"]} />
     </div>
   );
 }
@@ -344,8 +681,41 @@ function StatusBadge({ label, value, good }: { label: string; value: string; goo
   );
 }
 
-interface SuggestionCardProps {
-  suggestion: Suggestion;
+function AmbiguousCard({
+  detection,
+  busy,
+  onSelect,
+  onDismiss,
+}: {
+  detection: ScriptureDetection;
+  busy: string | null;
+  onSelect: (candidate: ScriptureDetection["candidates"][number]) => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="live-brain__ambiguous-card">
+      <p className="live-brain__hint">Source: &ldquo;{detection.rawText}&rdquo;</p>
+      <div className="live-brain__row">
+        {detection.candidates.map((candidate) => (
+          <button
+            key={referenceDisplay(candidate.reference)}
+            type="button"
+            disabled={busy !== null}
+            onClick={() => onSelect(candidate)}
+          >
+            Select {referenceDisplay(candidate.reference)} ({Math.round(candidate.confidence.score * 100)}%)
+          </button>
+        ))}
+        <button type="button" onClick={onDismiss}>
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface SuggestionGroupsProps {
+  suggestions: Suggestion[];
   busy: string | null;
   editingId: string | null;
   editValue: string;
@@ -356,6 +726,36 @@ interface SuggestionCardProps {
   onSaveEdit: (id: string) => void;
   onReject: (id: string) => void;
   onPrepare: (id: string) => void;
+}
+
+/** Groups pending suggestions by confidence level (section 14) - high
+ * confidence first, so the operator's attention goes to the suggestions
+ * most likely worth a quick approve. */
+function SuggestionGroups(props: SuggestionGroupsProps) {
+  const { suggestions } = props;
+  const groups: Array<{ label: string; level: "high" | "medium" | "low" }> = [
+    { label: "High Confidence", level: "high" },
+    { label: "Medium Confidence", level: "medium" },
+    { label: "Low Confidence", level: "low" },
+  ];
+  return (
+    <>
+      {groups.map(({ label, level }) => {
+        const items = suggestions.filter((s) => s.confidence.level === level);
+        if (items.length === 0) return null;
+        return (
+          <div key={level} className="live-brain__confidence-group">
+            <h3>{label}</h3>
+            <ul className="live-brain__suggestions">
+              {items.map((s) => (
+                <SuggestionCard key={s.id} suggestion={s} {...props} />
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+    </>
+  );
 }
 
 function SuggestionCard({
@@ -370,7 +770,7 @@ function SuggestionCard({
   onSaveEdit,
   onReject,
   onPrepare,
-}: SuggestionCardProps) {
+}: { suggestion: Suggestion } & Omit<SuggestionGroupsProps, "suggestions">) {
   const reference = suggestion.kind.type === "scripture" ? suggestion.kind.reference : suggestion.kind.label;
   const isEditing = editingId === suggestion.id;
   const confidencePercent = Math.round(suggestion.confidence.score * 100);
@@ -393,6 +793,7 @@ function SuggestionCard({
             <strong>{reference}</strong>
             <span className="live-brain__confidence">Confidence: {confidencePercent}%</span>
           </div>
+          {suggestion.sourceText && <p className="live-brain__source-text">&ldquo;{suggestion.sourceText}&rdquo;</p>}
           <div className="live-brain__row">
             <button type="button" disabled={busy === `prepare-${suggestion.id}`} onClick={() => onPrepare(suggestion.id)}>
               Preview

@@ -5,7 +5,9 @@ scripture is spoken, it detects the reference, brings up the verse text,
 and queues it for presentation - reviewed and approved by a human operator,
 never auto-applied. It is being built in phases; this repository currently
 contains **Phase 1 - Foundation**, **Phase 1.1 - Bible Intelligence Core**,
-and **Phase 1.2 - Live Speech Foundation**.
+**Phase 1.2 - Live Speech Foundation**, **Phase 1.2.1 - Runtime
+Compatibility**, and **Phase 1.3 - Live Service Intelligence & Operator
+Workflow**.
 
 ## Approved architecture
 
@@ -27,9 +29,10 @@ See [`docs/architecture.md`](docs/architecture.md) for the full picture,
 [`docs/bible-intelligence.md`](docs/bible-intelligence.md) for the
 transcript-to-suggestion pipeline, [`docs/live-speech.md`](docs/live-speech.md)
 for real audio capture, the speech-to-text boundary, and the Live Church
-Brain UI, [`docs/development.md`](docs/development.md) to get running
-locally, and [`docs/database.md`](docs/database.md) for the SQLite/migration
-story.
+Brain UI, [`docs/live-service.md`](docs/live-service.md) for the service
+lifecycle and operator workflow built around that pipeline,
+[`docs/development.md`](docs/development.md) to get running locally, and
+[`docs/database.md`](docs/database.md) for the SQLite/migration story.
 
 ## What's implemented (and what isn't)
 
@@ -71,9 +74,26 @@ deployment in an ordinary browser shows a clear "Web Runtime" notice
 instead of the raw `TypeError` a bare `invoke()` call previously threw
 outside Tauri. See [`docs/live-speech.md`](docs/live-speech.md#cip-web-vs-cip-desktop-phase-121).
 
+**Phase 1.3 (Live Service Intelligence & Operator Workflow)** turned that
+pipeline into a reliable, operator-controlled live-service tool: a full
+service lifecycle (start/pause/resume/end, with duplicate-start and
+invalid-transition protection), a service timeline reusing the existing
+`audit_events` table, session-scoped suggestion deduplication, operator
+ambiguity resolution and manual context correction (both validated and
+audited), edit validation against the `BibleProvider`, audio/speech/
+database failure recovery that keeps the service live, a service history
+archive, and a refit "Live Church Brain" operator workspace (confidence-
+grouped suggestion queue, current/recent/history views that never
+interfere with each other, guarded keyboard shortcuts). See
+[`docs/live-service.md`](docs/live-service.md), including its documented
+scope decisions and the reasoning behind the deduplication/ambiguity/
+failure-recovery policies.
+
 Still deliberately **not** implemented: song recognition, sermon
-intelligence, semantic/paraphrase Bible search, cloud sync, OBS/vMix
-integration, and the full presentation designer. Those are later phases.
+intelligence, semantic/paraphrase Bible search, automatic bullet
+extraction, a web research engine, online Bible fallback, content
+generation, cloud sync, OBS/vMix integration, remote operator accounts, a
+mobile app, and the full presentation designer. Those are later phases.
 
 ## Repository layout
 

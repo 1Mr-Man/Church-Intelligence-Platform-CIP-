@@ -6,6 +6,7 @@ pub mod logging;
 mod persistence;
 mod pipeline;
 mod state;
+mod timeline;
 
 use cip_core_ai::SpeechEngine;
 use config::AppConfig;
@@ -98,6 +99,8 @@ pub fn run() {
             commands::app_health_check,
             commands::list_bible_translations,
             commands::start_service,
+            commands::pause_service,
+            commands::resume_service,
             commands::end_service,
             commands::list_audio_devices,
             commands::start_listening,
@@ -111,6 +114,11 @@ pub fn run() {
             commands::prepare_presentation,
             commands::search_bible,
             commands::get_live_status,
+            commands::list_timeline,
+            commands::list_service_history,
+            commands::get_service,
+            commands::resolve_ambiguous_reference,
+            commands::correct_scripture_context,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -15,6 +15,10 @@ semantic/paraphrase Bible search, cloud speech, OBS/vMix integration, the
 full presentation designer, automatic projection. See
 [`README.md`](../README.md) for the full phase boundary.
 
+Phase 1.3 built the service lifecycle, timeline, and operator workflow
+around this pipeline without changing anything documented here - see
+[`docs/live-service.md`](live-service.md).
+
 ## The pipeline
 
 ```

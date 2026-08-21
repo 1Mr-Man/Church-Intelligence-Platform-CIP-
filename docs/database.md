@@ -33,6 +33,15 @@ pipeline needed that Phase 1.0's schema didn't yet have:
 `scripture_detections.detection_type`/`.source_text` - see
 [`docs/live-speech.md`](live-speech.md).
 
+`0003_service_operations.sql` (Phase 1.3) added
+`ai_suggestions.transcript_segment_id`/`.source_text` (the same
+traceability `scripture_detections` already had, now for suggestions too
+- "what did the pastor say" next to a queued suggestion) and an index on
+`audit_events(service_id, created_at)` for the service timeline's
+chronological queries - no new table, since `audit_events` already
+existed and was unused until this phase. See
+[`docs/live-service.md`](live-service.md).
+
 ## Schema
 
 See [`database/schema/README.md`](../database/schema/README.md) for the

@@ -39,6 +39,15 @@ pub struct AppState {
     /// the real audio/speech pipeline and `process_test_transcript` so
     /// both paths order consistently within one service.
     pub transcript_sequence: AtomicU64,
+    /// The last audio-engine failure, if any, since the last successful
+    /// `start_listening`/chunk. `get_live_status` reports `AudioStatusKind::Error`
+    /// while this is set, distinct from `Unavailable` (Phase 1.3's audio
+    /// failure recovery - see `docs/live-service.md`). Cleared on the next
+    /// successful audio operation, never automatically time-limited: an
+    /// unresolved failure must stay visible until the operator retries.
+    pub audio_error: Mutex<Option<String>>,
+    /// Same as `audio_error`, for the speech engine (`SpeechStatusKind::Error`).
+    pub speech_error: Mutex<Option<String>>,
 }
 
 impl AppState {
@@ -61,6 +70,8 @@ impl AppState {
             speech_engine: Mutex::new(speech_engine),
             active_service: Mutex::new(None),
             transcript_sequence: AtomicU64::new(0),
+            audio_error: Mutex::new(None),
+            speech_error: Mutex::new(None),
         }
     }
 }

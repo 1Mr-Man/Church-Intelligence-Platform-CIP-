@@ -54,6 +54,14 @@ export interface Suggestion {
   status: SuggestionStatus;
   confidence: ConfidenceResult;
   createdAt: string; // ISO-8601
+  /** The transcript segment this suggestion was produced from, if known
+   * (Phase 1.3 traceability). `null` for a suggestion with no single
+   * originating segment (e.g. an operator's manually resolved ambiguous
+   * reference). */
+  transcriptSegmentId: string | null;
+  /** The transcript substring that produced this suggestion - "what did
+   * the pastor say" next to a suggestion in the queue. */
+  sourceText: string | null;
 }
 
 /**

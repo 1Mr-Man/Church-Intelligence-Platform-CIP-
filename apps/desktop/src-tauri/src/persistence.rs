@@ -103,6 +103,96 @@ pub fn update_service_status(
     Ok(())
 }
 
+fn parse_service_status(value: &str) -> ServiceStatus {
+    match value {
+        "paused" => ServiceStatus::Paused,
+        "ended" => ServiceStatus::Ended,
+        _ => ServiceStatus::Started,
+    }
+}
+
+fn row_to_service(
+    id: String,
+    title: String,
+    status: String,
+    started_at: String,
+    ended_at: Option<String>,
+) -> Result<ServiceSession, PersistError> {
+    Ok(ServiceSession {
+        id: Uuid::parse_str(&id).map_err(|_| PersistError::NotFound(id.clone()))?,
+        title,
+        status: parse_service_status(&status),
+        started_at: chrono::DateTime::parse_from_rfc3339(&started_at)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now()),
+        ended_at: ended_at.and_then(|t| {
+            chrono::DateTime::parse_from_rfc3339(&t)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
+        }),
+    })
+}
+
+/// A single service by id - the service archive's detail view (Phase 1.3
+/// section 34) uses this to look up a *completed* service independent of
+/// whichever one (if any) is currently active, unlike every other
+/// `list_*`/`get_*` function in this module, which is implicitly scoped to
+/// `AppState::active_service` by its caller in `commands.rs`.
+pub fn get_service(conn: &Connection, service_id: Uuid) -> Result<ServiceSession, PersistError> {
+    conn.query_row(
+        "SELECT id, title, status, started_at, ended_at FROM services WHERE id = ?1",
+        params![service_id.to_string()],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        },
+    )
+    .optional()?
+    .ok_or_else(|| PersistError::NotFound(service_id.to_string()))
+    .and_then(|(id, title, status, started_at, ended_at)| {
+        row_to_service(id, title, status, started_at, ended_at)
+    })
+}
+
+/// Completed services, most recently started first, bounded by `limit` -
+/// the service archive's list view (Phase 1.3 section 34). Deliberately
+/// only ever `ended` here (an in-progress service belongs in the live
+/// view, not the archive) - see `commands::list_service_history`.
+pub fn list_services(
+    conn: &Connection,
+    status: Option<ServiceStatus>,
+    limit: u32,
+) -> Result<Vec<ServiceSession>, PersistError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, status, started_at, ended_at FROM services
+         WHERE (?1 IS NULL OR status = ?1)
+         ORDER BY started_at DESC LIMIT ?2",
+    )?;
+    let status_filter = status.map(service_status_str);
+    let rows = stmt
+        .query_map(params![status_filter, limit], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    rows.into_iter()
+        .map(|(id, title, status, started_at, ended_at)| {
+            row_to_service(id, title, status, started_at, ended_at)
+        })
+        .collect()
+}
+
 // --- transcript_segments -----------------------------------------------
 
 /// Persist one **final** transcript segment. Interim segments must never
@@ -246,8 +336,9 @@ pub fn persist_suggestion(conn: &Connection, suggestion: &Suggestion) -> Result<
     let payload = serde_json::to_string(&suggestion.kind)?;
     conn.execute(
         "INSERT INTO ai_suggestions
-            (id, service_id, kind, payload, status, confidence_score, confidence_level, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            (id, service_id, kind, payload, status, confidence_score, confidence_level, created_at,
+             transcript_segment_id, source_text)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             suggestion.id.to_string(),
             suggestion.service_id.to_string(),
@@ -257,9 +348,44 @@ pub fn persist_suggestion(conn: &Connection, suggestion: &Suggestion) -> Result<
             suggestion.confidence.score,
             confidence_level_str(suggestion.confidence.level),
             suggestion.created_at.to_rfc3339(),
+            suggestion.transcript_segment_id.map(|id| id.to_string()),
+            suggestion.source_text,
         ],
     )?;
     Ok(())
+}
+
+/// Phase 1.3 session-aware suggestion deduplication: has this exact
+/// reference already been suggested for this service within the last
+/// `window_seconds`? A pastor repeating "Romans 8:28" mid-explanation
+/// should not flood the queue with identical suggestions, but a
+/// *genuine* repeat later in the service (past the window) is legitimate
+/// and must not be silently suppressed - see `docs/live-service.md`'s
+/// deduplication policy. Scoped to one service (never cross-service or
+/// permanent/global), and status-independent (a reference the operator
+/// already approved or rejected moments ago still counts - re-suggesting
+/// it immediately would be noise either way).
+///
+/// Matches on `payload LIKE '%"reference":"<text>"%'` rather than a
+/// dedicated column: `reference` is always a string this application
+/// generated itself (`ScriptureReference::to_string()`, e.g. `"ROM 8:28"`),
+/// using only alphanumerics, spaces, colons, and hyphens, so it can never
+/// contain a SQL LIKE wildcard (`%`/`_`) that would need escaping.
+pub fn has_recent_suggestion_for_reference(
+    conn: &Connection,
+    service_id: Uuid,
+    reference_display: &str,
+    window_seconds: i64,
+) -> Result<bool, PersistError> {
+    let cutoff = (Utc::now() - chrono::Duration::seconds(window_seconds)).to_rfc3339();
+    let pattern = format!("%\"reference\":\"{reference_display}\"%");
+    let count: i64 = conn.query_row(
+        "SELECT count(*) FROM ai_suggestions
+         WHERE service_id = ?1 AND kind = 'scripture' AND payload LIKE ?2 AND created_at >= ?3",
+        params![service_id.to_string(), pattern, cutoff],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
 }
 
 /// `confidence_level` is stored alongside `confidence_score` for
@@ -268,6 +394,7 @@ pub fn persist_suggestion(conn: &Connection, suggestion: &Suggestion) -> Result<
 /// only needs the score - `ConfidenceResult::new` recomputes the same
 /// level from it. `reason` isn't a persisted column, so a reloaded
 /// `ConfidenceResult` always has `reason: None`.
+#[allow(clippy::too_many_arguments)]
 fn row_to_suggestion(
     id: String,
     service_id: String,
@@ -275,6 +402,8 @@ fn row_to_suggestion(
     status: String,
     confidence_score: f64,
     created_at: String,
+    transcript_segment_id: Option<String>,
+    source_text: Option<String>,
 ) -> Result<Suggestion, PersistError> {
     Ok(Suggestion {
         id: Uuid::parse_str(&id).map_err(|_| PersistError::NotFound(id.clone()))?,
@@ -290,7 +419,37 @@ fn row_to_suggestion(
         created_at: chrono::DateTime::parse_from_rfc3339(&created_at)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now()),
+        transcript_segment_id: transcript_segment_id.and_then(|id| Uuid::parse_str(&id).ok()),
+        source_text,
     })
+}
+
+const SUGGESTION_COLUMNS: &str = "id, service_id, payload, status, confidence_score, created_at, \
+     transcript_segment_id, source_text";
+
+#[allow(clippy::type_complexity)]
+fn suggestion_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<(
+    String,
+    String,
+    String,
+    String,
+    f64,
+    String,
+    Option<String>,
+    Option<String>,
+)> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+    ))
 }
 
 pub fn list_suggestions(
@@ -298,53 +457,45 @@ pub fn list_suggestions(
     service_id: Uuid,
     status: Option<SuggestionStatus>,
 ) -> Result<Vec<Suggestion>, PersistError> {
-    let mut stmt = conn.prepare(
-        "SELECT id, service_id, payload, status, confidence_score, created_at
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SUGGESTION_COLUMNS}
          FROM ai_suggestions WHERE service_id = ?1 AND (?2 IS NULL OR status = ?2)
-         ORDER BY created_at DESC",
-    )?;
+         ORDER BY created_at DESC"
+    ))?;
     let status_filter = status.map(suggestion_status_str);
     let rows = stmt
-        .query_map(params![service_id.to_string(), status_filter], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, f64>(4)?,
-                row.get::<_, String>(5)?,
-            ))
-        })?
+        .query_map(
+            params![service_id.to_string(), status_filter],
+            suggestion_row,
+        )?
         .collect::<Result<Vec<_>, _>>()?;
 
     rows.into_iter()
-        .map(|(id, service_id, payload, status, score, created_at)| {
-            row_to_suggestion(id, service_id, payload, status, score, created_at)
-        })
+        .map(
+            |(id, service_id, payload, status, score, created_at, seg_id, src)| {
+                row_to_suggestion(
+                    id, service_id, payload, status, score, created_at, seg_id, src,
+                )
+            },
+        )
         .collect()
 }
 
 pub fn get_suggestion(conn: &Connection, suggestion_id: Uuid) -> Result<Suggestion, PersistError> {
     conn.query_row(
-        "SELECT id, service_id, payload, status, confidence_score, created_at
-         FROM ai_suggestions WHERE id = ?1",
+        &format!("SELECT {SUGGESTION_COLUMNS} FROM ai_suggestions WHERE id = ?1"),
         params![suggestion_id.to_string()],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, f64>(4)?,
-                row.get::<_, String>(5)?,
-            ))
-        },
+        suggestion_row,
     )
     .optional()?
     .ok_or_else(|| PersistError::NotFound(suggestion_id.to_string()))
-    .and_then(|(id, service_id, payload, status, score, created_at)| {
-        row_to_suggestion(id, service_id, payload, status, score, created_at)
-    })
+    .and_then(
+        |(id, service_id, payload, status, score, created_at, seg_id, src)| {
+            row_to_suggestion(
+                id, service_id, payload, status, score, created_at, seg_id, src,
+            )
+        },
+    )
 }
 
 /// Update a suggestion's status (and, for an edit, its payload). Returns
@@ -377,25 +528,19 @@ pub fn update_suggestion_status(
     }
 
     conn.query_row(
-        "SELECT id, service_id, payload, status, confidence_score, created_at
-         FROM ai_suggestions WHERE id = ?1",
+        &format!("SELECT {SUGGESTION_COLUMNS} FROM ai_suggestions WHERE id = ?1"),
         params![suggestion_id.to_string()],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, f64>(4)?,
-                row.get::<_, String>(5)?,
-            ))
-        },
+        suggestion_row,
     )
     .optional()?
     .ok_or_else(|| PersistError::NotFound(suggestion_id.to_string()))
-    .and_then(|(id, service_id, payload, status, score, created_at)| {
-        row_to_suggestion(id, service_id, payload, status, score, created_at)
-    })
+    .and_then(
+        |(id, service_id, payload, status, score, created_at, seg_id, src)| {
+            row_to_suggestion(
+                id, service_id, payload, status, score, created_at, seg_id, src,
+            )
+        },
+    )
 }
 
 // --- presentation_items ---------------------------------------------------
@@ -705,5 +850,71 @@ mod tests {
 
         let loaded = get_suggestion(&conn, suggestion.id).unwrap();
         assert_eq!(loaded.id, suggestion.id);
+    }
+
+    #[test]
+    fn suggestion_transcript_source_round_trips_through_persistence() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let segment = sample_transcript_segment("Look at verse 28.", 0);
+        let segment_id = segment.id;
+        persist_transcript_segment(&conn, session.id, &segment).unwrap();
+        let suggestion = Suggestion::new(
+            session.id,
+            SuggestionKind::Scripture {
+                reference: "ROM 8:28".into(),
+            },
+            ConfidenceResult::new(0.95, ConfidenceSource::Heuristic, None),
+        )
+        .with_source(segment_id, "Look at verse 28.");
+        persist_suggestion(&conn, &suggestion).unwrap();
+
+        let loaded = get_suggestion(&conn, suggestion.id).unwrap();
+        assert_eq!(loaded.transcript_segment_id, Some(segment_id));
+        assert_eq!(loaded.source_text.as_deref(), Some("Look at verse 28."));
+    }
+
+    #[test]
+    fn get_service_and_list_services_find_a_completed_service() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        update_service_status(&conn, session.id, ServiceStatus::Ended, Some(Utc::now())).unwrap();
+
+        let fetched = get_service(&conn, session.id).unwrap();
+        assert_eq!(fetched.status, ServiceStatus::Ended);
+
+        let history = list_services(&conn, Some(ServiceStatus::Ended), 10).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].id, session.id);
+    }
+
+    #[test]
+    fn get_service_reports_not_found_for_an_unknown_id() {
+        let conn = migrated_conn();
+        assert!(matches!(
+            get_service(&conn, Uuid::new_v4()),
+            Err(PersistError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn recent_duplicate_suggestion_is_detected_within_the_window_and_not_after() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let suggestion = Suggestion::new(
+            session.id,
+            SuggestionKind::Scripture {
+                reference: "ROM 8:28".into(),
+            },
+            ConfidenceResult::new(0.95, ConfidenceSource::Heuristic, None),
+        );
+        persist_suggestion(&conn, &suggestion).unwrap();
+
+        assert!(has_recent_suggestion_for_reference(&conn, session.id, "ROM 8:28", 60).unwrap());
+        // A different reference in the same service is not a duplicate.
+        assert!(!has_recent_suggestion_for_reference(&conn, session.id, "ROM 8:31", 60).unwrap());
+        // A window of 0 seconds excludes even a suggestion from "now" once
+        // any time at all has elapsed since `created_at` was recorded.
+        assert!(!has_recent_suggestion_for_reference(&conn, session.id, "ROM 8:28", -1).unwrap());
     }
 }

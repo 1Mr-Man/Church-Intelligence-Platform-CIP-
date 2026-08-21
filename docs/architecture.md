@@ -96,7 +96,11 @@ pipeline, the context model, ambiguity handling, and the transcript test
 harness. Phase 1.2 connects this to a real live-service input path - real
 audio capture, a replaceable speech-to-text boundary, persistence, IPC/
 event wiring, and an operator UI - without changing any of the above; see
-[`docs/live-speech.md`](live-speech.md).
+[`docs/live-speech.md`](live-speech.md). Phase 1.3 adds the operational
+layer around that pipeline - service lifecycle, a timeline, operator
+ambiguity resolution and context correction, suggestion deduplication,
+and failure recovery - again without changing the Bible Intelligence Core
+itself; see [`docs/live-service.md`](live-service.md).
 
 ## Event architecture
 
@@ -114,6 +118,16 @@ SUGGESTION_CREATED, SUGGESTION_APPROVED, SUGGESTION_EDITED, SUGGESTION_REJECTED
 PRESENTATION_PREPARED, PRESENTATION_STARTED, PRESENTATION_STOPPED
 SERVICE_STARTED, SERVICE_PAUSED, SERVICE_ENDED
 ```
+
+Phase 1.3 added six more variants to the same enum - `ServiceResumed`,
+`SpeechStarted`/`SpeechStopped`, `ErrorOccurred`,
+`ScriptureContextCorrected`, `ScriptureAmbiguousResolved` - still no
+second event bus. It also reuses Phase 1.0's previously-unused
+`audit_events` table as the service timeline's storage
+(`apps/desktop/src-tauri/src/timeline.rs`): every meaningful event is
+both emitted live (the mechanism above) and persisted as one
+`audit_events` row, so the timeline is reconstructable after a restart
+without a redundant table. See [`docs/live-service.md`](live-service.md#service-timeline).
 
 ## Configuration
 

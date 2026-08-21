@@ -11,7 +11,7 @@ import type { ConfidenceResult } from "./confidence";
 import type { ProcessedSegment, ScriptureDetection, Suggestion, TranscriptSegment } from "./ai";
 import type { PresentationItem } from "./presentation";
 import type { ServiceSession } from "./service";
-import type { LiveStatus } from "./live";
+import type { LiveStatus, TimelineEntry } from "./live";
 
 describe("domain contracts", () => {
   it("constructs a ScriptureReference and a matching BibleTranslation", () => {
@@ -41,6 +41,8 @@ describe("domain contracts", () => {
       status: "pending",
       confidence,
       createdAt: new Date().toISOString(),
+      transcriptSegmentId: null,
+      sourceText: null,
     };
     expect(suggestion.status).toBe("pending");
   });
@@ -115,6 +117,8 @@ describe("domain contracts", () => {
       status: "pending",
       confidence,
       createdAt: new Date().toISOString(),
+      transcriptSegmentId: null,
+      sourceText: null,
     };
     const processed: ProcessedSegment = {
       serviceId: suggestion.serviceId,
@@ -140,9 +144,24 @@ describe("domain contracts", () => {
       speechStatus: "ready",
       networkStatus: "offline",
       aiStatus: "available",
+      databaseStatus: "connected",
     };
     expect(status.serviceStatus).toBe("live");
     expect(status.networkStatus).toBe("offline");
     expect(status.aiStatus).toBe("available");
+    expect(status.databaseStatus).toBe("connected");
+  });
+
+  it("constructs a TimelineEntry describing a service-lifecycle event", () => {
+    const entry: TimelineEntry = {
+      id: "00000000-0000-0000-0000-000000000006",
+      serviceId: "00000000-0000-0000-0000-000000000002",
+      eventName: "SUGGESTION_APPROVED",
+      category: "ai",
+      payload: { suggestionId: "00000000-0000-0000-0000-000000000005", kind: { reference: "ROM 8:28" } },
+      createdAt: new Date().toISOString(),
+    };
+    expect(entry.eventName).toBe("SUGGESTION_APPROVED");
+    expect(entry.payload?.kind).toEqual({ reference: "ROM 8:28" });
   });
 });

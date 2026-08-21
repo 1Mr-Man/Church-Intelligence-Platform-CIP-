@@ -31,7 +31,16 @@ export const AppEvents = {
 
   ServiceStarted: "SERVICE_STARTED",
   ServicePaused: "SERVICE_PAUSED",
+  ServiceResumed: "SERVICE_RESUMED",
   ServiceEnded: "SERVICE_ENDED",
+
+  SpeechStarted: "SPEECH_STARTED",
+  SpeechStopped: "SPEECH_STOPPED",
+
+  ErrorOccurred: "ERROR_OCCURRED",
+
+  ScriptureContextCorrected: "SCRIPTURE_CONTEXT_CORRECTED",
+  ScriptureAmbiguousResolved: "SCRIPTURE_AMBIGUOUS_RESOLVED",
 } as const;
 
 export type AppEventName = (typeof AppEvents)[keyof typeof AppEvents];

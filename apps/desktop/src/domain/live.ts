@@ -10,9 +10,14 @@ import type { AudioEngineStatus, ServiceSession } from "./service";
  * active service yet"; `completed` covers "ended". */
 export type LiveServiceStatus = "planned" | "live" | "paused" | "completed";
 
-export type AudioStatusKind = "unavailable" | "ready" | "listening";
+/** `error`: a real capture failure was recorded and not yet cleared by a
+ * successful retry (Phase 1.3) - distinct from `unavailable` (no device
+ * at all). See `docs/live-service.md`'s recovery section. */
+export type AudioStatusKind = "unavailable" | "ready" | "listening" | "error";
 
-export type SpeechStatusKind = "unavailable" | "ready";
+/** `error`: a real speech-engine failure was recorded and not yet cleared
+ * by the next successful transcription (Phase 1.3). */
+export type SpeechStatusKind = "unavailable" | "ready" | "error";
 
 export type NetworkStatusKind = "offline" | "online";
 
@@ -23,6 +28,8 @@ export type NetworkStatusKind = "offline" | "online";
  */
 export type AiStatusKind = "available" | "degraded" | "unavailable";
 
+export type DatabaseStatusKind = "connected" | "error";
+
 export interface LiveStatus {
   service: ServiceSession | null;
   serviceStatus: LiveServiceStatus;
@@ -31,4 +38,22 @@ export interface LiveStatus {
   speechStatus: SpeechStatusKind;
   networkStatus: NetworkStatusKind;
   aiStatus: AiStatusKind;
+  databaseStatus: DatabaseStatusKind;
+}
+
+/**
+ * One service-timeline entry (Phase 1.3). Mirrors `timeline::TimelineEntry`
+ * (Rust), itself a thin read model over the existing `audit_events` table -
+ * no second event bus, no redundant timeline table. `eventName` is one of
+ * the `AppEvents` values (`events/eventNames.ts`); the Live Church Brain
+ * derives a human-readable line from `eventName` + `payload` rather than
+ * the backend pre-formatting a description string.
+ */
+export interface TimelineEntry {
+  id: string;
+  serviceId: string | null;
+  eventName: string;
+  category: string;
+  payload: Record<string, unknown> | null;
+  createdAt: string; // ISO-8601
 }

@@ -32,7 +32,31 @@ pub enum AppEvent {
 
     ServiceStarted,
     ServicePaused,
+    ServiceResumed,
     ServiceEnded,
+
+    /// Emitted alongside `AudioStarted`/`AudioStopped` - in this
+    /// architecture speech processing is driven entirely by audio chunks
+    /// arriving (see `commands::handle_audio_chunk`), so "speech started"
+    /// and "speech stopped" are the same real transition as audio
+    /// capture starting/stopping, not a separately observable engine
+    /// state. See `docs/live-service.md`.
+    SpeechStarted,
+    SpeechStopped,
+
+    /// A recorded, non-fatal failure (audio device lost, speech engine
+    /// error, persistence failure) - never emitted for routine input
+    /// validation errors, only for the failure-recovery scenarios
+    /// Phase 1.3 requires the operator be able to see. See
+    /// `docs/live-service.md`'s recovery section.
+    ErrorOccurred,
+
+    /// The operator manually corrected the active Scripture context
+    /// (Phase 1.3) - distinct from an automatic `ScriptureUpdated`.
+    ScriptureContextCorrected,
+    /// The operator resolved an `Ambiguous` detection by choosing one of
+    /// the offered candidates (Phase 1.3).
+    ScriptureAmbiguousResolved,
 }
 
 impl AppEvent {
@@ -58,7 +82,16 @@ impl AppEvent {
 
             AppEvent::ServiceStarted => "SERVICE_STARTED",
             AppEvent::ServicePaused => "SERVICE_PAUSED",
+            AppEvent::ServiceResumed => "SERVICE_RESUMED",
             AppEvent::ServiceEnded => "SERVICE_ENDED",
+
+            AppEvent::SpeechStarted => "SPEECH_STARTED",
+            AppEvent::SpeechStopped => "SPEECH_STOPPED",
+
+            AppEvent::ErrorOccurred => "ERROR_OCCURRED",
+
+            AppEvent::ScriptureContextCorrected => "SCRIPTURE_CONTEXT_CORRECTED",
+            AppEvent::ScriptureAmbiguousResolved => "SCRIPTURE_AMBIGUOUS_RESOLVED",
         }
     }
 }
@@ -98,7 +131,13 @@ mod tests {
             AppEvent::PresentationStopped,
             AppEvent::ServiceStarted,
             AppEvent::ServicePaused,
+            AppEvent::ServiceResumed,
             AppEvent::ServiceEnded,
+            AppEvent::SpeechStarted,
+            AppEvent::SpeechStopped,
+            AppEvent::ErrorOccurred,
+            AppEvent::ScriptureContextCorrected,
+            AppEvent::ScriptureAmbiguousResolved,
         ];
         let mut names: Vec<&str> = events.iter().map(|e| e.name()).collect();
         let unique_before = names.len();

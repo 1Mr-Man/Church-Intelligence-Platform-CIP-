@@ -21,9 +21,11 @@ import type {
   LiveStatus,
   PresentationItem,
   ProcessedSegment,
+  ScriptureContext,
   ServiceSession,
   Suggestion,
   SuggestionStatus,
+  TimelineEntry,
   TranscriptSegment,
 } from "../domain";
 import { isTauriRuntime } from "./runtime";
@@ -70,6 +72,14 @@ export function startService(title: string): Promise<ServiceSession> {
   return invokeCommand("start_service", { title });
 }
 
+export function pauseService(): Promise<ServiceSession> {
+  return invokeCommand("pause_service");
+}
+
+export function resumeService(): Promise<ServiceSession> {
+  return invokeCommand("resume_service");
+}
+
 export function endService(): Promise<ServiceSession> {
   return invokeCommand("end_service");
 }
@@ -96,12 +106,32 @@ export function processTestTranscript(text: string): Promise<ProcessedSegment> {
 
 // --- transcript & suggestions -------------------------------------------------
 
-export function listTranscript(limit: number): Promise<TranscriptSegment[]> {
-  return invokeCommand("list_transcript", { limit });
+/** `serviceId` is optional and defaults to the active service - passing
+ * it lets the Phase 1.3 service archive inspect a *completed* service's
+ * transcript without disturbing the live view (see `resolve_service_id`
+ * on the Rust side). */
+export function listTranscript(limit: number, serviceId?: string): Promise<TranscriptSegment[]> {
+  return invokeCommand("list_transcript", { limit, serviceId: serviceId ?? null });
 }
 
-export function listSuggestions(status?: SuggestionStatus): Promise<Suggestion[]> {
-  return invokeCommand("list_suggestions", { status: status ?? null });
+export function listSuggestions(status?: SuggestionStatus, serviceId?: string): Promise<Suggestion[]> {
+  return invokeCommand("list_suggestions", { status: status ?? null, serviceId: serviceId ?? null });
+}
+
+/** The service timeline (Phase 1.3) - same optional `serviceId` pattern. */
+export function listTimeline(limit: number, serviceId?: string): Promise<TimelineEntry[]> {
+  return invokeCommand("list_timeline", { serviceId: serviceId ?? null, limit });
+}
+
+/** Completed services, most recent first - the service archive's list view. */
+export function listServiceHistory(limit: number): Promise<ServiceSession[]> {
+  return invokeCommand("list_service_history", { limit });
+}
+
+/** A single service by id, independent of whichever one (if any) is
+ * currently active - the service archive's detail view. */
+export function getService(serviceId: string): Promise<ServiceSession> {
+  return invokeCommand("get_service", { serviceId });
 }
 
 export function approveSuggestion(suggestionId: string): Promise<Suggestion> {
@@ -118,6 +148,34 @@ export function rejectSuggestion(suggestionId: string): Promise<Suggestion> {
 
 export function preparePresentation(suggestionId: string): Promise<PresentationItem> {
   return invokeCommand("prepare_presentation", { suggestionId });
+}
+
+// --- ambiguity resolution & context correction (Phase 1.3) ----------------
+
+/** Resolves an `ambiguous` detection by an explicit operator choice - see
+ * `ScriptureDetection.candidates`. `candidatesShown` is the full set that
+ * was offered, kept purely for the audit record. */
+export function resolveAmbiguousReference(
+  book: string,
+  chapter: number,
+  verse: number,
+  rawText: string,
+  candidatesShown: string[],
+): Promise<Suggestion> {
+  return invokeCommand("resolve_ambiguous_reference", {
+    book,
+    chapter,
+    verse,
+    rawText,
+    candidatesShown,
+  });
+}
+
+/** Operator correction of the active Scripture context when CIP
+ * misunderstood the pastor - validated against the Bible the same way an
+ * automatic chapter detection would be. */
+export function correctScriptureContext(book: string, chapter: number): Promise<ScriptureContext> {
+  return invokeCommand("correct_scripture_context", { book, chapter });
 }
 
 // --- manual Bible search (works with no audio/speech/network) ---------------

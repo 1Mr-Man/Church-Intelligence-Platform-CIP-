@@ -46,6 +46,14 @@ pub struct Suggestion {
     pub status: SuggestionStatus,
     pub confidence: ConfidenceResult,
     pub created_at: DateTime<Utc>,
+    /// The transcript segment this suggestion was produced from, if known
+    /// (Phase 1.3 traceability - "what did the pastor say"). `None` for a
+    /// suggestion with no single originating segment (e.g. an operator's
+    /// manually resolved ambiguous reference isn't tied to exactly one).
+    pub transcript_segment_id: Option<Uuid>,
+    /// The transcript substring that produced this suggestion, denormalized
+    /// so the link survives even if the referenced segment is ever gone.
+    pub source_text: Option<String>,
 }
 
 impl Suggestion {
@@ -57,7 +65,25 @@ impl Suggestion {
             status: SuggestionStatus::Pending,
             confidence,
             created_at: Utc::now(),
+            transcript_segment_id: None,
+            source_text: None,
         }
+    }
+
+    /// Attach the transcript segment this suggestion came from. Called by
+    /// the Tauri-layer pipeline (`apps/desktop/src-tauri/src/pipeline.rs`),
+    /// which is the one place that has both the `Suggestion` the Bible
+    /// Intelligence Core produced and the `TranscriptSegment` it produced
+    /// it from - `core/service`'s pipeline itself only ever sees segment
+    /// *text*, not segment identity, so it cannot set this itself.
+    pub fn with_source(
+        mut self,
+        transcript_segment_id: Uuid,
+        source_text: impl Into<String>,
+    ) -> Self {
+        self.transcript_segment_id = Some(transcript_segment_id);
+        self.source_text = Some(source_text.into());
+        self
     }
 }
 

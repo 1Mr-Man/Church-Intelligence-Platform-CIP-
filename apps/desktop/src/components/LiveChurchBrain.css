@@ -159,6 +159,103 @@
   font-size: 0.9rem;
 }
 
+.live-brain__current-scripture {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.live-brain__label {
+  display: block;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #777;
+}
+
+.live-brain__recent-references {
+  margin-top: 0.75rem;
+}
+
+.live-brain__recent-references ul {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.live-brain__recent-references li {
+  border: 1px solid #ddd;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.85rem;
+  color: #444;
+}
+
+.live-brain__panel--ambiguous {
+  border-color: #ffb300;
+  background: #fffbf0;
+}
+
+.live-brain__ambiguous-card {
+  margin-top: 0.5rem;
+}
+
+.live-brain__source-text {
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  font-style: italic;
+  color: #555;
+}
+
+.live-brain__confidence-group {
+  margin-top: 0.75rem;
+}
+
+.live-brain__confidence-group h3 {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #777;
+  margin: 0 0 0.35rem;
+}
+
+.live-brain__timeline {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  max-height: 14rem;
+  overflow-y: auto;
+  font-size: 0.9rem;
+}
+
+.live-brain__timeline li {
+  padding: 0.2rem 0;
+  border-bottom: 1px solid #eee;
+}
+
+.live-brain__timestamp {
+  color: #888;
+  font-variant-numeric: tabular-nums;
+  margin-right: 0.5rem;
+}
+
+.live-brain__history-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.live-brain__history-detail {
+  margin-top: 1rem;
+  border-top: 1px solid #eee;
+  padding-top: 0.75rem;
+}
+
 button {
   padding: 0.4rem 0.75rem;
   border-radius: 6px;
