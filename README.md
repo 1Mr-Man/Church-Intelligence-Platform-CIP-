@@ -6,8 +6,9 @@ and queues it for presentation - reviewed and approved by a human operator,
 never auto-applied. It is being built in phases; this repository currently
 contains **Phase 1 - Foundation**, **Phase 1.1 - Bible Intelligence Core**,
 **Phase 1.2 - Live Speech Foundation**, **Phase 1.2.1 - Runtime
-Compatibility**, and **Phase 1.3 - Live Service Intelligence & Operator
-Workflow**.
+Compatibility**, **Phase 1.3 - Live Service Intelligence & Operator
+Workflow**, and **Phase 1.4 - Presentation Foundation & Real-Service
+Validation**.
 
 ## Approved architecture
 
@@ -31,8 +32,11 @@ transcript-to-suggestion pipeline, [`docs/live-speech.md`](docs/live-speech.md)
 for real audio capture, the speech-to-text boundary, and the Live Church
 Brain UI, [`docs/live-service.md`](docs/live-service.md) for the service
 lifecycle and operator workflow built around that pipeline,
-[`docs/development.md`](docs/development.md) to get running locally, and
-[`docs/database.md`](docs/database.md) for the SQLite/migration story.
+[`docs/presentation.md`](docs/presentation.md) for the presentation
+preparation path from an approved suggestion to persisted, prepared
+output, [`docs/development.md`](docs/development.md) to get running
+locally, and [`docs/database.md`](docs/database.md) for the
+SQLite/migration story.
 
 ## What's implemented (and what isn't)
 
@@ -89,11 +93,29 @@ interfere with each other, guarded keyboard shortcuts). See
 scope decisions and the reasoning behind the deduplication/ambiguity/
 failure-recovery policies.
 
+**Phase 1.4 (Presentation Foundation & Real-Service Validation)** connected
+that operator-approved pipeline to a real presentation preparation path:
+`PresentationItem` now traces back to the suggestion (if any) it came
+from and the template that rendered it, a deterministic
+`SCRIPTURE_DEFAULT` renderer turns real, local-Bible-sourced content into
+a structured slide, and separate Preview (non-mutating, available before
+approval) and Prepare (approval-gated, persists) actions replace a
+pre-1.4 UI bug where "Preview" silently called the approval-gated prepare
+command. A manual creation path keeps presentation preparation working
+with no suggestion, no speech engine, and no network. Preparation is
+still never projection - nothing in this codebase can display prepared
+content yet, and the phase proves as much: a detected Scripture cannot
+automatically become a prepared item, and no code path ever sets a
+presentation item to "active". See
+[`docs/presentation.md`](docs/presentation.md).
+
 Still deliberately **not** implemented: song recognition, sermon
 intelligence, semantic/paraphrase Bible search, automatic bullet
 extraction, a web research engine, online Bible fallback, content
 generation, cloud sync, OBS/vMix integration, remote operator accounts, a
-mobile app, and the full presentation designer. Those are later phases.
+mobile app, real display/projection output, and the full presentation
+designer (visual/typographic design beyond one deterministic template).
+Those are later phases.
 
 ## Repository layout
 

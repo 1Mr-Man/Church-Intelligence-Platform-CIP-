@@ -1052,4 +1052,263 @@ mod tests {
         .unwrap();
         assert!(history.iter().any(|s| s.id == session.id));
     }
+
+    // --- Phase 1.4: presentation foundation acceptance --------------------
+    //
+    // The "most important acceptance criterion": the complete chain
+    // SERVICE -> TRANSCRIPT -> "Romans 8" -> "verse 28" -> ROM 8:28 ->
+    // PENDING SUGGESTION -> HUMAN APPROVAL -> PREVIEW -> PREPARE -> real
+    // local Bible text -> PERSISTED OUTPUT -> SERVICE TIMELINE, then the
+    // same reference prepared again through the offline/manual path with
+    // no suggestion involved, with explicit proof that nothing here ever
+    // auto-approves, auto-prepares, or auto-projects.
+    #[test]
+    fn phase_1_4_presentation_foundation_acceptance() {
+        let conn = seeded_db();
+        let session = ServiceSession::start("Phase 1.4 Acceptance");
+        persist_service(&conn, &session).unwrap();
+
+        let mut provider_conn = open_in_memory().unwrap();
+        run_migrations(&mut provider_conn).unwrap();
+        apply_dev_seed(&provider_conn).unwrap();
+        let provider = SqliteBibleProvider::new(provider_conn);
+        let mut context = DefaultScriptureContextManager::new("KJV");
+
+        // SERVICE -> TRANSCRIPT -> "Romans 8" -> "verse 28" -> ROM 8:28 ->
+        // PENDING SUGGESTION.
+        handle_final_transcript(
+            &conn,
+            &provider,
+            &mut context,
+            session.id,
+            "KJV",
+            segment("Turn with me to Romans chapter 8", 0),
+        )
+        .unwrap();
+        let processed = handle_final_transcript(
+            &conn,
+            &provider,
+            &mut context,
+            session.id,
+            "KJV",
+            segment("Look at verse 28", 1),
+        )
+        .unwrap();
+        assert_eq!(processed.suggestions.len(), 1);
+        let suggestion = &processed.suggestions[0];
+        assert_eq!(suggestion.status, cip_core_ai::SuggestionStatus::Pending);
+        let cip_core_ai::SuggestionKind::Scripture { reference } = &suggestion.kind else {
+            panic!("expected a scripture suggestion");
+        };
+        assert_eq!(reference, "ROM 8:28");
+
+        // A detected Scripture must NOT automatically become a prepared
+        // presentation item, no matter how confident the detection - only
+        // an explicit operator approval, followed by an explicit prepare
+        // call, may do that.
+        let auto_prepared_count: i64 = conn
+            .query_row("SELECT count(*) FROM presentation_items", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            auto_prepared_count, 0,
+            "a pending suggestion must never automatically produce a presentation item"
+        );
+
+        // HUMAN APPROVAL - only an explicit operator action moves this
+        // suggestion out of Pending.
+        let approved = crate::persistence::update_suggestion_status(
+            &conn,
+            suggestion.id,
+            cip_core_ai::SuggestionStatus::Approved,
+            None,
+        )
+        .unwrap();
+        assert_eq!(approved.status, cip_core_ai::SuggestionStatus::Approved);
+
+        // PREVIEW - non-mutating, must not create a presentation_items row.
+        let (preview_content, preview_slide) =
+            crate::presentation::build_scripture_slide(&provider, "KJV", reference).unwrap();
+        let count_after_preview: i64 = conn
+            .query_row("SELECT count(*) FROM presentation_items", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            count_after_preview, 0,
+            "preview must never persist a presentation item"
+        );
+        let cip_core_presentation::PresentationContent::Scripture { text, .. } = &preview_content
+        else {
+            panic!("expected scripture content");
+        };
+        assert!(
+            text.contains("all things work together for good"),
+            "preview must show real local Bible text, not invented/AI text: {text:?}"
+        );
+        assert_eq!(
+            preview_slide.template,
+            cip_presentation_renderer::SCRIPTURE_DEFAULT_TEMPLATE
+        );
+
+        // PREPARE - persists, records which suggestion it came from.
+        let item = crate::presentation::persist_prepared_item(
+            &conn,
+            session.id,
+            preview_content.clone(),
+            cip_presentation_renderer::SCRIPTURE_DEFAULT_TEMPLATE,
+            Some(suggestion.id),
+        )
+        .unwrap();
+        assert_eq!(
+            item.status,
+            cip_core_presentation::PresentationItemStatus::Prepared
+        );
+        assert_eq!(item.source_suggestion_id, Some(suggestion.id));
+        crate::timeline::record_event(
+            &conn,
+            Some(session.id),
+            crate::events::AppEvent::PresentationPrepared,
+            crate::logging::LogCategory::Presentation,
+            serde_json::json!({ "presentationItemId": item.id, "reference": reference }),
+        )
+        .unwrap();
+
+        // PERSISTED OUTPUT - reloadable independent of the in-memory value.
+        let reloaded = crate::persistence::get_presentation_item(&conn, item.id).unwrap();
+        assert_eq!(reloaded, item);
+        assert_eq!(reloaded.content, preview_content);
+
+        // SERVICE TIMELINE - the prepare is reconstructable from history,
+        // not a side channel the timeline doesn't know about.
+        let timeline_entries = crate::timeline::list_timeline(&conn, session.id, 20).unwrap();
+        assert!(timeline_entries
+            .iter()
+            .any(|e| e.event_name == "PRESENTATION_PREPARED"));
+
+        // No automatic projection: nothing in this whole chain ever set
+        // the item to `Active` - the only states reachable from this test
+        // are `Prepared` (and, if cancelled, `Stopped`).
+        assert_ne!(
+            reloaded.status,
+            cip_core_presentation::PresentationItemStatus::Active
+        );
+
+        // --- Offline / manual fallback: the same reference prepared again
+        // with no suggestion, no speech engine, no network - proving the
+        // manual path produces the identical real Bible text independent
+        // of the automatic detection path.
+        let (manual_content, _) =
+            crate::presentation::build_scripture_slide(&provider, "KJV", "ROM 8:28").unwrap();
+        assert_eq!(
+            manual_content, preview_content,
+            "the automatic and manual paths must produce identical, real Bible-sourced content"
+        );
+        let manual_item = crate::presentation::persist_prepared_item(
+            &conn,
+            session.id,
+            manual_content,
+            cip_presentation_renderer::SCRIPTURE_DEFAULT_TEMPLATE,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            manual_item.source_suggestion_id, None,
+            "a manually-prepared item must never be attributed to a suggestion it didn't come from"
+        );
+        assert_eq!(
+            manual_item.status,
+            cip_core_presentation::PresentationItemStatus::Prepared
+        );
+
+        // Every presentation item ever produced in this test belongs to
+        // the service it was prepared during - no orphaned items.
+        let all_items =
+            crate::persistence::list_presentation_items(&conn, session.id, None).unwrap();
+        assert_eq!(all_items.len(), 2);
+        assert!(all_items.iter().all(|i| i.service_id == session.id));
+        assert!(
+            all_items
+                .iter()
+                .all(|i| i.status != cip_core_presentation::PresentationItemStatus::Active),
+            "no automatic projection: nothing here may ever reach Active on its own"
+        );
+    }
+
+    /// Explicit proof (section 15/19): an invalid reference is rejected
+    /// with no presentation item, no prepared output, and no silent
+    /// substitution of a different translation or verse.
+    #[test]
+    fn invalid_scripture_never_produces_a_presentation_item() {
+        let mut provider_conn = open_in_memory().unwrap();
+        run_migrations(&mut provider_conn).unwrap();
+        apply_dev_seed(&provider_conn).unwrap();
+        let provider = SqliteBibleProvider::new(provider_conn);
+
+        let err = crate::presentation::build_scripture_slide(&provider, "KJV", "ROM 999:999")
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            crate::presentation::PresentationError::VerseNotFound(_)
+        ));
+    }
+
+    /// Restart/recovery (section 28): a prepared item, and the timeline
+    /// entry recording it, both survive a simulated application restart -
+    /// and the item is still exactly `Prepared`, never auto-advanced to
+    /// `Active`, after reopening.
+    #[test]
+    fn prepared_presentation_items_survive_a_simulated_restart_and_stay_prepared() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("cip-presentation-restart-test.sqlite3");
+        let session_id;
+        let item_id;
+
+        {
+            let mut conn = cip_database::open(&db_path).unwrap();
+            run_migrations(&mut conn).unwrap();
+            let session = ServiceSession::start("Presentation Restart Test");
+            session_id = session.id;
+            persist_service(&conn, &session).unwrap();
+
+            let mut provider_conn = open_in_memory().unwrap();
+            run_migrations(&mut provider_conn).unwrap();
+            apply_dev_seed(&provider_conn).unwrap();
+            let provider = SqliteBibleProvider::new(provider_conn);
+
+            let (content, _) =
+                crate::presentation::build_scripture_slide(&provider, "KJV", "JHN 3:16").unwrap();
+            let item = crate::presentation::persist_prepared_item(
+                &conn,
+                session.id,
+                content,
+                cip_presentation_renderer::SCRIPTURE_DEFAULT_TEMPLATE,
+                None,
+            )
+            .unwrap();
+            item_id = item.id;
+            crate::timeline::record_event(
+                &conn,
+                Some(session.id),
+                crate::events::AppEvent::PresentationPrepared,
+                crate::logging::LogCategory::Presentation,
+                serde_json::json!({ "presentationItemId": item.id }),
+            )
+            .unwrap();
+
+            // "Close/restart the application": drop the connection at the
+            // end of this block - nothing here ever displays the item, so
+            // it must reopen exactly as `Prepared`.
+        }
+
+        let reopened = cip_database::open(&db_path).unwrap();
+        let reloaded = crate::persistence::get_presentation_item(&reopened, item_id).unwrap();
+        assert_eq!(
+            reloaded.status,
+            cip_core_presentation::PresentationItemStatus::Prepared,
+            "a restart must never advance a prepared item toward display on its own"
+        );
+
+        let timeline = crate::timeline::list_timeline(&reopened, session_id, 10).unwrap();
+        assert!(timeline
+            .iter()
+            .any(|e| e.event_name == "PRESENTATION_PREPARED"));
+    }
 }

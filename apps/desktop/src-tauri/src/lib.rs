@@ -5,6 +5,7 @@ pub mod events;
 pub mod logging;
 mod persistence;
 mod pipeline;
+mod presentation;
 mod state;
 mod timeline;
 
@@ -111,7 +112,13 @@ pub fn run() {
             commands::approve_suggestion,
             commands::edit_suggestion,
             commands::reject_suggestion,
+            commands::preview_presentation,
+            commands::preview_scripture,
             commands::prepare_presentation,
+            commands::create_manual_presentation,
+            commands::list_prepared_presentations,
+            commands::get_presentation_item,
+            commands::cancel_presentation,
             commands::search_bible,
             commands::get_live_status,
             commands::list_timeline,

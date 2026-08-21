@@ -42,6 +42,13 @@ chronological queries - no new table, since `audit_events` already
 existed and was unused until this phase. See
 [`docs/live-service.md`](live-service.md).
 
+`0004_presentation_traceability.sql` (Phase 1.4) added
+`presentation_items.source_suggestion_id`/`.template` (which suggestion,
+if any, a prepared item came from, and which rendering template produced
+it) and an index on `source_suggestion_id` - again no new table, since
+`presentation_items` already existed. See
+[`docs/presentation.md`](presentation.md).
+
 ## Schema
 
 See [`database/schema/README.md`](../database/schema/README.md) for the

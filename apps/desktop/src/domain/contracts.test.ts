@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { AmbiguousCandidate, ScriptureContext, BibleTranslation, ScriptureReference } from "./bible";
 import type { ConfidenceResult } from "./confidence";
 import type { ProcessedSegment, ScriptureDetection, Suggestion, TranscriptSegment } from "./ai";
-import type { PresentationItem } from "./presentation";
+import type { PresentationItem, PresentationPreview, RenderedSlide } from "./presentation";
 import type { ServiceSession } from "./service";
 import type { LiveStatus, TimelineEntry } from "./live";
 
@@ -61,6 +61,8 @@ describe("domain contracts", () => {
       content: { type: "scripture", reference: "ROM 8:28", translationId: "KJV", text: "..." },
       status: "prepared",
       createdAt: new Date().toISOString(),
+      sourceSuggestionId: null,
+      template: null,
     };
     expect(item.serviceId).toBe(session.id);
   });
@@ -150,6 +152,35 @@ describe("domain contracts", () => {
     expect(status.networkStatus).toBe("offline");
     expect(status.aiStatus).toBe("available");
     expect(status.databaseStatus).toBe("connected");
+  });
+
+  it("constructs a PresentationItem traceable to its source suggestion and template (Phase 1.4)", () => {
+    const item: PresentationItem = {
+      id: "00000000-0000-0000-0000-000000000007",
+      serviceId: "00000000-0000-0000-0000-000000000002",
+      content: { type: "scripture", reference: "ROM 8:28", translationId: "KJV", text: "..." },
+      status: "prepared",
+      createdAt: new Date().toISOString(),
+      sourceSuggestionId: "00000000-0000-0000-0000-000000000001",
+      template: "SCRIPTURE_DEFAULT",
+    };
+    expect(item.sourceSuggestionId).not.toBeNull();
+    expect(item.template).toBe("SCRIPTURE_DEFAULT");
+  });
+
+  it("constructs a RenderedSlide and the PresentationPreview that wraps it (Phase 1.4)", () => {
+    const slide: RenderedSlide = {
+      template: "SCRIPTURE_DEFAULT",
+      heading: "ROM 8:28",
+      bodyLines: ["And we know that all things work together for good", "to them that love God."],
+      footer: "KJV",
+    };
+    const preview: PresentationPreview = {
+      content: { type: "scripture", reference: "ROM 8:28", translationId: "KJV", text: "And we know..." },
+      slide,
+    };
+    expect(preview.slide.bodyLines.length).toBeGreaterThan(0);
+    expect(preview.content.type).toBe("scripture");
   });
 
   it("constructs a TimelineEntry describing a service-lifecycle event", () => {

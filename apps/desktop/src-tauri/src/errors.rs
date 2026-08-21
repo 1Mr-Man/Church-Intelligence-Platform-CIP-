@@ -26,6 +26,8 @@ pub enum AppError {
     AudioEngine(#[from] cip_core_service::AudioEngineError),
     #[error(transparent)]
     SpeechEngine(#[from] cip_core_ai::SpeechEngineError),
+    #[error(transparent)]
+    Presentation(#[from] crate::presentation::PresentationError),
     #[error("no service is currently active - start one first")]
     NoActiveService,
     #[error("invalid input: {0}")]
@@ -41,6 +43,7 @@ impl AppError {
             AppError::Persistence(_) => LogCategory::Database,
             AppError::AudioEngine(_) => LogCategory::Audio,
             AppError::SpeechEngine(_) => LogCategory::Speech,
+            AppError::Presentation(_) => LogCategory::Presentation,
             AppError::NoActiveService => LogCategory::App,
             AppError::InvalidInput(_) => LogCategory::App,
         }

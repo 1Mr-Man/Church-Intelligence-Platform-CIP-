@@ -26,6 +26,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0003_service_operations",
         sql: include_str!("../migrations/0003_service_operations.sql"),
     },
+    Migration {
+        version: 4,
+        name: "0004_presentation_traceability",
+        sql: include_str!("../migrations/0004_presentation_traceability.sql"),
+    },
 ];
 
 /// A migration that was applied during this call to [`run_migrations`].
@@ -170,6 +175,40 @@ mod tests {
             .map(|count| count == 1)
             .unwrap();
         assert!(index_exists, "missing idx_audit_events_service_created");
+    }
+
+    #[test]
+    fn phase_1_4_presentation_traceability_columns_and_index_exist_after_migration() {
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+
+        let has_column = |table: &str, column: &str| -> bool {
+            conn.prepare(&format!("PRAGMA table_info({table})"))
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .filter_map(Result::ok)
+                .any(|name| name == column)
+        };
+        for column in ["source_suggestion_id", "template"] {
+            assert!(
+                has_column("presentation_items", column),
+                "missing presentation_items.{column}"
+            );
+        }
+
+        let index_exists: bool = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_presentation_items_source_suggestion'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count == 1)
+            .unwrap();
+        assert!(
+            index_exists,
+            "missing idx_presentation_items_source_suggestion"
+        );
     }
 
     #[test]

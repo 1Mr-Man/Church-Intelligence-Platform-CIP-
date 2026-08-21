@@ -7,7 +7,14 @@
  * `window.__TAURI_INTERNALS__` never exists regardless.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getAppConfig, searchBible, TauriUnavailableError } from "./commands";
+import {
+  createManualPresentation,
+  getAppConfig,
+  previewPresentation,
+  previewScripture,
+  searchBible,
+  TauriUnavailableError,
+} from "./commands";
 
 const invokeMock = vi.fn();
 const isTauriMock = vi.fn();
@@ -43,5 +50,32 @@ describe("commands.ts Tauri IPC guard", () => {
     await searchBible("Romans 8:28");
 
     expect(invokeMock).toHaveBeenCalledWith("search_bible", { query: "Romans 8:28" });
+  });
+
+  it("previewPresentation calls preview_presentation, never prepare_presentation (Phase 1.4)", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await previewPresentation("suggestion-1");
+
+    expect(invokeMock).toHaveBeenCalledWith("preview_presentation", { suggestionId: "suggestion-1" });
+  });
+
+  it("previewScripture calls preview_scripture with the raw reference", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await previewScripture("ROM 8:28");
+
+    expect(invokeMock).toHaveBeenCalledWith("preview_scripture", { reference: "ROM 8:28" });
+  });
+
+  it("createManualPresentation calls create_manual_presentation, not prepare_presentation", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await createManualPresentation("JHN 3:16");
+
+    expect(invokeMock).toHaveBeenCalledWith("create_manual_presentation", { reference: "JHN 3:16" });
   });
 });

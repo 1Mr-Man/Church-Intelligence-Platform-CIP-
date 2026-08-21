@@ -44,6 +44,17 @@ export interface BibleVerse {
   text: string;
 }
 
+/** `{ book: "ROM", chapter: 8, verseStart: 28 }` -> `"ROM 8:28"` - mirrors
+ * `core/bible::ScriptureReference`'s `Display` impl (Rust). Used to turn a
+ * manual Bible search result into the reference string
+ * `preview_scripture`/`create_manual_presentation` expect. */
+export function formatScriptureReference(reference: ScriptureReference): string {
+  if (reference.verseEnd !== null && reference.verseEnd !== reference.verseStart) {
+    return `${reference.book} ${reference.chapter}:${reference.verseStart}-${reference.verseEnd}`;
+  }
+  return `${reference.book} ${reference.chapter}:${reference.verseStart}`;
+}
+
 export interface BibleChapter {
   book: string;
   chapter: number;

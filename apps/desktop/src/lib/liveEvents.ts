@@ -13,7 +13,13 @@
  */
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AppEvents } from "../events/eventNames";
-import type { ProcessedSegment, ScriptureDetection, Suggestion, TranscriptSegment } from "../domain";
+import type {
+  PresentationItem,
+  ProcessedSegment,
+  ScriptureDetection,
+  Suggestion,
+  TranscriptSegment,
+} from "../domain";
 import { isTauriRuntime } from "./runtime";
 
 function listenSafe<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
@@ -49,6 +55,19 @@ export function onSuggestionEdited(handler: (suggestion: Suggestion) => void): P
 
 export function onSuggestionRejected(handler: (suggestion: Suggestion) => void): Promise<UnlistenFn> {
   return listenSafe<Suggestion>(AppEvents.SuggestionRejected, handler);
+}
+
+/** A non-mutating preview render - never implies anything was persisted. */
+export function onPresentationPreviewed(handler: (item: PresentationItem) => void): Promise<UnlistenFn> {
+  return listenSafe<PresentationItem>(AppEvents.PresentationPreviewed, handler);
+}
+
+export function onPresentationPrepared(handler: (item: PresentationItem) => void): Promise<UnlistenFn> {
+  return listenSafe<PresentationItem>(AppEvents.PresentationPrepared, handler);
+}
+
+export function onPresentationCancelled(handler: (item: PresentationItem) => void): Promise<UnlistenFn> {
+  return listenSafe<PresentationItem>(AppEvents.PresentationCancelled, handler);
 }
 
 /** Unused by `ProcessedSegment` directly but kept for reference/parity -

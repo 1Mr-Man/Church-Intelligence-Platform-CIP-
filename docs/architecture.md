@@ -72,8 +72,13 @@ composes `ServiceSession` state that other domains reference by id
 - `presentation/renderer` - turns a `PresentationItem` into on-screen
   output. Kept separate from `core/presentation` so the AI/suggestion
   pipeline never couples directly to the renderer. Phase 1 ships only
-  `NullRenderer`. `presentation/templates` and `presentation/outputs` are
-  reserved directories for the future presentation designer.
+  `NullRenderer`; Phase 1.4 adds a real, deterministic
+  `render_content()` (no AI generation, no randomness) producing a
+  structured `RenderedSlide` via the one `SCRIPTURE_DEFAULT` template -
+  see [`docs/presentation.md`](presentation.md). `presentation/templates`
+  and `presentation/outputs` remain reserved directories for the future
+  presentation designer (visual/typographic design beyond that one
+  template, plus real display output).
 
 ## Bible Intelligence Core & Scripture Context Manager
 
@@ -100,7 +105,12 @@ event wiring, and an operator UI - without changing any of the above; see
 layer around that pipeline - service lifecycle, a timeline, operator
 ambiguity resolution and context correction, suggestion deduplication,
 and failure recovery - again without changing the Bible Intelligence Core
-itself; see [`docs/live-service.md`](live-service.md).
+itself; see [`docs/live-service.md`](live-service.md). Phase 1.4 connects
+an approved suggestion to a real, prepared presentation output - real
+local Bible text, a deterministic renderer, and separate preview/prepare
+actions - again without changing the Bible Intelligence Core, the
+detection pipeline, or the operator approval boundary; see
+[`docs/presentation.md`](presentation.md).
 
 ## Event architecture
 
@@ -128,6 +138,14 @@ second event bus. It also reuses Phase 1.0's previously-unused
 both emitted live (the mechanism above) and persisted as one
 `audit_events` row, so the timeline is reconstructable after a restart
 without a redundant table. See [`docs/live-service.md`](live-service.md#service-timeline).
+
+Phase 1.4 added two more - `PresentationPreviewed` and
+`PresentationCancelled` - alongside the already-existing
+`PresentationPrepared`/`PresentationStarted`/`PresentationStopped`.
+`PresentationStarted`/`PresentationStopped` remain declared but unused,
+reserved for a future real display integration: nothing in this codebase
+emits them, since nothing can actually display prepared content yet. See
+[`docs/presentation.md`](presentation.md).
 
 ## Configuration
 

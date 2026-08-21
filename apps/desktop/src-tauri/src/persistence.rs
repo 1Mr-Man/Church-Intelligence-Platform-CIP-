@@ -545,6 +545,26 @@ pub fn update_suggestion_status(
 
 // --- presentation_items ---------------------------------------------------
 
+fn presentation_item_status_str(
+    status: cip_core_presentation::PresentationItemStatus,
+) -> &'static str {
+    use cip_core_presentation::PresentationItemStatus;
+    match status {
+        PresentationItemStatus::Prepared => "prepared",
+        PresentationItemStatus::Active => "active",
+        PresentationItemStatus::Stopped => "stopped",
+    }
+}
+
+fn parse_presentation_item_status(status: &str) -> cip_core_presentation::PresentationItemStatus {
+    use cip_core_presentation::PresentationItemStatus;
+    match status {
+        "active" => PresentationItemStatus::Active,
+        "stopped" => PresentationItemStatus::Stopped,
+        _ => PresentationItemStatus::Prepared,
+    }
+}
+
 /// Persist a prepared presentation item (`status = 'prepared'`, matching
 /// `PresentationItemStatus::Prepared`). Nothing in this pipeline ever
 /// writes `'active'` - see `commands::prepare_presentation`'s docs.
@@ -559,17 +579,135 @@ pub fn persist_presentation_item(
     };
     let content = serde_json::to_string(&item.content)?;
     conn.execute(
-        "INSERT INTO presentation_items (id, service_id, content_type, content, status, created_at)
-         VALUES (?1, ?2, ?3, ?4, 'prepared', ?5)",
+        "INSERT INTO presentation_items
+            (id, service_id, content_type, content, status, created_at, source_suggestion_id, template)
+         VALUES (?1, ?2, ?3, ?4, 'prepared', ?5, ?6, ?7)",
         params![
             item.id.to_string(),
             item.service_id.to_string(),
             content_type,
             content,
             item.created_at.to_rfc3339(),
+            item.source_suggestion_id.map(|id| id.to_string()),
+            item.template,
         ],
     )?;
     Ok(())
+}
+
+const PRESENTATION_ITEM_COLUMNS: &str =
+    "id, service_id, content, status, created_at, source_suggestion_id, template";
+
+#[allow(clippy::type_complexity)]
+fn presentation_item_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<(
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+)> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+    ))
+}
+
+fn row_to_presentation_item(
+    id: String,
+    service_id: String,
+    content: String,
+    status: String,
+    created_at: String,
+    source_suggestion_id: Option<String>,
+    template: Option<String>,
+) -> Result<cip_core_presentation::PresentationItem, PersistError> {
+    Ok(cip_core_presentation::PresentationItem {
+        id: Uuid::parse_str(&id).map_err(|_| PersistError::NotFound(id.clone()))?,
+        service_id: Uuid::parse_str(&service_id)
+            .map_err(|_| PersistError::NotFound(service_id.clone()))?,
+        content: serde_json::from_str(&content)?,
+        status: parse_presentation_item_status(&status),
+        created_at: chrono::DateTime::parse_from_rfc3339(&created_at)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now()),
+        source_suggestion_id: source_suggestion_id.and_then(|id| Uuid::parse_str(&id).ok()),
+        template,
+    })
+}
+
+pub fn get_presentation_item(
+    conn: &Connection,
+    item_id: Uuid,
+) -> Result<cip_core_presentation::PresentationItem, PersistError> {
+    conn.query_row(
+        &format!("SELECT {PRESENTATION_ITEM_COLUMNS} FROM presentation_items WHERE id = ?1"),
+        params![item_id.to_string()],
+        presentation_item_row,
+    )
+    .optional()?
+    .ok_or_else(|| PersistError::NotFound(item_id.to_string()))
+    .and_then(
+        |(id, service_id, content, status, created_at, src, template)| {
+            row_to_presentation_item(id, service_id, content, status, created_at, src, template)
+        },
+    )
+}
+
+/// List presentation items for a service, most recent first. `status`
+/// filters to a single status when set (e.g. `Prepared` for "what's
+/// currently prepared").
+pub fn list_presentation_items(
+    conn: &Connection,
+    service_id: Uuid,
+    status: Option<cip_core_presentation::PresentationItemStatus>,
+) -> Result<Vec<cip_core_presentation::PresentationItem>, PersistError> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {PRESENTATION_ITEM_COLUMNS}
+         FROM presentation_items WHERE service_id = ?1 AND (?2 IS NULL OR status = ?2)
+         ORDER BY created_at DESC"
+    ))?;
+    let status_filter = status.map(presentation_item_status_str);
+    let rows = stmt
+        .query_map(
+            params![service_id.to_string(), status_filter],
+            presentation_item_row,
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    rows.into_iter()
+        .map(
+            |(id, service_id, content, status, created_at, src, template)| {
+                row_to_presentation_item(id, service_id, content, status, created_at, src, template)
+            },
+        )
+        .collect()
+}
+
+/// Update a presentation item's status (e.g. cancelling a prepared item -
+/// `Stopped`, reused as "prepared then retracted" since nothing in this
+/// phase ever transitions an item to `Active`). Returns the updated row.
+pub fn update_presentation_item_status(
+    conn: &Connection,
+    item_id: Uuid,
+    new_status: cip_core_presentation::PresentationItemStatus,
+) -> Result<cip_core_presentation::PresentationItem, PersistError> {
+    conn.execute(
+        "UPDATE presentation_items SET status = ?1 WHERE id = ?2",
+        params![
+            presentation_item_status_str(new_status),
+            item_id.to_string()
+        ],
+    )?;
+    get_presentation_item(conn, item_id)
 }
 
 #[cfg(test)]
@@ -818,6 +956,130 @@ mod tests {
             .query_row("SELECT status FROM presentation_items", [], |r| r.get(0))
             .unwrap();
         assert_eq!(status, "prepared");
+    }
+
+    #[test]
+    fn round_trips_a_presentation_item_with_source_and_template() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let suggestion = Suggestion::new(
+            session.id,
+            SuggestionKind::Scripture {
+                reference: "ROM 8:28".into(),
+            },
+            ConfidenceResult::new(0.95, ConfidenceSource::Heuristic, None),
+        );
+        persist_suggestion(&conn, &suggestion).unwrap();
+        let suggestion_id = suggestion.id;
+        let item = cip_core_presentation::PresentationItem::prepare(
+            session.id,
+            cip_core_presentation::PresentationContent::Scripture {
+                reference: "ROM 8:28".into(),
+                translation_id: "KJV".into(),
+                text: "And we know...".into(),
+            },
+        )
+        .with_source_suggestion(suggestion_id)
+        .with_template("SCRIPTURE_DEFAULT");
+        persist_presentation_item(&conn, &item).unwrap();
+
+        let loaded = get_presentation_item(&conn, item.id).unwrap();
+        assert_eq!(loaded, item);
+        assert_eq!(loaded.source_suggestion_id, Some(suggestion_id));
+        assert_eq!(loaded.template.as_deref(), Some("SCRIPTURE_DEFAULT"));
+    }
+
+    #[test]
+    fn round_trips_a_manually_created_presentation_item_without_source() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let item = cip_core_presentation::PresentationItem::prepare(
+            session.id,
+            cip_core_presentation::PresentationContent::Scripture {
+                reference: "JHN 3:16".into(),
+                translation_id: "KJV".into(),
+                text: "For God so loved the world...".into(),
+            },
+        );
+        persist_presentation_item(&conn, &item).unwrap();
+
+        let loaded = get_presentation_item(&conn, item.id).unwrap();
+        assert_eq!(loaded.source_suggestion_id, None);
+        assert_eq!(loaded.template, None);
+    }
+
+    #[test]
+    fn get_presentation_item_returns_not_found_for_unknown_id() {
+        let conn = migrated_conn();
+        let err = get_presentation_item(&conn, Uuid::new_v4()).unwrap_err();
+        assert!(matches!(err, PersistError::NotFound(_)));
+    }
+
+    #[test]
+    fn lists_presentation_items_for_a_service_most_recent_first_and_filters_by_status() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let first = cip_core_presentation::PresentationItem::prepare(
+            session.id,
+            cip_core_presentation::PresentationContent::Text {
+                title: None,
+                body: "first".into(),
+            },
+        );
+        persist_presentation_item(&conn, &first).unwrap();
+        let second = cip_core_presentation::PresentationItem::prepare(
+            session.id,
+            cip_core_presentation::PresentationContent::Text {
+                title: None,
+                body: "second".into(),
+            },
+        );
+        persist_presentation_item(&conn, &second).unwrap();
+
+        let all = list_presentation_items(&conn, session.id, None).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].id, second.id, "expected most recent item first");
+
+        update_presentation_item_status(
+            &conn,
+            first.id,
+            cip_core_presentation::PresentationItemStatus::Stopped,
+        )
+        .unwrap();
+
+        let only_prepared = list_presentation_items(
+            &conn,
+            session.id,
+            Some(cip_core_presentation::PresentationItemStatus::Prepared),
+        )
+        .unwrap();
+        assert_eq!(only_prepared.len(), 1);
+        assert_eq!(only_prepared[0].id, second.id);
+    }
+
+    #[test]
+    fn update_presentation_item_status_persists_the_new_status() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let item = cip_core_presentation::PresentationItem::prepare(
+            session.id,
+            cip_core_presentation::PresentationContent::Text {
+                title: None,
+                body: "welcome".into(),
+            },
+        );
+        persist_presentation_item(&conn, &item).unwrap();
+
+        let updated = update_presentation_item_status(
+            &conn,
+            item.id,
+            cip_core_presentation::PresentationItemStatus::Stopped,
+        )
+        .unwrap();
+        assert_eq!(
+            updated.status,
+            cip_core_presentation::PresentationItemStatus::Stopped
+        );
     }
 
     #[test]

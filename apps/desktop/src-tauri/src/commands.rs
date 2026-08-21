@@ -11,6 +11,7 @@ use crate::events::{emit, AppEvent};
 use crate::logging::LogCategory;
 use crate::persistence;
 use crate::pipeline::handle_final_transcript;
+use crate::presentation;
 use crate::state::{AppState, DEFAULT_TRANSLATION_ID};
 use crate::timeline::{self, TimelineEntry};
 use cip_core_ai::{Suggestion, SuggestionKind, SuggestionStatus, TranscriptSegment};
@@ -19,11 +20,12 @@ use cip_core_bible::{
     ScriptureContextManager, ScriptureReference,
 };
 use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
-use cip_core_presentation::{PresentationContent, PresentationItem};
+use cip_core_presentation::{PresentationContent, PresentationItem, PresentationItemStatus};
 use cip_core_service::{
     AudioChunk, AudioChunkSink, AudioDevice, AudioEngineStatus, ScriptureDetection, ServiceSession,
     ServiceStatus,
 };
+use cip_presentation_renderer::{RenderedSlide, SCRIPTURE_DEFAULT_TEMPLATE};
 use rusqlite::Connection;
 use serde::Serialize;
 use std::sync::atomic::Ordering;
@@ -139,6 +141,20 @@ fn ensure_suggestion_editable(status: SuggestionStatus, action: &str) -> Result<
         return Err(AppError::InvalidInput(format!(
             "cannot {action} a suggestion with status {status:?}"
         )));
+    }
+    Ok(())
+}
+
+/// `preview_presentation`'s guard (Phase 1.4): unlike `prepare_presentation`,
+/// preview is non-mutating and deliberately available before approval - the
+/// whole point of separating it from the approval-gated prepare path (see
+/// `docs/presentation.md`). A rejected suggestion is the one status that
+/// makes no operational sense to preview: the operator has already said no.
+fn ensure_suggestion_previewable(status: SuggestionStatus) -> Result<(), AppError> {
+    if status == SuggestionStatus::Rejected {
+        return Err(AppError::InvalidInput(
+            "cannot preview a rejected suggestion".to_string(),
+        ));
     }
     Ok(())
 }
@@ -966,6 +982,74 @@ fn parse_display_reference(text: &str) -> Result<(String, u32, u32), AppError> {
     Ok((book.to_string(), chapter, verse))
 }
 
+/// Non-mutating render of a scripture reference - the shared core behind
+/// both `preview_presentation` and `preview_scripture` below. Never
+/// persists anything and never requires an active service (Phase 1.4
+/// section 14): the operator can preview before approving, before a
+/// service even exists to attach a prepared item to.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresentationPreview {
+    pub content: PresentationContent,
+    pub slide: RenderedSlide,
+}
+
+fn preview_reference(
+    reference: &str,
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+) -> Result<PresentationPreview, AppError> {
+    let (content, slide) = presentation::build_scripture_slide(
+        state.bible_provider.as_ref(),
+        DEFAULT_TRANSLATION_ID,
+        reference,
+    )
+    .map_err(AppError::from)
+    .map_err(log_and_return)?;
+    let preview = PresentationPreview { content, slide };
+    let _ = emit(app, AppEvent::PresentationPreviewed, preview.clone());
+    Ok(preview)
+}
+
+/// Previews a suggestion's scripture reference - available before
+/// approval, unlike `prepare_presentation` (section 14: "Preview and
+/// Prepare are separate actions"). This is the fix for the pre-1.4 UI bug
+/// where the operator's "Preview" button called the approval-gated
+/// prepare command directly.
+#[tauri::command]
+pub fn preview_presentation(
+    suggestion_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PresentationPreview, AppError> {
+    let id = parse_uuid(&suggestion_id).map_err(log_and_return)?;
+    let db = state.db.lock().expect("db connection poisoned");
+    let suggestion = persistence::get_suggestion(&db, id)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
+    drop(db);
+    ensure_suggestion_previewable(suggestion.status).map_err(log_and_return)?;
+    let SuggestionKind::Scripture { reference } = &suggestion.kind else {
+        return Err(log_and_return(AppError::InvalidInput(
+            "suggestion is not a scripture reference".to_string(),
+        )));
+    };
+    preview_reference(reference, &app, &state)
+}
+
+/// Previews an arbitrary scripture reference with no suggestion involved -
+/// the manual Bible search path's preview (section 5/20: manual creation
+/// must work independently of speech recognition).
+#[tauri::command]
+pub fn preview_scripture(
+    reference: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PresentationPreview, AppError> {
+    let reference = require_non_empty(&reference, "reference").map_err(log_and_return)?;
+    preview_reference(&reference, &app, &state)
+}
+
 /// Prepares (never projects) a presentation item from an approved
 /// suggestion. There is no "active"/projected state anywhere in this
 /// command - see `docs/live-speech.md`'s "no automatic projection"
@@ -982,52 +1066,146 @@ pub fn prepare_presentation(
         .map_err(AppError::from)
         .map_err(log_and_return)?;
 
-    if suggestion.status != SuggestionStatus::Approved {
-        return Err(log_and_return(AppError::InvalidInput(
-            "only an approved suggestion can be prepared for presentation".to_string(),
-        )));
-    }
+    presentation::ensure_suggestion_approved(suggestion.status)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
     let SuggestionKind::Scripture { reference } = &suggestion.kind else {
-        return Err(log_and_return(AppError::InvalidInput(
-            "suggestion is not a scripture reference".to_string(),
+        return Err(log_and_return(AppError::from(
+            presentation::PresentationError::SuggestionNotScripture,
         )));
     };
 
-    let (book, chapter, verse) = parse_display_reference(reference).map_err(log_and_return)?;
-    let scripture_reference =
-        ScriptureReference::single(DEFAULT_TRANSLATION_ID, &book, chapter, verse);
-    let verse_row = state
-        .bible_provider
-        .get_verse(&scripture_reference)
-        .map_err(AppError::from)
-        .map_err(log_and_return)?
-        .ok_or_else(|| {
-            log_and_return(AppError::InvalidInput(format!(
-                "verse not found: {reference}"
-            )))
-        })?;
+    let (content, _slide) = presentation::build_scripture_slide(
+        state.bible_provider.as_ref(),
+        DEFAULT_TRANSLATION_ID,
+        reference,
+    )
+    .map_err(AppError::from)
+    .map_err(log_and_return)?;
 
-    let item = PresentationItem::prepare(
+    let item = presentation::persist_prepared_item(
+        &db,
         suggestion.service_id,
-        PresentationContent::Scripture {
-            reference: reference.clone(),
-            translation_id: DEFAULT_TRANSLATION_ID.to_string(),
-            text: verse_row.text,
-        },
-    );
-    persistence::persist_presentation_item(&db, &item)
-        .map_err(AppError::from)
-        .map_err(log_and_return)?;
+        content,
+        SCRIPTURE_DEFAULT_TEMPLATE,
+        Some(suggestion.id),
+    )
+    .map_err(AppError::from)
+    .map_err(log_and_return)?;
     record_timeline(
         &db,
         Some(item.service_id),
         AppEvent::PresentationPrepared,
         LogCategory::Presentation,
-        serde_json::json!({ "presentationItemId": item.id, "reference": reference }),
+        serde_json::json!({
+            "presentationItemId": item.id,
+            "reference": reference,
+            "sourceSuggestionId": item.source_suggestion_id,
+            "template": item.template,
+        }),
     );
     drop(db);
 
     let _ = emit(&app, AppEvent::PresentationPrepared, item.clone());
+    Ok(item)
+}
+
+/// Creates a prepared presentation item directly from a reference, with no
+/// suggestion involved - the manual fallback (section 5/20) that keeps
+/// presentation preparation working with no audio, no speech engine, and
+/// no network. Requires an active service to attach the item to (the
+/// schema's `service_id` is not nullable), same as every other
+/// service-scoped write in this file.
+#[tauri::command]
+pub fn create_manual_presentation(
+    reference: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PresentationItem, AppError> {
+    let reference = require_non_empty(&reference, "reference").map_err(log_and_return)?;
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+
+    let (content, _slide) = presentation::build_scripture_slide(
+        state.bible_provider.as_ref(),
+        DEFAULT_TRANSLATION_ID,
+        &reference,
+    )
+    .map_err(AppError::from)
+    .map_err(log_and_return)?;
+
+    let db = state.db.lock().expect("db connection poisoned");
+    let item = presentation::persist_prepared_item(
+        &db,
+        service_id,
+        content,
+        SCRIPTURE_DEFAULT_TEMPLATE,
+        None,
+    )
+    .map_err(AppError::from)
+    .map_err(log_and_return)?;
+    record_timeline(
+        &db,
+        Some(service_id),
+        AppEvent::PresentationPrepared,
+        LogCategory::Presentation,
+        serde_json::json!({ "presentationItemId": item.id, "reference": reference, "manual": true }),
+    );
+    drop(db);
+
+    let _ = emit(&app, AppEvent::PresentationPrepared, item.clone());
+    Ok(item)
+}
+
+/// What's currently prepared for the active service - the "Current
+/// Output" panel's data source (section 27). Never includes cancelled
+/// (`Stopped`) items.
+#[tauri::command]
+pub fn list_prepared_presentations(
+    state: State<'_, AppState>,
+) -> Result<Vec<PresentationItem>, AppError> {
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let db = state.db.lock().expect("db connection poisoned");
+    persistence::list_presentation_items(&db, service_id, Some(PresentationItemStatus::Prepared))
+        .map_err(AppError::from)
+        .map_err(log_and_return)
+}
+
+#[tauri::command]
+pub fn get_presentation_item(
+    item_id: String,
+    state: State<'_, AppState>,
+) -> Result<PresentationItem, AppError> {
+    let id = parse_uuid(&item_id).map_err(log_and_return)?;
+    let db = state.db.lock().expect("db connection poisoned");
+    persistence::get_presentation_item(&db, id)
+        .map_err(AppError::from)
+        .map_err(log_and_return)
+}
+
+/// Cancels ("retracts") a still-prepared item before it's ever displayed.
+/// Only valid from `Prepared` - an already-cancelled item cannot be
+/// cancelled again.
+#[tauri::command]
+pub fn cancel_presentation(
+    item_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PresentationItem, AppError> {
+    let id = parse_uuid(&item_id).map_err(log_and_return)?;
+    let db = state.db.lock().expect("db connection poisoned");
+    let item = presentation::cancel_item(&db, id)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
+    record_timeline(
+        &db,
+        Some(item.service_id),
+        AppEvent::PresentationCancelled,
+        LogCategory::Presentation,
+        serde_json::json!({ "presentationItemId": item.id }),
+    );
+    drop(db);
+
+    let _ = emit(&app, AppEvent::PresentationCancelled, item.clone());
     Ok(item)
 }
 
@@ -1470,6 +1648,17 @@ mod tests {
         ));
         assert!(matches!(
             ensure_suggestion_editable(SuggestionStatus::Rejected, "reject"),
+            Err(AppError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn ensure_suggestion_previewable_allows_everything_but_rejected() {
+        assert!(ensure_suggestion_previewable(SuggestionStatus::Pending).is_ok());
+        assert!(ensure_suggestion_previewable(SuggestionStatus::Edited).is_ok());
+        assert!(ensure_suggestion_previewable(SuggestionStatus::Approved).is_ok());
+        assert!(matches!(
+            ensure_suggestion_previewable(SuggestionStatus::Rejected),
             Err(AppError::InvalidInput(_))
         ));
     }

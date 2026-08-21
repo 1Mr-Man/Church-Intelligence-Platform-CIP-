@@ -26,9 +26,15 @@ pub enum AppEvent {
     SuggestionEdited,
     SuggestionRejected,
 
+    /// A non-mutating preview render was produced (Phase 1.4) - never
+    /// implies anything was persisted or prepared.
+    PresentationPreviewed,
     PresentationPrepared,
     PresentationStarted,
     PresentationStopped,
+    /// A prepared item was cancelled/retracted before being displayed
+    /// (Phase 1.4).
+    PresentationCancelled,
 
     ServiceStarted,
     ServicePaused,
@@ -76,9 +82,11 @@ impl AppEvent {
             AppEvent::SuggestionEdited => "SUGGESTION_EDITED",
             AppEvent::SuggestionRejected => "SUGGESTION_REJECTED",
 
+            AppEvent::PresentationPreviewed => "PRESENTATION_PREVIEWED",
             AppEvent::PresentationPrepared => "PRESENTATION_PREPARED",
             AppEvent::PresentationStarted => "PRESENTATION_STARTED",
             AppEvent::PresentationStopped => "PRESENTATION_STOPPED",
+            AppEvent::PresentationCancelled => "PRESENTATION_CANCELLED",
 
             AppEvent::ServiceStarted => "SERVICE_STARTED",
             AppEvent::ServicePaused => "SERVICE_PAUSED",
@@ -126,9 +134,11 @@ mod tests {
             AppEvent::SuggestionApproved,
             AppEvent::SuggestionEdited,
             AppEvent::SuggestionRejected,
+            AppEvent::PresentationPreviewed,
             AppEvent::PresentationPrepared,
             AppEvent::PresentationStarted,
             AppEvent::PresentationStopped,
+            AppEvent::PresentationCancelled,
             AppEvent::ServiceStarted,
             AppEvent::ServicePaused,
             AppEvent::ServiceResumed,

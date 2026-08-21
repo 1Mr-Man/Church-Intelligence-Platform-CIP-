@@ -33,6 +33,7 @@ cip-core-ai.workspace = true
 cip-core-service.workspace = true
 cip-core-confidence.workspace = true
 cip-core-presentation.workspace = true
+cip-presentation-renderer.workspace = true
 cip-integrations-bible.workspace = true
 cip-integrations-audio.workspace = true
 cip-ai-speech.workspace = true

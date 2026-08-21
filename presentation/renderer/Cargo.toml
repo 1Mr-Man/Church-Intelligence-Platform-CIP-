@@ -9,6 +9,8 @@ repository.workspace = true
 
 [dependencies]
 cip-core-presentation.workspace = true
+serde.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 uuid.workspace = true

@@ -539,6 +539,7 @@ dependencies = [
  "cip-database",
  "cip-integrations-audio",
  "cip-integrations-bible",
+ "cip-presentation-renderer",
  "log",
  "rusqlite",
  "serde",
@@ -606,6 +607,8 @@ name = "cip-presentation-renderer"
 version = "0.1.0"
 dependencies = [
  "cip-core-presentation",
+ "serde",
+ "thiserror 2.0.20",
  "uuid",
 ]
 

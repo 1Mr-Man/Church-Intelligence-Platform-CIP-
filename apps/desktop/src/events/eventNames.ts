@@ -25,9 +25,11 @@ export const AppEvents = {
   SuggestionEdited: "SUGGESTION_EDITED",
   SuggestionRejected: "SUGGESTION_REJECTED",
 
+  PresentationPreviewed: "PRESENTATION_PREVIEWED",
   PresentationPrepared: "PRESENTATION_PREPARED",
   PresentationStarted: "PRESENTATION_STARTED",
   PresentationStopped: "PRESENTATION_STOPPED",
+  PresentationCancelled: "PRESENTATION_CANCELLED",
 
   ServiceStarted: "SERVICE_STARTED",
   ServicePaused: "SERVICE_PAUSED",

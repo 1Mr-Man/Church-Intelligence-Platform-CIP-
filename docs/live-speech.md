@@ -17,7 +17,13 @@ full presentation designer, automatic projection. See
 
 Phase 1.3 built the service lifecycle, timeline, and operator workflow
 around this pipeline without changing anything documented here - see
-[`docs/live-service.md`](live-service.md).
+[`docs/live-service.md`](live-service.md). Phase 1.4 built the
+presentation preparation path on top of that (an approved suggestion, or
+a manual reference, through to real, persisted, prepared output) -
+`prepare_presentation` below is still real, but is no longer the only
+presentation command; see [`docs/presentation.md`](presentation.md) for
+`preview_presentation`, `preview_scripture`, `create_manual_presentation`,
+and the rest.
 
 ## The pipeline
 

@@ -3,6 +3,8 @@ import type {
   AudioDevice,
   BibleVerse,
   LiveStatus,
+  PresentationItem,
+  PresentationPreview,
   ScriptureContext,
   ScriptureDetection,
   ScriptureReference,
@@ -11,6 +13,7 @@ import type {
   TimelineEntry,
   TranscriptSegment,
 } from "../domain";
+import { formatScriptureReference } from "../domain/bible";
 import * as commands from "../lib/commands";
 import * as liveEvents from "../lib/liveEvents";
 import { formatClockTime } from "../lib/format";
@@ -53,6 +56,21 @@ export function LiveChurchBrain() {
   // shows no time, rather than a fabricated one.
   const [transcriptReceivedAt, setTranscriptReceivedAt] = useState<Record<string, string>>({});
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  // Approved but not yet prepared - a suggestion moves here (never
+  // disappears) on approval, and out again once prepared. Kept distinct
+  // from `suggestions` (pending/edited) because only an approved
+  // suggestion may ever be prepared - see `ensure_suggestion_approved` on
+  // the Rust side and Phase 1.4 section 3/16.
+  const [approvedSuggestions, setApprovedSuggestions] = useState<Suggestion[]>([]);
+  // Currently prepared presentation items for the active service - the
+  // Current Output panel's data (Phase 1.4 section 27). Never includes
+  // cancelled items.
+  const [preparedItems, setPreparedItems] = useState<PresentationItem[]>([]);
+  // Non-mutating previews, keyed by suggestion id / search reference -
+  // Preview never changes `suggestions`/`approvedSuggestions`/`preparedItems`
+  // (section 14: preview and prepare are separate actions).
+  const [previews, setPreviews] = useState<Record<string, PresentationPreview>>({});
+  const [searchPreviews, setSearchPreviews] = useState<Record<string, PresentationPreview>>({});
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [serviceTitle, setServiceTitle] = useState("Sunday Morning Service");
@@ -91,10 +109,16 @@ export function LiveChurchBrain() {
   useEffect(() => {
     if (activeServiceId) {
       commands.listSuggestions("pending").then(setSuggestions).catch(() => {});
+      commands.listSuggestions("approved").then(setApprovedSuggestions).catch(() => {});
+      commands.listPreparedPresentations().then(setPreparedItems).catch(() => {});
       commands.listTranscript(TRANSCRIPT_LIMIT).then(setTranscript).catch(() => {});
       commands.listTimeline(TIMELINE_LIMIT).then(setTimeline).catch(() => {});
     } else {
       setSuggestions([]);
+      setApprovedSuggestions([]);
+      setPreparedItems([]);
+      setPreviews({});
+      setSearchPreviews({});
       setTranscript([]);
       setTranscriptReceivedAt({});
       setTimeline([]);
@@ -143,9 +167,21 @@ export function LiveChurchBrain() {
       liveEvents.onScriptureDetected(recordDetection),
       liveEvents.onScriptureUpdated(recordDetection),
       liveEvents.onSuggestionCreated((s) => setSuggestions((prev) => [s, ...prev])),
-      liveEvents.onSuggestionApproved((s) => setSuggestions((prev) => prev.filter((x) => x.id !== s.id))),
+      liveEvents.onSuggestionApproved((s) => {
+        setSuggestions((prev) => prev.filter((x) => x.id !== s.id));
+        setApprovedSuggestions((prev) => [s, ...prev]);
+      }),
       liveEvents.onSuggestionRejected((s) => setSuggestions((prev) => prev.filter((x) => x.id !== s.id))),
       liveEvents.onSuggestionEdited((s) => setSuggestions((prev) => prev.map((x) => (x.id === s.id ? s : x)))),
+      liveEvents.onPresentationPrepared((item) => {
+        setPreparedItems((prev) => [item, ...prev]);
+        if (item.sourceSuggestionId) {
+          setApprovedSuggestions((prev) => prev.filter((s) => s.id !== item.sourceSuggestionId));
+        }
+      }),
+      liveEvents.onPresentationCancelled((item) =>
+        setPreparedItems((prev) => prev.filter((x) => x.id !== item.id)),
+      ),
     ];
     return () => {
       subscriptions.forEach((p) => p.then((unlisten) => unlisten()));
@@ -168,9 +204,12 @@ export function LiveChurchBrain() {
 
   const firstPending = suggestions[0];
 
-  // Phase 1.3 keyboard shortcuts (section 31): A/R/E/P act on the first
-  // pending suggestion, S focuses the search box. Guarded so typing in
-  // any input never accidentally triggers one - see `shouldHandleShortcut`.
+  // Phase 1.3 keyboard shortcuts (section 31): A/R/E act on the first
+  // pending suggestion, S focuses the search box. P previews it (Phase
+  // 1.4) - never prepares, since a still-pending suggestion is never
+  // approved yet and preparing requires approval (section 3/16). Guarded
+  // so typing in any input never accidentally triggers one - see
+  // `shouldHandleShortcut`.
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -200,8 +239,9 @@ export function LiveChurchBrain() {
         setEditingId(firstPending.id);
         setEditValue(firstPending.kind.type === "scripture" ? firstPending.kind.reference : "");
       } else if (key === "p") {
-        void withBusy(`prepare-${firstPending.id}`, async () => {
-          await commands.preparePresentation(firstPending.id);
+        void withBusy(`preview-${firstPending.id}`, async () => {
+          const preview = await commands.previewPresentation(firstPending.id);
+          setPreviews((prev) => ({ ...prev, [firstPending.id]: preview }));
         });
       }
     };
@@ -543,14 +583,46 @@ export function LiveChurchBrain() {
                 await commands.rejectSuggestion(id);
               })
             }
-            onPrepare={(id) =>
-              withBusy(`prepare-${id}`, async () => {
-                await commands.preparePresentation(id);
+            onPreview={(id) =>
+              withBusy(`preview-${id}`, async () => {
+                const preview = await commands.previewPresentation(id);
+                setPreviews((prev) => ({ ...prev, [id]: preview }));
               })
             }
+            previews={previews}
           />
         )}
       </section>
+
+      {approvedSuggestions.length > 0 && (
+        <section className="live-brain__panel">
+          <h2>Approved &mdash; Ready to Prepare</h2>
+          <p className="live-brain__hint">
+            Approved suggestions never auto-prepare - preview, then explicitly prepare each one.
+          </p>
+          <ul className="live-brain__suggestions">
+            {approvedSuggestions.map((s) => (
+              <ApprovedSuggestionCard
+                key={s.id}
+                suggestion={s}
+                busy={busy}
+                preview={previews[s.id]}
+                onPreview={() =>
+                  withBusy(`preview-${s.id}`, async () => {
+                    const preview = await commands.previewPresentation(s.id);
+                    setPreviews((prev) => ({ ...prev, [s.id]: preview }));
+                  })
+                }
+                onPrepare={() =>
+                  withBusy(`prepare-${s.id}`, async () => {
+                    await commands.preparePresentation(s.id);
+                  })
+                }
+              />
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="live-brain__panel">
         <h2>Service Timeline</h2>
@@ -594,21 +666,81 @@ export function LiveChurchBrain() {
         </div>
         {searchResults.length > 0 && (
           <ul className="live-brain__search-results">
-            {searchResults.map((verse) => (
-              <li key={`${verse.reference.book}-${verse.reference.chapter}-${verse.reference.verseStart}`}>
-                <strong>
-                  {verse.reference.book} {verse.reference.chapter}:{verse.reference.verseStart}
-                </strong>
-                <span> &mdash; {verse.text}</span>
-              </li>
-            ))}
+            {searchResults.map((verse) => {
+              const reference = formatScriptureReference(verse.reference);
+              return (
+                <li key={reference}>
+                  <strong>{reference}</strong>
+                  <span> &mdash; {verse.text}</span>
+                  <div className="live-brain__row">
+                    <button
+                      type="button"
+                      disabled={isBusy(`search-preview-${reference}`)}
+                      onClick={() =>
+                        withBusy(`search-preview-${reference}`, async () => {
+                          const preview = await commands.previewScripture(reference);
+                          setSearchPreviews((prev) => ({ ...prev, [reference]: preview }));
+                        })
+                      }
+                    >
+                      Preview
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!status?.service || isBusy(`search-prepare-${reference}`)}
+                      onClick={() =>
+                        withBusy(`search-prepare-${reference}`, async () => {
+                          await commands.createManualPresentation(reference);
+                        })
+                      }
+                    >
+                      Prepare
+                    </button>
+                  </div>
+                  {searchPreviews[reference] && <PreviewPane preview={searchPreviews[reference]} />}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
 
-      <section className="live-brain__panel">
+      <section className="live-brain__panel live-brain__panel--current-output">
         <h2>Current Output</h2>
-        <p className="live-brain__hint">Nothing projected. CIP never projects content automatically.</p>
+        {preparedItems.length === 0 ? (
+          <p className="live-brain__hint">NOTHING PREPARED &mdash; CIP never prepares or projects content automatically.</p>
+        ) : (
+          <ul className="live-brain__prepared-items">
+            {preparedItems.map((item) => (
+              <li key={item.id}>
+                <div className="live-brain__suggestion-header">
+                  <strong>{item.content.type === "scripture" ? item.content.reference : item.content.title}</strong>
+                  <span className="live-brain__status-dot">
+                    &#9679; PREPARED{item.sourceSuggestionId ? " (automatic)" : " (manual)"}
+                  </span>
+                </div>
+                {item.content.type === "scripture" && (
+                  <p className="live-brain__preview-heading">
+                    {item.content.text} <span className="live-brain__confidence">({item.content.translationId})</span>
+                  </p>
+                )}
+                <div className="live-brain__row">
+                  <button
+                    type="button"
+                    disabled={isBusy(`cancel-${item.id}`)}
+                    onClick={() =>
+                      withBusy(`cancel-${item.id}`, async () => {
+                        await commands.cancelPresentation(item.id);
+                      })
+                    }
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="live-brain__panel">
@@ -714,6 +846,24 @@ function AmbiguousCard({
   );
 }
 
+/** Renders a non-mutating [`PresentationPreview`] - the same real,
+ * `BibleProvider`-sourced text and deterministic template a prepared item
+ * would use, without persisting anything (section 14). */
+function PreviewPane({ preview }: { preview: PresentationPreview }) {
+  return (
+    <div className="live-brain__preview-pane">
+      <p className="live-brain__label">Preview &mdash; {preview.slide.template}</p>
+      <p className="live-brain__preview-heading">
+        <strong>{preview.slide.heading}</strong>
+      </p>
+      {preview.slide.bodyLines.map((line, i) => (
+        <p key={i}>{line}</p>
+      ))}
+      {preview.slide.footer && <p className="live-brain__confidence">{preview.slide.footer}</p>}
+    </div>
+  );
+}
+
 interface SuggestionGroupsProps {
   suggestions: Suggestion[];
   busy: string | null;
@@ -725,7 +875,8 @@ interface SuggestionGroupsProps {
   onApprove: (id: string) => void;
   onSaveEdit: (id: string) => void;
   onReject: (id: string) => void;
-  onPrepare: (id: string) => void;
+  onPreview: (id: string) => void;
+  previews: Record<string, PresentationPreview>;
 }
 
 /** Groups pending suggestions by confidence level (section 14) - high
@@ -769,11 +920,13 @@ function SuggestionCard({
   onApprove,
   onSaveEdit,
   onReject,
-  onPrepare,
+  onPreview,
+  previews,
 }: { suggestion: Suggestion } & Omit<SuggestionGroupsProps, "suggestions">) {
   const reference = suggestion.kind.type === "scripture" ? suggestion.kind.reference : suggestion.kind.label;
   const isEditing = editingId === suggestion.id;
   const confidencePercent = Math.round(suggestion.confidence.score * 100);
+  const preview = previews[suggestion.id];
 
   return (
     <li className="live-brain__suggestion-card">
@@ -795,7 +948,11 @@ function SuggestionCard({
           </div>
           {suggestion.sourceText && <p className="live-brain__source-text">&ldquo;{suggestion.sourceText}&rdquo;</p>}
           <div className="live-brain__row">
-            <button type="button" disabled={busy === `prepare-${suggestion.id}`} onClick={() => onPrepare(suggestion.id)}>
+            <button
+              type="button"
+              disabled={busy === `preview-${suggestion.id}`}
+              onClick={() => onPreview(suggestion.id)}
+            >
               Preview
             </button>
             <button type="button" disabled={busy === `approve-${suggestion.id}`} onClick={() => onApprove(suggestion.id)}>
@@ -808,8 +965,47 @@ function SuggestionCard({
               Ignore
             </button>
           </div>
+          {preview && <PreviewPane preview={preview} />}
         </>
       )}
+    </li>
+  );
+}
+
+/** An approved suggestion, not yet prepared (Phase 1.4) - "CURRENT
+ * SUGGESTION -> after approval, PRESENTATION with PREVIEW/PREPARE" from
+ * the workspace mockup. Never appears until the operator has explicitly
+ * approved it; disappears once prepared (see the `PresentationPrepared`
+ * event handler). */
+function ApprovedSuggestionCard({
+  suggestion,
+  busy,
+  preview,
+  onPreview,
+  onPrepare,
+}: {
+  suggestion: Suggestion;
+  busy: string | null;
+  preview: PresentationPreview | undefined;
+  onPreview: () => void;
+  onPrepare: () => void;
+}) {
+  const reference = suggestion.kind.type === "scripture" ? suggestion.kind.reference : suggestion.kind.label;
+  return (
+    <li className="live-brain__suggestion-card">
+      <div className="live-brain__suggestion-header">
+        <strong>{reference}</strong>
+        <span className="live-brain__confidence">Approved</span>
+      </div>
+      <div className="live-brain__row">
+        <button type="button" disabled={busy === `preview-${suggestion.id}`} onClick={onPreview}>
+          Preview
+        </button>
+        <button type="button" disabled={busy === `prepare-${suggestion.id}`} onClick={onPrepare}>
+          Prepare
+        </button>
+      </div>
+      {preview && <PreviewPane preview={preview} />}
     </li>
   );
 }

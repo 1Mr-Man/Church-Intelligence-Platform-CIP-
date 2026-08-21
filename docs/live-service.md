@@ -17,7 +17,11 @@ action - see "No automatic projection" below.
 automatic bullet extraction, a web research engine, online Bible
 fallback, content generation, the full presentation designer, OBS/vMix
 integration, cloud sync, remote operator accounts, a mobile app. See
-[`README.md`](../README.md) for the full phase boundary.
+[`README.md`](../README.md) for the full phase boundary. Phase 1.4 built
+the presentation preparation path (an approved suggestion or a manual
+reference through to real, persisted, prepared output) on top of the
+operator workflow this document describes, without changing any of it -
+see [`docs/presentation.md`](presentation.md).
 
 ## Service lifecycle
 

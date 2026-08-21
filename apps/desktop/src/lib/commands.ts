@@ -20,6 +20,7 @@ import type {
   BibleVerse,
   LiveStatus,
   PresentationItem,
+  PresentationPreview,
   ProcessedSegment,
   ScriptureContext,
   ServiceSession,
@@ -146,8 +147,49 @@ export function rejectSuggestion(suggestionId: string): Promise<Suggestion> {
   return invokeCommand("reject_suggestion", { suggestionId });
 }
 
+// --- presentation (Phase 1.4) ------------------------------------------------
+//
+// Preview is non-mutating and available before approval (see
+// `previewPresentation`/`previewScripture`); only `preparePresentation` and
+// `createManualPresentation` ever persist a presentation_items row, and
+// `preparePresentation` remains strictly gated on an approved suggestion -
+// see `docs/presentation.md`.
+
+/** Previews a suggestion's scripture reference - works on a still-`pending`
+ * suggestion, unlike `preparePresentation`. */
+export function previewPresentation(suggestionId: string): Promise<PresentationPreview> {
+  return invokeCommand("preview_presentation", { suggestionId });
+}
+
+/** Previews an arbitrary reference (e.g. from manual Bible search) with no
+ * suggestion involved. */
+export function previewScripture(reference: string): Promise<PresentationPreview> {
+  return invokeCommand("preview_scripture", { reference });
+}
+
 export function preparePresentation(suggestionId: string): Promise<PresentationItem> {
   return invokeCommand("prepare_presentation", { suggestionId });
+}
+
+/** Creates a prepared presentation item directly from a reference, with no
+ * suggestion or speech recognition involved - the manual fallback. */
+export function createManualPresentation(reference: string): Promise<PresentationItem> {
+  return invokeCommand("create_manual_presentation", { reference });
+}
+
+/** What's currently prepared for the active service (never includes
+ * cancelled items) - the Current Output panel's data source. */
+export function listPreparedPresentations(): Promise<PresentationItem[]> {
+  return invokeCommand("list_prepared_presentations");
+}
+
+export function getPresentationItem(itemId: string): Promise<PresentationItem> {
+  return invokeCommand("get_presentation_item", { itemId });
+}
+
+/** Cancels ("retracts") a still-prepared item before it's ever displayed. */
+export function cancelPresentation(itemId: string): Promise<PresentationItem> {
+  return invokeCommand("cancel_presentation", { itemId });
 }
 
 // --- ambiguity resolution & context correction (Phase 1.3) ----------------
