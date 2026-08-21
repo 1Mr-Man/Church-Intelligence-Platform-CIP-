@@ -29,10 +29,19 @@ pub enum SuggestionStatus {
 /// action (mirrored by the `SUGGESTION_APPROVED` / `SUGGESTION_EDITED` /
 /// `SUGGESTION_REJECTED` events) moves it out of that state - nothing in
 /// `core` auto-applies a suggestion on its own, regardless of confidence.
+///
+/// `service_id` scopes every suggestion to the live service it was
+/// produced during, matching `PresentationItem::service_id` and the
+/// `ai_suggestions.service_id` column already defined in the Phase 1.0
+/// schema (`database/migrations/0001_initial_schema.sql`) - the schema
+/// always expected this linkage; Phase 1.1 is the first caller that
+/// actually needs to construct a `Suggestion` from a live service, so it
+/// adds the field the schema already assumed existed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Suggestion {
     pub id: Uuid,
+    pub service_id: Uuid,
     pub kind: SuggestionKind,
     pub status: SuggestionStatus,
     pub confidence: ConfidenceResult,
@@ -40,9 +49,10 @@ pub struct Suggestion {
 }
 
 impl Suggestion {
-    pub fn new(kind: SuggestionKind, confidence: ConfidenceResult) -> Self {
+    pub fn new(service_id: Uuid, kind: SuggestionKind, confidence: ConfidenceResult) -> Self {
         Self {
             id: Uuid::new_v4(),
+            service_id,
             kind,
             status: SuggestionStatus::Pending,
             confidence,
@@ -59,6 +69,7 @@ mod tests {
     #[test]
     fn new_suggestions_always_start_pending() {
         let suggestion = Suggestion::new(
+            Uuid::new_v4(),
             SuggestionKind::Scripture {
                 reference: "ROM 8:28".into(),
             },

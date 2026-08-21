@@ -25,7 +25,7 @@ mod tests {
         let verse_count: i64 = conn
             .query_row("SELECT count(*) FROM bible_verses", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(verse_count, 3);
+        assert_eq!(verse_count, 6);
 
         let text: String = conn
             .query_row(

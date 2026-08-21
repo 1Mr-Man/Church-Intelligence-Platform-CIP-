@@ -384,6 +384,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "cip-core-confidence",
+ "regex",
  "serde",
  "thiserror 2.0.20",
 ]
@@ -433,6 +434,9 @@ name = "cip-core-service"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "cip-core-ai",
+ "cip-core-bible",
+ "cip-core-confidence",
  "serde",
  "thiserror 2.0.20",
  "uuid",

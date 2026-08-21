@@ -12,3 +12,6 @@ serde.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 thiserror.workspace = true
+cip-core-bible.workspace = true
+cip-core-ai.workspace = true
+cip-core-confidence.workspace = true

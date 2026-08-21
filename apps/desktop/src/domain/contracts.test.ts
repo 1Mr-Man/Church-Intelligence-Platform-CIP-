@@ -35,6 +35,7 @@ describe("domain contracts", () => {
     const confidence: ConfidenceResult = { score: 0.92, level: "high", source: "heuristic", reason: null };
     const suggestion: Suggestion = {
       id: "00000000-0000-0000-0000-000000000001",
+      serviceId: "00000000-0000-0000-0000-000000000002",
       kind: { type: "scripture", reference: "ROM 8:28" },
       status: "pending",
       confidence,

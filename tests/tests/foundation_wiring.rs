@@ -37,6 +37,7 @@ fn a_scripture_reference_flows_from_provider_to_rendered_presentation_item() {
 
     // AI domain: wrap the detection in a Suggestion, starting Pending.
     let mut suggestion = Suggestion::new(
+        session.id,
         SuggestionKind::Scripture {
             reference: reference.to_string(),
         },

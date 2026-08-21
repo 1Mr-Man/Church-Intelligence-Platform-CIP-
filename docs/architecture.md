@@ -39,7 +39,7 @@ not replace the operator's judgment.
 
 | Crate                  | Owns                                                             |
 | ------------------------ | ------------------------------------------------------------------ |
-| `core/bible`            | `BibleProvider`, `ScriptureReference`, the Scripture Context Manager interface (see below) |
+| `core/bible`            | `BibleProvider`, `ScriptureReference`, text normalization, reference detection, the Scripture Context Manager (see below) |
 | `core/service`          | `ServiceSession` lifecycle, `AudioEngine` capture contract        |
 | `core/ai`               | `SpeechEngine` transcription contract, `Suggestion`                |
 | `core/presentation`     | `PresentationItem` - *what* is shown, not how it's rendered       |
@@ -70,23 +70,25 @@ composes `ServiceSession` state that other domains reference by id
   `NullRenderer`. `presentation/templates` and `presentation/outputs` are
   reserved directories for the future presentation designer.
 
-## Scripture Context Manager
+## Bible Intelligence Core & Scripture Context Manager
 
-Interface boundary only in Phase 1 (`core/bible::ScriptureContextManager`,
-`core/bible/src/context.rs`) - no resolution algorithm is implemented yet.
-Planned behavior:
+Implemented in Phase 1.1: `core/bible::ScriptureContextManager`'s interface
+boundary (established in Phase 1.0) now has a real implementation,
+`DefaultScriptureContextManager`, and `core/service`'s
+`process_transcript_segment` composes it with detection, `BibleProvider`
+validation, and `Suggestion` creation into the full transcript-to-suggestion
+pipeline:
 
 ```
-Pastor: "Romans 8"            -> ACTIVE SCRIPTURE CONTEXT = Romans 8
+Pastor: "Turn with me to Romans chapter 8." -> ACTIVE SCRIPTURE CONTEXT = Romans 8
 Pastor: "verse 28"             -> resolves to Romans 8:28
 Pastor: "verse 31"              -> resolves to Romans 8:31
 Pastor: "go back to verse 18"   -> resolves to Romans 8:18
 ```
 
-The eventual implementation must support: a persistent short-lived active
-context, a bounded history of recent references, a confidence score per
-resolution, context replacement (a new chapter reference supersedes the
-old one), and ambiguity handling (more than one candidate resolution).
+See [`docs/bible-intelligence.md`](bible-intelligence.md) for the full
+pipeline, the context model, ambiguity handling, and the transcript test
+harness that stands in for a real `SpeechEngine` until Phase 1.2.
 
 ## Event architecture
 

@@ -11,4 +11,5 @@ repository.workspace = true
 serde.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
+regex.workspace = true
 cip-core-confidence.workspace = true

@@ -39,10 +39,12 @@ confidence-score columns, JSON payload columns). The Phase 1 tables:
 
 ## Seed data
 
-`database/seeds/dev_seed.sql` inserts one Bible translation (KJV) and three
-verses (John 3:16, Romans 8:28, Romans 8:31) plus one sample service -
-enough to validate the schema and query layer end to end. It is **not** a
-full Bible dataset, and it is never applied automatically in `production`;
+`database/seeds/dev_seed.sql` inserts one Bible translation (KJV), six
+verses (John 3:16 and Romans 8:18, 28, 29, 30, 31 - enough to exercise the
+Bible Intelligence Core's context/sequential-verse behavior, see
+[`docs/bible-intelligence.md`](bible-intelligence.md)), and one sample
+service. It is **not** a full Bible dataset, and it is never applied
+automatically in `production`;
 in `development`/`test` the app shell applies it once, on first launch,
 guarded by a check that `bible_translations` is empty (see `lib.rs`'s
 `setup` hook) so re-launching the app doesn't try to re-insert it.

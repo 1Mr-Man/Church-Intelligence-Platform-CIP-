@@ -4,7 +4,8 @@ CIP is a desktop application that assists a live church service: as
 scripture is spoken, it detects the reference, brings up the verse text,
 and queues it for presentation - reviewed and approved by a human operator,
 never auto-applied. It is being built in phases; this repository currently
-contains **Phase 1 - Foundation** only.
+contains **Phase 1 - Foundation** and **Phase 1.1 - Bible Intelligence
+Core**.
 
 ## Approved architecture
 
@@ -23,22 +24,35 @@ contains **Phase 1 - Foundation** only.
   provider/adaptor traits (`integrations/*`).
 
 See [`docs/architecture.md`](docs/architecture.md) for the full picture,
-[`docs/development.md`](docs/development.md) to get running locally, and
-[`docs/database.md`](docs/database.md) for the SQLite/migration story.
+[`docs/bible-intelligence.md`](docs/bible-intelligence.md) for the
+transcript-to-suggestion pipeline, [`docs/development.md`](docs/development.md)
+to get running locally, and [`docs/database.md`](docs/database.md) for the
+SQLite/migration story.
 
-## What Phase 1 is (and isn't)
+## What's implemented (and what isn't)
 
-Phase 1 establishes the application skeleton: the desktop shell, the
-domain-oriented crate layout, the local SQLite schema and migration system,
-typed domain contracts (`BibleProvider`, `AudioEngine`, `SpeechEngine`,
-`SearchEngine`, `Suggestion`, `PresentationItem`, `ServiceSession`,
-`ConfidenceResult`), the event architecture, configuration, logging, and
-the Scripture Context Manager's interface boundary.
+**Phase 1 (Foundation)** established the application skeleton: the desktop
+shell, the domain-oriented crate layout, the local SQLite schema and
+migration system, typed domain contracts (`BibleProvider`, `AudioEngine`,
+`SpeechEngine`, `SearchEngine`, `Suggestion`, `PresentationItem`,
+`ServiceSession`, `ConfidenceResult`), the event architecture,
+configuration, logging, and the Scripture Context Manager's interface
+boundary.
 
-It deliberately does **not** implement: the Bible Intelligence Engine
-(beyond a handful of seed verses to validate the schema), speech
-recognition, song recognition, sermon intelligence, cloud sync, OBS/vMix
-integration, or the full presentation designer. Those are later phases.
+**Phase 1.1 (Bible Intelligence Core)** implemented that interface
+boundary for real: transcript text normalization, deterministic scripture
+reference detection, the `ScriptureContextManager` (so "verse 28" resolves
+against whatever chapter the pastor named, even across unrelated
+intervening speech), Bible-validated reference resolution, confidence
+scoring, and `Suggestion` creation - all driven by a deterministic
+transcript-input test harness, with no real audio or speech model
+involved. See [`docs/bible-intelligence.md`](docs/bible-intelligence.md).
+
+Still deliberately **not** implemented: real speech recognition (no
+Whisper or other backend - `ai/speech` still ships only a
+`NullSpeechEngine`), song recognition, sermon intelligence, cloud sync,
+OBS/vMix integration, and the full presentation designer. Those are later
+phases.
 
 ## Repository layout
 
@@ -48,7 +62,7 @@ apps/desktop/          Tauri + React + TypeScript desktop application
   src-tauri/            Rust backend (Tauri commands, app shell)
 
 core/                  Domain logic and contracts, one crate per domain
-  bible/               BibleProvider + Scripture Context Manager interface
+  bible/               BibleProvider, text normalization, reference detection, Scripture Context Manager
   music/                (placeholder - Phase 2+)
   sermon/               (placeholder - Phase 2+)
   service/              ServiceSession + AudioEngine

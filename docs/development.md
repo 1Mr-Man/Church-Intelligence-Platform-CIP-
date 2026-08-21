@@ -37,7 +37,9 @@ Run from the repository root unless noted.
 | `pnpm --filter @cip/desktop lint`                     | Lint the frontend (oxlint)                                 |
 | `cargo check --workspace`                             | Type-check every Rust crate                                |
 | `cargo test --workspace`                               | Run every Rust unit + integration test                     |
-| `cargo test -p cip-integration-tests`                  | Run only the cross-domain foundation wiring test          |
+| `cargo test -p cip-integration-tests`                  | Run cross-domain tests, including the Bible Intelligence Core acceptance test |
+| `cargo test -p cip-core-bible`                          | Run normalization/detection/context-manager unit tests    |
+| `cargo test -p cip-core-service`                        | Run the Bible Intelligence Core orchestrator's unit tests  |
 | `cargo test -p cip-database`                           | Run only the migration/seed tests                          |
 | `cargo fmt --all`                                       | Format all Rust code                                        |
 
@@ -63,17 +65,24 @@ Test coverage by layer:
 
 - **Rust unit tests** live next to the code they test (`#[cfg(test)] mod tests`
   in each crate) - e.g. `core/confidence/src/lib.rs` tests the
-  low/medium/high bucketing, `core/bible/src/context.rs` proves the
-  Scripture Context Manager trait is object-safe and wireable.
+  low/medium/high bucketing, `core/bible/src/detection.rs` tests reference
+  detection shapes, `core/bible/src/context_manager.rs` tests the real
+  Scripture Context Manager (replacement, ambiguity, bounded history), and
+  `core/service/src/bible_intelligence.rs` tests the full orchestrator
+  against an in-memory `BibleProvider` - see
+  [`docs/bible-intelligence.md`](bible-intelligence.md) for what each of
+  these covers.
 - **Database/migration tests** (`database/src/migrations.rs`,
   `database/src/seed.rs`) prove migrations are idempotent and that all ten
   Phase 1 tables exist after running them.
-- **Cross-crate integration tests** (`tests/tests/foundation_wiring.rs`)
-  prove the domains actually compose: a `ServiceSession` is started, a
-  verse is resolved through the real SQLite-backed `BibleProvider`,
-  wrapped in a `Suggestion`, approved into a `PresentationItem`, and handed
-  to a `Renderer` - crossing every domain boundary using only public
-  contracts.
+- **Cross-crate integration tests** (`tests/tests/foundation_wiring.rs`,
+  `tests/tests/bible_intelligence_acceptance.rs`) prove the domains
+  actually compose against the real SQLite-backed `BibleProvider`: a
+  `ServiceSession` is started, verses are resolved and wrapped in
+  `Suggestion`s, one is approved into a `PresentationItem` and handed to a
+  `Renderer`, and a realistic multi-segment pastoral-speech sequence
+  (Romans 8 -> several unrelated segments -> verse 28/31/18 -> John 3 ->
+  verse 16) resolves deterministically end to end.
 - **Frontend/type tests** (`apps/desktop/src/**/*.test.ts`, run via
   `pnpm --filter @cip/desktop test`) cover the TypeScript mirrors of the
   Rust domain contracts and the event name registry; `tsc -b` is the type

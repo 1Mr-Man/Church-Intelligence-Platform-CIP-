@@ -36,6 +36,7 @@ export type SuggestionKind =
  */
 export interface Suggestion {
   id: string;
+  serviceId: string;
   kind: SuggestionKind;
   status: SuggestionStatus;
   confidence: ConfidenceResult;

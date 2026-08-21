@@ -25,8 +25,14 @@ INSERT INTO bible_verses (translation_id, book_code, chapter_number, verse_numbe
 VALUES
     ('KJV', 'JHN', 3, 16,
      'For God so loved the world, that he gave his only begotten Son, that whosoever believeth in him should not perish, but have everlasting life.'),
+    ('KJV', 'ROM', 8, 18,
+     'For I reckon that the sufferings of this present time are not worthy to be compared with the glory which shall be revealed in us.'),
     ('KJV', 'ROM', 8, 28,
      'And we know that all things work together for good to them that love God, to them who are the called according to his purpose.'),
+    ('KJV', 'ROM', 8, 29,
+     'For whom he did foreknow, he also did predestinate to be conformed to the image of his Son, that he might be the firstborn among many brethren.'),
+    ('KJV', 'ROM', 8, 30,
+     'Moreover whom he did predestinate, them he also called: and whom he called, them he also justified: and whom he justified, them he also glorified.'),
     ('KJV', 'ROM', 8, 31,
      'What shall we then say to these things? If God be for us, who can be against us?');
 
