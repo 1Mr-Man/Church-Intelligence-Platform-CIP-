@@ -12,6 +12,12 @@ use cip_core_bible::{
 use rusqlite::{params, Connection, OptionalExtension};
 use std::sync::Mutex;
 
+pub mod importer;
+pub use importer::{
+    import_bible_dataset, BibleDatasetInput, ImportError, ImportReport, TranslationInput,
+    VerseInput,
+};
+
 pub struct SqliteBibleProvider {
     conn: Mutex<Connection>,
 }
@@ -187,6 +193,29 @@ impl BibleProvider for SqliteBibleProvider {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| BibleProviderError::Storage(e.to_string()));
         rows
+    }
+
+    fn list_chapters(
+        &self,
+        translation_id: &str,
+        book_code: &str,
+    ) -> Result<Vec<u32>, BibleProviderError> {
+        let conn = self
+            .conn
+            .lock()
+            .expect("bible provider connection poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT chapter_number FROM bible_chapters
+                 WHERE translation_id = ?1 AND book_code = ?2
+                 ORDER BY chapter_number",
+            )
+            .map_err(|e| BibleProviderError::Storage(e.to_string()))?;
+        let rows = stmt
+            .query_map(params![translation_id, book_code], |row| row.get(0))
+            .map_err(|e| BibleProviderError::Storage(e.to_string()))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| BibleProviderError::Storage(e.to_string()))
     }
 }
 

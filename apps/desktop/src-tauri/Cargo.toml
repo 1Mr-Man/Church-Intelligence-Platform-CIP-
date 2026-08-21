@@ -29,6 +29,8 @@ tauri-plugin-log = "2"
 
 cip-database.workspace = true
 cip-core-bible.workspace = true
+cip-core-content.workspace = true
+cip-integrations-content.workspace = true
 cip-core-ai.workspace = true
 cip-core-service.workspace = true
 cip-core-confidence.workspace = true

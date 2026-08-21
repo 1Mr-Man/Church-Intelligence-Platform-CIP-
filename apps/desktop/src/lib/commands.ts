@@ -16,8 +16,12 @@ import { invoke } from "@tauri-apps/api/core";
 import type { AppConfig, AppEnvironment } from "../config/appConfig";
 import type {
   AudioDevice,
+  BibleSearchResult,
   BibleTranslation,
-  BibleVerse,
+  ContentMetadata,
+  ContentType,
+  ImportReport,
+  IntegrityReport,
   LiveStatus,
   PresentationItem,
   PresentationPreview,
@@ -222,8 +226,42 @@ export function correctScriptureContext(book: string, chapter: number): Promise<
 
 // --- manual Bible search (works with no audio/speech/network) ---------------
 
-export function searchBible(query: string): Promise<BibleVerse[]> {
-  return invokeCommand("search_bible", { query });
+/** `translationId` defaults to the app's default translation
+ * (`DEFAULT_TRANSLATION_ID` on the Rust side) when omitted. Dispatches to
+ * an exact reference/chapter/range lookup or a free-text search - see
+ * `cip_core_bible::search::search_bible`'s docs. */
+export function searchBible(query: string, translationId?: string): Promise<BibleSearchResult[]> {
+  return invokeCommand("search_bible", { query, translationId: translationId ?? null });
+}
+
+// --- content registry (Phase 1.5) --------------------------------------------
+//
+// What local content exists, and under what license/version - see
+// `docs/content-registry.md`. Disabled content never appears in
+// `listBibleTranslations`'s result but is never deleted.
+
+export function listContentRegistry(contentType?: ContentType): Promise<ContentMetadata[]> {
+  return invokeCommand("list_content_registry", { contentType: contentType ?? null });
+}
+
+export function getContentMetadata(contentId: string): Promise<ContentMetadata> {
+  return invokeCommand("get_content_metadata", { contentId });
+}
+
+export function setContentEnabled(contentId: string, enabled: boolean): Promise<ContentMetadata> {
+  return invokeCommand("set_content_enabled", { contentId, enabled });
+}
+
+/** `datasetJson` is the dataset file's contents, already read as text by
+ * the frontend (e.g. via `FileReader`) - this never asks the backend to
+ * touch the filesystem itself. See `docs/bible-datasets.md` for the
+ * expected JSON shape (`BibleDatasetInput`). */
+export function importBibleDataset(datasetJson: string): Promise<ImportReport> {
+  return invokeCommand("import_bible_dataset", { datasetJson });
+}
+
+export function checkBibleDatasetIntegrity(translationId: string): Promise<IntegrityReport> {
+  return invokeCommand("check_bible_dataset_integrity", { translationId });
 }
 
 // --- live status --------------------------------------------------------------

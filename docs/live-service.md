@@ -21,7 +21,17 @@ integration, cloud sync, remote operator accounts, a mobile app. See
 the presentation preparation path (an approved suggestion or a manual
 reference through to real, persisted, prepared output) on top of the
 operator workflow this document describes, without changing any of it -
-see [`docs/presentation.md`](presentation.md).
+see [`docs/presentation.md`](presentation.md). Phase 1.5 built the
+content/dataset foundation underneath the whole pipeline - the Content
+Registry, the Bible dataset importer/integrity checker, verse-range
+retrieval, and local search - and ran a realistic scripted service through
+this exact operator workflow (context retention, context replacement,
+false-positive protection, operator override, dataset-validation
+authority) end to end, again without changing the service lifecycle,
+timeline, or suggestion workflow this document describes - see
+[`docs/content-registry.md`](content-registry.md),
+[`docs/bible-datasets.md`](bible-datasets.md), and
+[`docs/full-service-validation.md`](full-service-validation.md).
 
 ## Service lifecycle
 

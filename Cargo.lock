@@ -472,6 +472,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cip-core-content"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "cip-core-music"
 version = "0.1.0"
 dependencies = [
@@ -534,11 +543,13 @@ dependencies = [
  "cip-core-ai",
  "cip-core-bible",
  "cip-core-confidence",
+ "cip-core-content",
  "cip-core-presentation",
  "cip-core-service",
  "cip-database",
  "cip-integrations-audio",
  "cip-integrations-bible",
+ "cip-integrations-content",
  "cip-presentation-renderer",
  "log",
  "rusqlite",
@@ -582,6 +593,18 @@ name = "cip-integrations-bible"
 version = "0.1.0"
 dependencies = [
  "cip-core-bible",
+ "cip-database",
+ "rusqlite",
+ "serde",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "cip-integrations-content"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "cip-core-content",
  "cip-database",
  "rusqlite",
 ]

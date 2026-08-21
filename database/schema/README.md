@@ -18,6 +18,7 @@ here is executed automatically.
 | `ai_suggestions`       | AI-produced suggestions of any kind, pending human review.           |
 | `presentation_items`   | Queued/active/stopped items in the presentation queue.                |
 | `audit_events`         | Append-only log of domain events, categorized (see logging docs).    |
+| `content_registry`     | One row per locally-installed content item (Bible today), with provenance/licensing metadata and enabled/disabled status (Phase 1.5, see `docs/content-registry.md`). |
 
 ## Conventions
 

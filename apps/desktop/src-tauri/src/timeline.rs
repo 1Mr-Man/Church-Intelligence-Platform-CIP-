@@ -54,6 +54,13 @@ fn category_str(category: LogCategory) -> &'static str {
         LogCategory::Bible => "bible",
         LogCategory::Ai => "ai",
         LogCategory::Presentation => "presentation",
+        // `audit_events.category`'s CHECK constraint (migration 0001) has
+        // no `'content'` value and nothing here writes a Content Registry
+        // timeline entry (it's app-level content management, not a
+        // service-scoped event) - mapped to the closest existing bucket
+        // rather than an additive migration for a category with no
+        // current caller.
+        LogCategory::Content => "app",
         LogCategory::Network => "network",
         LogCategory::Security => "security",
         LogCategory::Error => "error",

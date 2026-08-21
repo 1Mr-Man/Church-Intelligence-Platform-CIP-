@@ -39,7 +39,8 @@ not replace the operator's judgment.
 
 | Crate                  | Owns                                                             |
 | ------------------------ | ------------------------------------------------------------------ |
-| `core/bible`            | `BibleProvider`, `ScriptureReference`, text normalization, reference detection, the Scripture Context Manager (see below) |
+| `core/bible`            | `BibleProvider`, `ScriptureReference`, text normalization, reference detection, verse-range retrieval, local search, the dataset integrity checker, the Scripture Context Manager (see below) |
+| `core/content`          | `ContentRegistry` - what local content exists, and its provenance/licensing (Phase 1.5) |
 | `core/service`          | `ServiceSession` lifecycle, `AudioEngine` capture contract        |
 | `core/ai`               | `SpeechEngine` transcription contract, `Suggestion`                |
 | `core/presentation`     | `PresentationItem` - *what* is shown, not how it's rendered       |
@@ -56,9 +57,15 @@ composes `ServiceSession` state that other domains reference by id
 
 - `integrations/bible` - Phase 1 ships one `BibleProvider`: a local
   SQLite-backed implementation (`SqliteBibleProvider`), proving the
-  contract end to end. `integrations/music`, `integrations/web`,
-  `integrations/obs`, `integrations/vmix` are placeholders for later
-  phases.
+  contract end to end. Phase 1.5 adds the reusable local Bible dataset
+  importer alongside it (`import_bible_dataset`) - see
+  [`docs/bible-datasets.md`](bible-datasets.md). `integrations/music`,
+  `integrations/web`, `integrations/obs`, `integrations/vmix` are
+  placeholders for later phases.
+- `integrations/content` - Phase 1.5's one `ContentRegistry`
+  implementation, `SqliteContentRegistry`, mirroring
+  `integrations/bible`'s shape. See
+  [`docs/content-registry.md`](content-registry.md).
 - `integrations/audio` - Phase 1.2's `AudioEngine` implementation
   (`CpalAudioEngine`, over the cross-platform `cpal` crate).
 - `ai/speech`, `ai/embeddings`, `ai/classifiers` - AI backend
@@ -110,7 +117,13 @@ an approved suggestion to a real, prepared presentation output - real
 local Bible text, a deterministic renderer, and separate preview/prepare
 actions - again without changing the Bible Intelligence Core, the
 detection pipeline, or the operator approval boundary; see
-[`docs/presentation.md`](presentation.md).
+[`docs/presentation.md`](presentation.md). Phase 1.5 builds the content/
+dataset foundation underneath all of the above - the Content Registry,
+the Bible dataset importer/integrity checker, verse-range retrieval, and
+local search - again without changing the Bible Intelligence Core's own
+detection/context/resolution behavior; see
+[`docs/bible-datasets.md`](bible-datasets.md) and
+[`docs/content-registry.md`](content-registry.md).
 
 ## Event architecture
 
@@ -159,10 +172,10 @@ credential storage, out of scope for Phase 1.
 
 ## Logging & error handling
 
-Every log call site logs against one of ten categories
+Every log call site logs against one of eleven categories
 (`apps/desktop/src-tauri/src/logging.rs::LogCategory`): `App`, `Database`,
-`Audio`, `Speech`, `Bible`, `Ai`, `Presentation`, `Network`, `Security`,
-`Error`. `apps/desktop/src-tauri/src/errors.rs::AppError` is the single
+`Audio`, `Speech`, `Bible`, `Ai`, `Presentation`, `Content`, `Network`,
+`Security`, `Error`. `apps/desktop/src-tauri/src/errors.rs::AppError` is the single
 error type every Tauri command returns; it wraps each domain's own error
 type and knows which category it belongs to, so command dispatch logs
 consistently before the error crosses the IPC boundary.
@@ -172,7 +185,12 @@ consistently before the error crosses the IPC boundary.
 - `core/*` crates depend on `cip-core-confidence` and (for `core/service`,
   `core/ai`, `core/presentation`) each other's public types by id
   reference, never on `integrations/*`, `ai/*`, `presentation/renderer`,
-  `database`, or `tauri`.
+  `database`, or `tauri`. `core/content` follows the same rule - it
+  defines `ContentRegistry` and `ContentMetadata` with no dependency on
+  `core/bible` or any other domain; the `"bible:<id>"` naming convention
+  that links a Bible translation to its registry entry lives in the
+  composition layer (`apps/desktop/src-tauri/src/content.rs`), not in
+  either domain crate.
 - `integrations/*` and `ai/*` depend on `core/*` (to implement its
   traits) and on `database` where they need storage - never the reverse.
 - `apps/desktop/src-tauri` is the only crate allowed to depend on `tauri`

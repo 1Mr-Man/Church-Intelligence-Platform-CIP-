@@ -17,6 +17,7 @@
 use crate::config::AppConfig;
 use cip_core_ai::SpeechEngine;
 use cip_core_bible::{BibleProvider, DefaultScriptureContextManager};
+use cip_core_content::ContentRegistry;
 use cip_core_service::{AudioEngine, ServiceSession};
 use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
@@ -31,6 +32,13 @@ pub struct AppState {
     pub config: AppConfig,
     pub db: Mutex<rusqlite::Connection>,
     pub bible_provider: Box<dyn BibleProvider>,
+    /// What local content exists (Phase 1.5) - a translation's own text
+    /// still comes from `bible_provider`; this answers "what's
+    /// installed, and under what license/version" (see
+    /// `docs/content-registry.md`). Its own connection, like
+    /// `bible_provider`'s, for the same reason: an independent read path
+    /// that never contends with the primary `db` mutex.
+    pub content_registry: Box<dyn ContentRegistry>,
     pub context_manager: Mutex<DefaultScriptureContextManager>,
     pub audio_engine: Mutex<Box<dyn AudioEngine>>,
     pub speech_engine: Mutex<Box<dyn SpeechEngine>>,
@@ -56,6 +64,7 @@ impl AppState {
         config: AppConfig,
         db: rusqlite::Connection,
         bible_provider: Box<dyn BibleProvider>,
+        content_registry: Box<dyn ContentRegistry>,
         audio_engine: Box<dyn AudioEngine>,
         speech_engine: Box<dyn SpeechEngine>,
     ) -> Self {
@@ -63,6 +72,7 @@ impl AppState {
             config,
             db: Mutex::new(db),
             bible_provider,
+            content_registry,
             context_manager: Mutex::new(DefaultScriptureContextManager::new(
                 DEFAULT_TRANSLATION_ID,
             )),

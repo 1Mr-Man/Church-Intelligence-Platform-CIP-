@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   AudioDevice,
-  BibleVerse,
+  BibleSearchResult,
+  BibleTranslation,
+  ContentMetadata,
+  ImportReport,
+  IntegrityReport,
   LiveStatus,
   PresentationItem,
   PresentationPreview,
@@ -13,7 +17,6 @@ import type {
   TimelineEntry,
   TranscriptSegment,
 } from "../domain";
-import { formatScriptureReference } from "../domain/bible";
 import * as commands from "../lib/commands";
 import * as liveEvents from "../lib/liveEvents";
 import { formatClockTime } from "../lib/format";
@@ -78,7 +81,15 @@ export function LiveChurchBrain() {
   const [selectedDevice, setSelectedDevice] = useState("");
   const [manualText, setManualText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<BibleVerse[]>([]);
+  const [searchResults, setSearchResults] = useState<BibleSearchResult[]>([]);
+  const [translations, setTranslations] = useState<BibleTranslation[]>([]);
+  const [searchTranslation, setSearchTranslation] = useState("");
+  // Content Registry (Phase 1.5) - not service-scoped, so this loads once
+  // on mount and refreshes after any action that changes it.
+  const [contentItems, setContentItems] = useState<ContentMetadata[]>([]);
+  const [integrityByTranslation, setIntegrityByTranslation] = useState<Record<string, IntegrityReport>>({});
+  const [importResult, setImportResult] = useState<ImportReport | null>(null);
+  const [importFileName, setImportFileName] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -104,6 +115,23 @@ export function LiveChurchBrain() {
   useEffect(() => {
     commands.listAudioDevices().then(setDevices).catch(() => {});
   }, [status?.audioStatus]);
+
+  // Enabled Bible translations (Phase 1.5) - populates the search
+  // translation selector. Disabled content is already excluded by the
+  // backend (see `list_bible_translations`), so every entry here is
+  // selectable.
+  useEffect(() => {
+    commands.listBibleTranslations().then(setTranslations).catch(() => {});
+  }, []);
+
+  const refreshContentRegistry = useCallback(() => {
+    commands.listContentRegistry().then(setContentItems).catch(() => {});
+    commands.listBibleTranslations().then(setTranslations).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshContentRegistry();
+  }, [refreshContentRegistry]);
 
   const activeServiceId = status?.service?.id;
   useEffect(() => {
@@ -648,15 +676,30 @@ export function LiveChurchBrain() {
             ref={searchInputRef}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="e.g. Romans 8:28"
+            placeholder="e.g. Romans 8:28, Romans 8, or a phrase"
             aria-label="Bible search query"
           />
+          <select
+            value={searchTranslation}
+            onChange={(e) => setSearchTranslation(e.target.value)}
+            aria-label="Search translation"
+          >
+            {translations.length === 0 ? (
+              <option value="">Default translation</option>
+            ) : (
+              translations.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))
+            )}
+          </select>
           <button
             type="button"
             disabled={!searchQuery.trim() || isBusy("search")}
             onClick={() =>
               withBusy("search", async () => {
-                const results = await commands.searchBible(searchQuery.trim());
+                const results = await commands.searchBible(searchQuery.trim(), searchTranslation || undefined);
                 setSearchResults(results);
               })
             }
@@ -666,41 +709,39 @@ export function LiveChurchBrain() {
         </div>
         {searchResults.length > 0 && (
           <ul className="live-brain__search-results">
-            {searchResults.map((verse) => {
-              const reference = formatScriptureReference(verse.reference);
-              return (
-                <li key={reference}>
-                  <strong>{reference}</strong>
-                  <span> &mdash; {verse.text}</span>
-                  <div className="live-brain__row">
-                    <button
-                      type="button"
-                      disabled={isBusy(`search-preview-${reference}`)}
-                      onClick={() =>
-                        withBusy(`search-preview-${reference}`, async () => {
-                          const preview = await commands.previewScripture(reference);
-                          setSearchPreviews((prev) => ({ ...prev, [reference]: preview }));
-                        })
-                      }
-                    >
-                      Preview
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!status?.service || isBusy(`search-prepare-${reference}`)}
-                      onClick={() =>
-                        withBusy(`search-prepare-${reference}`, async () => {
-                          await commands.createManualPresentation(reference);
-                        })
-                      }
-                    >
-                      Prepare
-                    </button>
-                  </div>
-                  {searchPreviews[reference] && <PreviewPane preview={searchPreviews[reference]} />}
-                </li>
-              );
-            })}
+            {searchResults.map((result) => (
+              <li key={`${result.translationId}-${result.reference}`}>
+                <strong>{result.reference}</strong>
+                <span className="live-brain__confidence"> ({result.translationId})</span>
+                <span> &mdash; {result.text}</span>
+                <div className="live-brain__row">
+                  <button
+                    type="button"
+                    disabled={isBusy(`search-preview-${result.reference}`)}
+                    onClick={() =>
+                      withBusy(`search-preview-${result.reference}`, async () => {
+                        const preview = await commands.previewScripture(result.reference);
+                        setSearchPreviews((prev) => ({ ...prev, [result.reference]: preview }));
+                      })
+                    }
+                  >
+                    Preview
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!status?.service || isBusy(`search-prepare-${result.reference}`)}
+                    onClick={() =>
+                      withBusy(`search-prepare-${result.reference}`, async () => {
+                        await commands.createManualPresentation(result.reference);
+                      })
+                    }
+                  >
+                    Prepare
+                  </button>
+                </div>
+                {searchPreviews[result.reference] && <PreviewPane preview={searchPreviews[result.reference]} />}
+              </li>
+            ))}
           </ul>
         )}
       </section>
@@ -741,6 +782,135 @@ export function LiveChurchBrain() {
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="live-brain__panel">
+        <h2>
+          Content Registry{" "}
+          <button type="button" onClick={refreshContentRegistry}>
+            Refresh
+          </button>
+        </h2>
+        <p className="live-brain__hint">
+          Installed local content. Copyrighted Bible datasets are never downloaded automatically - only content the
+          user explicitly imports, with honestly-recorded (or UNKNOWN) licensing.
+        </p>
+        {contentItems.length === 0 ? (
+          <p className="live-brain__hint">No content registered.</p>
+        ) : (
+          <ul className="live-brain__content-items">
+            {contentItems.map((item) => {
+              const translationId = item.id.startsWith("bible:") ? item.id.slice("bible:".length) : null;
+              const integrity = translationId ? integrityByTranslation[translationId] : undefined;
+              return (
+                <li key={item.id}>
+                  <div className="live-brain__suggestion-header">
+                    <strong>{item.name}</strong>
+                    <span className="live-brain__confidence">
+                      {item.status === "enabled" ? "● ENABLED" : "○ DISABLED"}
+                    </span>
+                  </div>
+                  <p className="live-brain__hint">
+                    {item.contentType} &middot; {item.language} &middot; version {item.version} &middot; publisher:{" "}
+                    {item.publisher ?? "UNKNOWN"} &middot; license: {item.license ?? "UNKNOWN"} &middot; distribution:{" "}
+                    {item.distribution ?? "UNKNOWN"}
+                  </p>
+                  {integrity && (
+                    <p className="live-brain__hint">
+                      Integrity: {integrity.status.toUpperCase()} ({integrity.booksPresent}/{integrity.booksExpected}{" "}
+                      books, {integrity.versesChecked} verses checked
+                      {integrity.issues.length > 0 ? `, ${integrity.issues.length} issue(s)` : ""})
+                    </p>
+                  )}
+                  <div className="live-brain__row">
+                    <button
+                      type="button"
+                      disabled={isBusy(`content-toggle-${item.id}`)}
+                      onClick={() =>
+                        withBusy(`content-toggle-${item.id}`, async () => {
+                          await commands.setContentEnabled(item.id, item.status !== "enabled");
+                          refreshContentRegistry();
+                        })
+                      }
+                    >
+                      {item.status === "enabled" ? "Disable" : "Enable"}
+                    </button>
+                    {translationId && (
+                      <button
+                        type="button"
+                        disabled={isBusy(`content-integrity-${item.id}`)}
+                        onClick={() =>
+                          withBusy(`content-integrity-${item.id}`, async () => {
+                            const report = await commands.checkBibleDatasetIntegrity(translationId);
+                            setIntegrityByTranslation((prev) => ({ ...prev, [translationId]: report }));
+                          })
+                        }
+                      >
+                        Check Integrity
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        <details className="live-brain__manual-entry">
+          <summary>Import a Bible dataset</summary>
+          <p className="live-brain__hint">
+            Select a local JSON file (see docs/bible-datasets.md for the format). The file is read in the browser -
+            nothing is downloaded, and the backend never touches the filesystem itself.
+          </p>
+          <div className="live-brain__row">
+            <input
+              type="file"
+              accept="application/json"
+              aria-label="Bible dataset file"
+              disabled={isBusy("import-dataset")}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const text = typeof reader.result === "string" ? reader.result : "";
+                  void withBusy("import-dataset", async () => {
+                    const report = await commands.importBibleDataset(text);
+                    setImportResult(report);
+                    setImportFileName(file.name);
+                    refreshContentRegistry();
+                  });
+                };
+                reader.onerror = () => setError(`Failed to read ${file.name}`);
+                reader.readAsText(file);
+              }}
+            />
+          </div>
+          {importResult && (
+            <div className="live-brain__preview-pane">
+              <p className="live-brain__label">
+                Import result{importFileName ? ` — ${importFileName}` : ""}
+              </p>
+              <p>
+                {importResult.translationId} (dataset version {importResult.datasetVersion}) &mdash; {importResult.books}{" "}
+                book(s), {importResult.chapters} chapter(s), {importResult.versesTotal} verse(s) in file
+              </p>
+              <p>
+                Imported: {importResult.imported} &middot; Already present: {importResult.alreadyPresent} &middot;
+                Invalid: {importResult.invalid}
+              </p>
+              <p className="live-brain__confidence">Checksum: {importResult.checksum}</p>
+              {importResult.errors.length > 0 && (
+                <ul>
+                  {importResult.errors.map((message, i) => (
+                    <li key={i}>{message}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </details>
       </section>
 
       <section className="live-brain__panel">

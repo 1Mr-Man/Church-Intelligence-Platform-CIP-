@@ -21,6 +21,8 @@ pub enum LogCategory {
     Bible,
     Ai,
     Presentation,
+    /// Content Registry / dataset import operations (Phase 1.5).
+    Content,
     Network,
     Security,
     /// For errors that don't cleanly belong to one of the above (see
@@ -39,6 +41,7 @@ impl LogCategory {
             LogCategory::Bible => "cip::bible",
             LogCategory::Ai => "cip::ai",
             LogCategory::Presentation => "cip::presentation",
+            LogCategory::Content => "cip::content",
             LogCategory::Network => "cip::network",
             LogCategory::Security => "cip::security",
             LogCategory::Error => "cip::error",
@@ -60,6 +63,7 @@ mod tests {
             LogCategory::Bible,
             LogCategory::Ai,
             LogCategory::Presentation,
+            LogCategory::Content,
             LogCategory::Network,
             LogCategory::Security,
             LogCategory::Error,

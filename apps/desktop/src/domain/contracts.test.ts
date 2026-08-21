@@ -6,9 +6,16 @@
  * runtime.
  */
 import { describe, expect, it } from "vitest";
-import type { AmbiguousCandidate, ScriptureContext, BibleTranslation, ScriptureReference } from "./bible";
+import type {
+  AmbiguousCandidate,
+  BibleSearchResult,
+  ScriptureContext,
+  BibleTranslation,
+  ScriptureReference,
+} from "./bible";
 import type { ConfidenceResult } from "./confidence";
 import type { ProcessedSegment, ScriptureDetection, Suggestion, TranscriptSegment } from "./ai";
+import type { ContentMetadata, ImportReport, IntegrityReport } from "./content";
 import type { PresentationItem, PresentationPreview, RenderedSlide } from "./presentation";
 import type { ServiceSession } from "./service";
 import type { LiveStatus, TimelineEntry } from "./live";
@@ -194,5 +201,71 @@ describe("domain contracts", () => {
     };
     expect(entry.eventName).toBe("SUGGESTION_APPROVED");
     expect(entry.payload?.kind).toEqual({ reference: "ROM 8:28" });
+  });
+
+  it("constructs a ContentMetadata with unknown licensing fields left null (Phase 1.5)", () => {
+    const metadata: ContentMetadata = {
+      id: "bible:KJV",
+      contentType: "bible",
+      name: "King James Version",
+      version: "dev-fixture",
+      language: "en",
+      source: "development fixture",
+      publisher: null,
+      copyright: null,
+      license: null,
+      distribution: null,
+      importedAt: new Date().toISOString(),
+      checksum: null,
+      status: "enabled",
+    };
+    expect(metadata.publisher).toBeNull();
+    expect(metadata.status).toBe("enabled");
+  });
+
+  it("constructs an ImportReport reflecting an actual dataset import", () => {
+    const report: ImportReport = {
+      translationId: "KJV",
+      datasetVersion: "1.0",
+      books: 66,
+      chapters: 1189,
+      versesTotal: 31102,
+      imported: 31102,
+      alreadyPresent: 0,
+      invalid: 0,
+      errors: [],
+      checksum: "abc123",
+    };
+    expect(report.imported).toBe(report.versesTotal);
+    expect(report.errors).toHaveLength(0);
+  });
+
+  it("constructs an IntegrityReport distinguishing a development fixture from a complete dataset", () => {
+    const report: IntegrityReport = {
+      translationId: "KJV",
+      status: "incomplete",
+      booksPresent: 2,
+      booksExpected: 66,
+      chaptersChecked: 2,
+      versesChecked: 6,
+      issues: [],
+    };
+    expect(report.status).toBe("incomplete");
+    expect(report.booksPresent).toBeLessThan(report.booksExpected);
+  });
+
+  it("constructs a BibleSearchResult with an honest relevance score (Phase 1.5)", () => {
+    const exactMatch: BibleSearchResult = {
+      translationId: "KJV",
+      book: "ROM",
+      chapter: 8,
+      verse: 28,
+      reference: "ROM 8:28",
+      text: "And we know that all things work together for good...",
+      relevance: 1.0,
+    };
+    const textMatch: BibleSearchResult = { ...exactMatch, relevance: null };
+    expect(exactMatch.relevance).toBe(1.0);
+    expect(textMatch.relevance).toBeNull();
   });
 });

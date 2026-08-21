@@ -6,6 +6,7 @@
 //! "manual fallback" requirement, nothing here may crash the application.
 
 use crate::config::AppConfig;
+use crate::content;
 use crate::errors::AppError;
 use crate::events::{emit, AppEvent};
 use crate::logging::LogCategory;
@@ -16,15 +17,18 @@ use crate::state::{AppState, DEFAULT_TRANSLATION_ID};
 use crate::timeline::{self, TimelineEntry};
 use cip_core_ai::{Suggestion, SuggestionKind, SuggestionStatus, TranscriptSegment};
 use cip_core_bible::{
-    BibleTranslation, BibleVerse, PartialScriptureReference, ReferenceKind, ScriptureContext,
+    check_bible_integrity, search_bible as dispatch_bible_search, BibleSearchResult,
+    BibleTranslation, IntegrityReport, PartialScriptureReference, ReferenceKind, ScriptureContext,
     ScriptureContextManager, ScriptureReference,
 };
 use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
+use cip_core_content::{ContentMetadata, ContentRegistryError, ContentStatus, ContentType};
 use cip_core_presentation::{PresentationContent, PresentationItem, PresentationItemStatus};
 use cip_core_service::{
     AudioChunk, AudioChunkSink, AudioDevice, AudioEngineStatus, ScriptureDetection, ServiceSession,
     ServiceStatus,
 };
+use cip_integrations_bible::{BibleDatasetInput, ImportReport};
 use cip_presentation_renderer::{RenderedSlide, SCRIPTURE_DEFAULT_TEMPLATE};
 use rusqlite::Connection;
 use serde::Serialize;
@@ -184,15 +188,39 @@ pub fn app_health_check(state: State<'_, AppState>) -> Result<HealthReport, AppE
     })
 }
 
+/// `list_bible_translations`'s selection guard (Phase 1.5 section 10):
+/// disabled content never appears in normal selection - but fails *open*.
+/// A translation with no registry entry at all (`Ok(None)`) or a registry
+/// read error (`Err`) is never hidden just because this phase's
+/// bookkeeping hasn't caught up to it; only an explicit `Disabled` record
+/// hides one. Pulled out as a plain function (same reasoning as this
+/// module's other guards) so the decision is directly unit-testable
+/// without a full `AppState`.
+fn is_translation_selectable(
+    registry_lookup: Result<Option<&ContentMetadata>, &ContentRegistryError>,
+) -> bool {
+    !matches!(registry_lookup, Ok(Some(metadata)) if metadata.status == ContentStatus::Disabled)
+}
+
 #[tauri::command]
 pub fn list_bible_translations(
     state: State<'_, AppState>,
 ) -> Result<Vec<BibleTranslation>, AppError> {
-    state
+    let translations = state
         .bible_provider
         .list_translations()
         .map_err(AppError::from)
-        .map_err(log_and_return)
+        .map_err(log_and_return)?;
+
+    Ok(translations
+        .into_iter()
+        .filter(|t| {
+            let lookup = state
+                .content_registry
+                .get(&content::bible_content_id(&t.id));
+            is_translation_selectable(lookup.as_ref().map(|opt| opt.as_ref()))
+        })
+        .collect())
 }
 
 // --- service lifecycle -----------------------------------------------------
@@ -1384,12 +1412,127 @@ pub fn correct_scripture_context(
 #[tauri::command]
 pub fn search_bible(
     query: String,
+    translation_id: Option<String>,
     state: State<'_, AppState>,
-) -> Result<Vec<BibleVerse>, AppError> {
+) -> Result<Vec<BibleSearchResult>, AppError> {
     let query = require_non_empty(&query, "query").map_err(log_and_return)?;
+    let translation_id = translation_id.unwrap_or_else(|| DEFAULT_TRANSLATION_ID.to_string());
+    dispatch_bible_search(state.bible_provider.as_ref(), &translation_id, &query)
+        .map_err(AppError::from)
+        .map_err(log_and_return)
+}
+
+// --- content registry (Phase 1.5) -------------------------------------------
+
+fn parse_content_type(value: &str) -> Result<ContentType, AppError> {
+    match value {
+        "bible" => Ok(ContentType::Bible),
+        "music" => Ok(ContentType::Music),
+        "service" => Ok(ContentType::Service),
+        "media" => Ok(ContentType::Media),
+        "reference" => Ok(ContentType::Reference),
+        other => Err(AppError::InvalidInput(format!(
+            "unknown content type: {other}"
+        ))),
+    }
+}
+
+/// What local content exists - the Content Registry diagnostics panel's
+/// data source. `contentType` (`"bible"`/`"music"`/...) optionally
+/// narrows the list; omitted, every registered content item is returned.
+#[tauri::command]
+pub fn list_content_registry(
+    content_type: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<ContentMetadata>, AppError> {
+    let content_type = content_type
+        .map(|s| parse_content_type(&s))
+        .transpose()
+        .map_err(log_and_return)?;
     state
-        .bible_provider
-        .search(&query, DEFAULT_TRANSLATION_ID)
+        .content_registry
+        .list(content_type)
+        .map_err(AppError::from)
+        .map_err(log_and_return)
+}
+
+#[tauri::command]
+pub fn get_content_metadata(
+    content_id: String,
+    state: State<'_, AppState>,
+) -> Result<ContentMetadata, AppError> {
+    let content_id = require_non_empty(&content_id, "contentId").map_err(log_and_return)?;
+    state
+        .content_registry
+        .get(&content_id)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?
+        .ok_or_else(|| {
+            log_and_return(AppError::InvalidInput(format!(
+                "content not found: {content_id}"
+            )))
+        })
+}
+
+/// Enables/disables a content item without deleting it (section 10) -
+/// disabled content stops appearing in normal selection/search
+/// (`list_bible_translations`) but its historical use (a service that
+/// already presented from it) remains fully understandable.
+#[tauri::command]
+pub fn set_content_enabled(
+    content_id: String,
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<ContentMetadata, AppError> {
+    let content_id = require_non_empty(&content_id, "contentId").map_err(log_and_return)?;
+    state
+        .content_registry
+        .set_enabled(&content_id, enabled)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
+    state
+        .content_registry
+        .get(&content_id)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?
+        .ok_or_else(|| {
+            log_and_return(AppError::InvalidInput(format!(
+                "content not found: {content_id}"
+            )))
+        })
+}
+
+/// Imports a local Bible dataset, already read and parsed to JSON text by
+/// the frontend (never a filesystem path - see `docs/bible-datasets.md`'s
+/// security note: this command never touches the filesystem itself).
+#[tauri::command]
+pub fn import_bible_dataset(
+    dataset_json: String,
+    state: State<'_, AppState>,
+) -> Result<ImportReport, AppError> {
+    let dataset_json = require_non_empty(&dataset_json, "datasetJson").map_err(log_and_return)?;
+    let dataset: BibleDatasetInput = serde_json::from_str(&dataset_json).map_err(|e| {
+        log_and_return(AppError::InvalidInput(format!(
+            "malformed dataset JSON: {e}"
+        )))
+    })?;
+    let db = state.db.lock().expect("db connection poisoned");
+    content::import_and_register(&db, state.content_registry.as_ref(), &dataset)
+        .map_err(AppError::from)
+        .map_err(log_and_return)
+}
+
+/// Structural integrity check (section 11) against whatever is actually
+/// stored for `translationId` - never a hard-coded canonical Bible fact
+/// table. See `cip_core_bible::check_bible_integrity`'s docs.
+#[tauri::command]
+pub fn check_bible_dataset_integrity(
+    translation_id: String,
+    state: State<'_, AppState>,
+) -> Result<IntegrityReport, AppError> {
+    let translation_id =
+        require_non_empty(&translation_id, "translationId").map_err(log_and_return)?;
+    check_bible_integrity(state.bible_provider.as_ref(), &translation_id)
         .map_err(AppError::from)
         .map_err(log_and_return)
 }
@@ -1686,6 +1829,61 @@ mod tests {
         ));
         assert!(matches!(
             require_non_empty("   ", "title"),
+            Err(AppError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn is_translation_selectable_fails_open_on_missing_or_errored_registry_lookups() {
+        assert!(
+            is_translation_selectable(Ok(None)),
+            "no registry entry must never hide a translation"
+        );
+        let err = ContentRegistryError::Storage("boom".to_string());
+        assert!(
+            is_translation_selectable(Err(&err)),
+            "a registry read error must never hide a translation"
+        );
+    }
+
+    #[test]
+    fn is_translation_selectable_hides_only_explicitly_disabled_content() {
+        let enabled = ContentMetadata {
+            id: "bible:KJV".to_string(),
+            content_type: ContentType::Bible,
+            name: "King James Version".to_string(),
+            version: "1.0".to_string(),
+            language: "en".to_string(),
+            source: "test".to_string(),
+            publisher: None,
+            copyright: None,
+            license: None,
+            distribution: None,
+            imported_at: chrono::Utc::now(),
+            checksum: None,
+            status: ContentStatus::Enabled,
+        };
+        assert!(is_translation_selectable(Ok(Some(&enabled))));
+
+        let disabled = ContentMetadata {
+            status: ContentStatus::Disabled,
+            ..enabled
+        };
+        assert!(!is_translation_selectable(Ok(Some(&disabled))));
+    }
+
+    #[test]
+    fn parse_content_type_accepts_known_values_and_rejects_unknown() {
+        assert_eq!(parse_content_type("bible").unwrap(), ContentType::Bible);
+        assert_eq!(parse_content_type("music").unwrap(), ContentType::Music);
+        assert_eq!(parse_content_type("service").unwrap(), ContentType::Service);
+        assert_eq!(parse_content_type("media").unwrap(), ContentType::Media);
+        assert_eq!(
+            parse_content_type("reference").unwrap(),
+            ContentType::Reference
+        );
+        assert!(matches!(
+            parse_content_type("sermon"),
             Err(AppError::InvalidInput(_))
         ));
     }

@@ -4,6 +4,7 @@ members = [
   "apps/desktop/src-tauri",
 
   "core/bible",
+  "core/content",
   "core/music",
   "core/sermon",
   "core/service",
@@ -16,6 +17,7 @@ members = [
 
   "integrations/audio",
   "integrations/bible",
+  "integrations/content",
   "integrations/music",
   "integrations/web",
   "integrations/obs",
@@ -53,6 +55,7 @@ regex = "1"
 cpal = "0.15"
 
 cip-core-bible = { path = "core/bible" }
+cip-core-content = { path = "core/content" }
 cip-core-music = { path = "core/music" }
 cip-core-sermon = { path = "core/sermon" }
 cip-core-service = { path = "core/service" }
@@ -63,6 +66,7 @@ cip-core-confidence = { path = "core/confidence" }
 cip-database = { path = "database" }
 cip-integrations-audio = { path = "integrations/audio" }
 cip-integrations-bible = { path = "integrations/bible" }
+cip-integrations-content = { path = "integrations/content" }
 cip-integrations-music = { path = "integrations/music" }
 cip-integrations-web = { path = "integrations/web" }
 cip-integrations-obs = { path = "integrations/obs" }

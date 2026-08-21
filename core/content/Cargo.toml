@@ -1,0 +1,13 @@
+[package]
+name = "cip-core-content"
+description = "Content Registry domain contract: what local content (Bible, music, service, media, reference) exists, and its provenance/licensing metadata."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+chrono.workspace = true
+thiserror.workspace = true

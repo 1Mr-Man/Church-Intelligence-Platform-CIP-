@@ -1311,4 +1311,348 @@ mod tests {
             .iter()
             .any(|e| e.event_name == "PRESENTATION_PREPARED"));
     }
+
+    // --- Phase 1.5: full-service validation --------------------------------
+    //
+    // The canonical realistic service simulation sections 27-34 ask for,
+    // against the real SQLite-backed BibleProvider: the full scripted
+    // sequence (approve/preview/prepare, approve/prepare, reject, approve/
+    // preview/prepare again), context retention across unrelated speech,
+    // context replacement, false-positive protection (Scripture-sounding
+    // prose that must never become a suggestion), an invalid verse that
+    // the detector might propose but the BibleProvider must reject, and an
+    // operator context correction that never rewrites transcript history.
+    #[test]
+    fn phase_1_5_full_service_validation() {
+        let conn = seeded_db();
+        let session = ServiceSession::start("Phase 1.5 Full Service Validation");
+        persist_service(&conn, &session).unwrap();
+
+        let mut provider_conn = open_in_memory().unwrap();
+        run_migrations(&mut provider_conn).unwrap();
+        apply_dev_seed(&provider_conn).unwrap();
+        let provider = SqliteBibleProvider::new(provider_conn);
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        let mut seq = 0u64;
+
+        let mut process =
+            |conn: &Connection, context: &mut DefaultScriptureContextManager, text: &str| {
+                let result = handle_final_transcript(
+                    conn,
+                    &provider,
+                    context,
+                    session.id,
+                    "KJV",
+                    segment(text, seq),
+                );
+                seq += 1;
+                result.unwrap()
+            };
+
+        // --- Section 32: false-positive protection, checked BEFORE any
+        // context exists so there is nothing for a bare "verse" fragment
+        // to even attach to - CIP must prefer no confident reference over
+        // a wrong one.
+        for false_positive in [
+            "Chapter eight of our study is important.",
+            "Romans is an important book.",
+            "John was one of the disciples.",
+        ] {
+            let result = process(&conn, &mut context, false_positive);
+            assert!(
+                result.suggestions.is_empty(),
+                "{false_positive:?} must never produce a suggestion"
+            );
+        }
+        assert!(
+            context.active_context().is_none(),
+            "false-positive prose must never establish a Scripture context"
+        );
+
+        // --- Section 27/28: "Good morning church. Turn with me to Romans
+        // chapter eight." -> Active Context = Romans 8, no verse invented.
+        let p = process(
+            &conn,
+            &mut context,
+            "Good morning church. Turn with me to Romans chapter eight",
+        );
+        assert!(p.suggestions.is_empty());
+        assert_eq!(context.active_context().unwrap().book, "ROM");
+        assert_eq!(context.active_context().unwrap().chapter, 8);
+
+        let p = process(
+            &conn,
+            &mut context,
+            "Paul is showing us the work of the Spirit.",
+        );
+        assert!(
+            p.suggestions.is_empty(),
+            "unrelated prose must never invent a reference"
+        );
+
+        // Section 32 again, now WITH an active context: wording that
+        // resembles Romans 8:28 but never says "verse" must still not be
+        // treated as that reference - resemblance is not a citation.
+        let p = process(
+            &conn,
+            &mut context,
+            "And we know that all things work together for good.",
+        );
+        assert!(
+            p.suggestions.is_empty(),
+            "textual resemblance to a verse must never invent a reference without an explicit citation"
+        );
+        assert_eq!(
+            context.active_context().unwrap().chapter,
+            8,
+            "context must survive this false-positive-shaped sentence unchanged"
+        );
+
+        // "Look at verse twenty-eight" -> Romans 8:28 -> Approve -> Preview -> Prepare.
+        let p = process(&conn, &mut context, "Look at verse twenty-eight");
+        assert_eq!(p.suggestions.len(), 1);
+        let romans_828 = p.suggestions[0].id;
+        assert_eq!(
+            p.detections[0].reference.as_ref().unwrap().to_string(),
+            "ROM 8:28"
+        );
+        let approved = crate::persistence::update_suggestion_status(
+            &conn,
+            romans_828,
+            cip_core_ai::SuggestionStatus::Approved,
+            None,
+        )
+        .unwrap();
+        assert_eq!(approved.status, cip_core_ai::SuggestionStatus::Approved);
+        let (content_828, _) =
+            crate::presentation::build_scripture_slide(&provider, "KJV", "ROM 8:28").unwrap();
+        let item_828 = crate::presentation::persist_prepared_item(
+            &conn,
+            session.id,
+            content_828,
+            "SCRIPTURE_DEFAULT",
+            Some(romans_828),
+        )
+        .unwrap();
+        assert_eq!(
+            item_828.status,
+            cip_core_presentation::PresentationItemStatus::Prepared
+        );
+
+        // "Now verse thirty-one" -> Romans 8:31 (Sequential - continuing
+        // the same still-active context) -> Approve -> Prepare.
+        let p = process(&conn, &mut context, "Now verse thirty-one");
+        assert_eq!(
+            p.detections[0].reference.as_ref().unwrap().to_string(),
+            "ROM 8:31"
+        );
+        let romans_831 = p.suggestions[0].id;
+        crate::persistence::update_suggestion_status(
+            &conn,
+            romans_831,
+            cip_core_ai::SuggestionStatus::Approved,
+            None,
+        )
+        .unwrap();
+        let (content_831, _) =
+            crate::presentation::build_scripture_slide(&provider, "KJV", "ROM 8:31").unwrap();
+        crate::presentation::persist_prepared_item(
+            &conn,
+            session.id,
+            content_831,
+            "SCRIPTURE_DEFAULT",
+            Some(romans_831),
+        )
+        .unwrap();
+
+        // --- Section 28: context retention - "go back to verse eighteen"
+        // resolves against the still-active Romans 8 with no chapter
+        // repeated, exactly the user requirement this section validates.
+        let p = process(&conn, &mut context, "Go back to verse eighteen");
+        assert_eq!(
+            p.detections[0].reference.as_ref().unwrap().to_string(),
+            "ROM 8:18"
+        );
+        let romans_818 = p.suggestions[0].id;
+        // Operator rejects this one - no presentation of any kind.
+        let rejected = crate::persistence::update_suggestion_status(
+            &conn,
+            romans_818,
+            cip_core_ai::SuggestionStatus::Rejected,
+            None,
+        )
+        .unwrap();
+        assert_eq!(rejected.status, cip_core_ai::SuggestionStatus::Rejected);
+
+        // --- Section 29: context replacement - Romans 8 -> John 3, then
+        // "verse sixteen" must resolve to John 3:16, never Romans 8:16.
+        let p = process(&conn, &mut context, "Now John chapter three");
+        assert!(
+            p.suggestions.is_empty(),
+            "a bare chapter never suggests a verse"
+        );
+        assert_eq!(context.active_context().unwrap().book, "JHN");
+
+        let p = process(&conn, &mut context, "Verse sixteen");
+        assert_eq!(
+            p.detections[0].reference.as_ref().unwrap().to_string(),
+            "JHN 3:16",
+            "context replacement must resolve to John 3:16, never Romans 8:16"
+        );
+        let john_316 = p.suggestions[0].id;
+        crate::persistence::update_suggestion_status(
+            &conn,
+            john_316,
+            cip_core_ai::SuggestionStatus::Approved,
+            None,
+        )
+        .unwrap();
+        let (preview_content, _) =
+            crate::presentation::build_scripture_slide(&provider, "KJV", "JHN 3:16").unwrap();
+        assert!(preview_content_is_scripture_text(
+            &preview_content,
+            "God so loved the world"
+        ));
+        crate::presentation::persist_prepared_item(
+            &conn,
+            session.id,
+            preview_content,
+            "SCRIPTURE_DEFAULT",
+            Some(john_316),
+        )
+        .unwrap();
+
+        // --- Section 35: the detector may recognize a pattern, but
+        // BibleProvider remains authoritative - Romans 8:999 is not a
+        // real verse, so it must produce no suggestion at all.
+        let p = process(&conn, &mut context, "Turn to Romans 8:999.");
+        assert!(
+            p.suggestions.is_empty(),
+            "an out-of-range verse must never produce a suggestion, however confident the parser is"
+        );
+
+        // --- Section 34: operator override. Simulate CIP having drifted
+        // to the wrong chapter (Romans 7), then the operator explicitly
+        // correcting it to Romans 8 - exactly what
+        // `commands::correct_scripture_context` does: validate the
+        // book+chapter against the real Bible data, then commit it as the
+        // new active context.
+        context.resolve(cip_core_bible::PartialScriptureReference {
+            book: Some("ROM".to_string()),
+            chapter: Some(7),
+            verse_start: None,
+            verse_end: None,
+        });
+        assert_eq!(context.active_context().unwrap().chapter, 7);
+
+        let transcript_count_before_correction =
+            crate::persistence::list_transcript_segments(&conn, session.id, 100)
+                .unwrap()
+                .len();
+
+        provider
+            .get_chapter("KJV", "ROM", 8)
+            .unwrap()
+            .expect("Romans 8 is a real chapter - the operator's correction must be valid");
+        context.resolve(cip_core_bible::PartialScriptureReference {
+            book: Some("ROM".to_string()),
+            chapter: Some(8),
+            verse_start: None,
+            verse_end: None,
+        });
+        crate::timeline::record_event(
+            &conn,
+            Some(session.id),
+            crate::events::AppEvent::ScriptureContextCorrected,
+            crate::logging::LogCategory::Bible,
+            serde_json::json!({ "previous": "ROM 7", "corrected": "ROM 8" }),
+        )
+        .unwrap();
+        assert_eq!(context.active_context().unwrap().chapter, 8);
+
+        // The correction must never rewrite transcript history - only new
+        // segments are added, nothing already persisted changes.
+        let transcript_count_after_correction =
+            crate::persistence::list_transcript_segments(&conn, session.id, 100)
+                .unwrap()
+                .len();
+        assert_eq!(
+            transcript_count_before_correction,
+            transcript_count_after_correction
+        );
+
+        let p = process(&conn, &mut context, "Verse twenty-eight");
+        assert_eq!(
+            p.detections[0].reference.as_ref().unwrap().to_string(),
+            "ROM 8:28",
+            "after the operator's correction, a bare verse must resolve against Romans 8"
+        );
+
+        // --- Final verification: exactly the presentation items explicit
+        // operator actions produced, nothing more, nothing auto-projected.
+        let all_items =
+            crate::persistence::list_presentation_items(&conn, session.id, None).unwrap();
+        assert_eq!(
+            all_items.len(),
+            3,
+            "exactly the three explicitly-approved-and-prepared verses (ROM 8:28, ROM 8:31, JHN 3:16) - \
+             the rejected ROM 8:18 and the out-of-range ROM 8:999 produced none"
+        );
+        assert!(all_items.iter().all(|i| i.service_id == session.id));
+        assert!(
+            all_items
+                .iter()
+                .all(|i| i.status != cip_core_presentation::PresentationItemStatus::Active),
+            "no automatic projection anywhere in this whole scenario"
+        );
+        let prepared_refs: std::collections::HashSet<String> = all_items
+            .iter()
+            .filter_map(|i| match &i.content {
+                cip_core_presentation::PresentationContent::Scripture { reference, .. } => {
+                    Some(reference.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            prepared_refs,
+            std::collections::HashSet::from([
+                "ROM 8:28".to_string(),
+                "ROM 8:31".to_string(),
+                "JHN 3:16".to_string(),
+            ])
+        );
+
+        let all_suggestions =
+            crate::persistence::list_suggestions(&conn, session.id, None).unwrap();
+        assert_eq!(
+            all_suggestions
+                .iter()
+                .filter(|s| s.status == cip_core_ai::SuggestionStatus::Approved)
+                .count(),
+            3
+        );
+        assert_eq!(
+            all_suggestions
+                .iter()
+                .filter(|s| s.status == cip_core_ai::SuggestionStatus::Rejected)
+                .count(),
+            1
+        );
+
+        // The service timeline documents the operator's correction and
+        // every prepare - the foundation for future service analytics
+        // (section 24).
+        let timeline_entries = crate::timeline::list_timeline(&conn, session.id, 50).unwrap();
+        assert!(timeline_entries
+            .iter()
+            .any(|e| e.event_name == "SCRIPTURE_CONTEXT_CORRECTED"));
+    }
+
+    fn preview_content_is_scripture_text(
+        content: &cip_core_presentation::PresentationContent,
+        needle: &str,
+    ) -> bool {
+        matches!(content, cip_core_presentation::PresentationContent::Scripture { text, .. } if text.contains(needle))
+    }
 }

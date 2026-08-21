@@ -489,6 +489,22 @@ mod tests {
         ) -> Result<Vec<BibleVerse>, BibleProviderError> {
             Ok(vec![])
         }
+
+        fn list_chapters(
+            &self,
+            translation_id: &str,
+            book_code: &str,
+        ) -> Result<Vec<u32>, BibleProviderError> {
+            let mut chapters: Vec<u32> = self
+                .verses
+                .keys()
+                .filter(|(t, b, _, _)| t == translation_id && b == book_code)
+                .map(|(_, _, c, _)| *c)
+                .collect();
+            chapters.sort_unstable();
+            chapters.dedup();
+            Ok(chapters)
+        }
     }
 
     fn process(

@@ -28,6 +28,12 @@ pub enum AppError {
     SpeechEngine(#[from] cip_core_ai::SpeechEngineError),
     #[error(transparent)]
     Presentation(#[from] crate::presentation::PresentationError),
+    #[error(transparent)]
+    Content(#[from] crate::content::ContentError),
+    #[error(transparent)]
+    ContentRegistry(#[from] cip_core_content::ContentRegistryError),
+    #[error(transparent)]
+    BibleSearch(#[from] cip_core_bible::BibleSearchError),
     #[error("no service is currently active - start one first")]
     NoActiveService,
     #[error("invalid input: {0}")]
@@ -44,6 +50,9 @@ impl AppError {
             AppError::AudioEngine(_) => LogCategory::Audio,
             AppError::SpeechEngine(_) => LogCategory::Speech,
             AppError::Presentation(_) => LogCategory::Presentation,
+            AppError::Content(_) => LogCategory::Content,
+            AppError::ContentRegistry(_) => LogCategory::Content,
+            AppError::BibleSearch(_) => LogCategory::Bible,
             AppError::NoActiveService => LogCategory::App,
             AppError::InvalidInput(_) => LogCategory::App,
         }

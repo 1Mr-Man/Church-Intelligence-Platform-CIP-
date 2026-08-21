@@ -87,6 +87,24 @@ paths call this same function, they are provably identical for the same
 input - see `presentation::tests::preview_and_prepare_paths_produce_identical_content_for_the_same_reference`
 and the canonical acceptance test's manual-path assertion.
 
+### Provenance: where did this Scripture text come from?
+
+`PresentationContent::Scripture`'s `translation_id` (e.g. `"KJV"`) is also
+a Content Registry lookup key: Phase 1.5's `core/content::bible_content_id`
+convention turns it into `"bible:KJV"`, the id under which that
+translation's provenance and licensing metadata is registered (publisher,
+copyright, license, distribution permission, dataset version, checksum -
+each `UNKNOWN`/`null` rather than guessed if the source dataset didn't say).
+So a prepared item's full answer to "where did this text come from" is:
+`translation_id` on the item itself, plus `content_registry.get("bible:" +
+translation_id)` for everything about that dataset's origin and right to be
+displayed. This phase does not add a `content_id` column to
+`presentation_items` - the `"bible:<translation_id>"` convention is enough
+to derive it without duplicating data that can already be looked up. See
+[`docs/content-registry.md`](content-registry.md#provenance-and-traceability) for the
+worked example and [`docs/bible-datasets.md`](bible-datasets.md) for how
+that metadata gets there in the first place.
+
 ### Translations
 
 Only `KJV` is seeded in this development environment

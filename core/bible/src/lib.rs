@@ -9,9 +9,14 @@ pub mod book_alias;
 mod context;
 mod context_manager;
 pub mod detection;
+#[cfg(test)]
+mod fixtures;
+pub mod integrity;
 pub mod normalize;
 mod provider;
+pub mod range;
 mod reference;
+pub mod search;
 
 pub use book_alias::{canonicalize_book, CanonicalBook};
 pub use context::{
@@ -19,8 +24,11 @@ pub use context::{
 };
 pub use context_manager::DefaultScriptureContextManager;
 pub use detection::{detect_candidates, DetectedCandidate, ReferenceKind};
+pub use integrity::{check_bible_integrity, IntegrityIssue, IntegrityReport, IntegrityStatus};
 pub use provider::{
     BibleBook, BibleChapter, BibleProvider, BibleProviderError, BibleTranslation, BibleVerse,
     Testament,
 };
+pub use range::{get_verse_range, VerseRangeError};
 pub use reference::{PartialScriptureReference, ScriptureReference};
+pub use search::{search_bible, BibleSearchError, BibleSearchResult};

@@ -49,6 +49,14 @@ it) and an index on `source_suggestion_id` - again no new table, since
 `presentation_items` already existed. See
 [`docs/presentation.md`](presentation.md).
 
+`0005_content_registry.sql` (Phase 1.5) added one new table,
+`content_registry` - one row per locally-installed content item (a Bible
+translation today; music/sermon/media/reference in later phases) with
+its provenance/licensing metadata (publisher/copyright/license/
+distribution, all nullable - `NULL` means honestly unknown, never
+guessed) and enabled/disabled status, plus an index on `content_type`.
+See [`docs/content-registry.md`](content-registry.md).
+
 ## Schema
 
 See [`database/schema/README.md`](../database/schema/README.md) for the
@@ -57,7 +65,8 @@ confidence-score columns, JSON payload columns). The Phase 1 tables:
 
 `services`, `transcript_segments`, `bible_translations`, `bible_books`,
 `bible_chapters`, `bible_verses`, `scripture_detections`, `ai_suggestions`,
-`presentation_items`, `audit_events`.
+`presentation_items`, `audit_events`. Phase 1.5 added an eleventh:
+`content_registry`.
 
 ## Seed data
 
@@ -77,7 +86,8 @@ Apply it manually against any connection with
 ## Validating the database layer
 
 ```sh
-cargo test -p cip-database          # migration idempotency + all 10 tables exist
-cargo test -p cip-integrations-bible # SqliteBibleProvider against the real schema
-cargo test -p cip-integration-tests  # full cross-domain flow through the DB
+cargo test -p cip-database             # migration idempotency + every table exists
+cargo test -p cip-integrations-bible   # SqliteBibleProvider + dataset importer against the real schema
+cargo test -p cip-integrations-content # SqliteContentRegistry against the real schema
+cargo test -p cip-integration-tests    # full cross-domain flow through the DB
 ```

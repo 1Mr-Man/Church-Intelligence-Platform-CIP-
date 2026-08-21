@@ -97,6 +97,18 @@ pub trait BibleProvider: Send + Sync {
         query: &str,
         translation_id: &str,
     ) -> Result<Vec<BibleVerse>, BibleProviderError>;
+
+    /// The chapter numbers actually present for one book, ascending -
+    /// e.g. `[3]` for a dev fixture that only has John chapter 3, `1..=21`
+    /// for a complete book. Added in Phase 1.5 so a dataset integrity
+    /// checker (`crate::integrity`) can enumerate what's actually stored
+    /// without guessing at or hard-coding a canonical chapter count -
+    /// nothing in `core/bible` invents Bible structure it wasn't given.
+    fn list_chapters(
+        &self,
+        translation_id: &str,
+        book_code: &str,
+    ) -> Result<Vec<u32>, BibleProviderError>;
 }
 
 #[cfg(test)]
@@ -127,6 +139,9 @@ mod tests {
             Ok(None)
         }
         fn search(&self, _q: &str, _t: &str) -> Result<Vec<BibleVerse>, BibleProviderError> {
+            Ok(vec![])
+        }
+        fn list_chapters(&self, _t: &str, _b: &str) -> Result<Vec<u32>, BibleProviderError> {
             Ok(vec![])
         }
     }

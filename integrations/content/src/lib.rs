@@ -1,0 +1,297 @@
+//! Local SQLite-backed [`ContentRegistry`]. Mirrors
+//! `integrations/bible::SqliteBibleProvider`'s shape: its own connection,
+//! `Mutex`-guarded for interior mutability behind a shared `&self`.
+
+use chrono::{DateTime, Utc};
+use cip_core_content::{ContentMetadata, ContentRegistry, ContentRegistryError, ContentStatus};
+use rusqlite::{params, Connection, OptionalExtension};
+use std::sync::Mutex;
+
+pub struct SqliteContentRegistry {
+    conn: Mutex<Connection>,
+}
+
+impl SqliteContentRegistry {
+    pub fn new(conn: Connection) -> Self {
+        Self {
+            conn: Mutex::new(conn),
+        }
+    }
+}
+
+fn content_type_str(value: cip_core_content::ContentType) -> &'static str {
+    use cip_core_content::ContentType;
+    match value {
+        ContentType::Bible => "bible",
+        ContentType::Music => "music",
+        ContentType::Service => "service",
+        ContentType::Media => "media",
+        ContentType::Reference => "reference",
+    }
+}
+
+fn content_type_from_str(value: &str) -> Option<cip_core_content::ContentType> {
+    use cip_core_content::ContentType;
+    match value {
+        "bible" => Some(ContentType::Bible),
+        "music" => Some(ContentType::Music),
+        "service" => Some(ContentType::Service),
+        "media" => Some(ContentType::Media),
+        "reference" => Some(ContentType::Reference),
+        _ => None,
+    }
+}
+
+fn status_str(value: ContentStatus) -> &'static str {
+    match value {
+        ContentStatus::Enabled => "enabled",
+        ContentStatus::Disabled => "disabled",
+    }
+}
+
+const ROW_COLUMNS: &str = "id, content_type, name, version, language, source, publisher, \
+     copyright, license, distribution, imported_at, checksum, status";
+
+fn row_to_metadata(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContentMetadata> {
+    let content_type_raw: String = row.get(1)?;
+    let status_raw: String = row.get(12)?;
+    let imported_at_raw: String = row.get(10)?;
+    Ok(ContentMetadata {
+        id: row.get(0)?,
+        content_type: content_type_from_str(&content_type_raw)
+            .unwrap_or(cip_core_content::ContentType::Reference),
+        name: row.get(2)?,
+        version: row.get(3)?,
+        language: row.get(4)?,
+        source: row.get(5)?,
+        publisher: row.get(6)?,
+        copyright: row.get(7)?,
+        license: row.get(8)?,
+        distribution: row.get(9)?,
+        imported_at: DateTime::parse_from_rfc3339(&imported_at_raw)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now()),
+        checksum: row.get(11)?,
+        status: if status_raw == "disabled" {
+            ContentStatus::Disabled
+        } else {
+            ContentStatus::Enabled
+        },
+    })
+}
+
+impl ContentRegistry for SqliteContentRegistry {
+    fn list(
+        &self,
+        content_type: Option<cip_core_content::ContentType>,
+    ) -> Result<Vec<ContentMetadata>, ContentRegistryError> {
+        let conn = self
+            .conn
+            .lock()
+            .expect("content registry connection poisoned");
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {ROW_COLUMNS} FROM content_registry
+                 WHERE (?1 IS NULL OR content_type = ?1)
+                 ORDER BY id"
+            ))
+            .map_err(|e| ContentRegistryError::Storage(e.to_string()))?;
+        let filter = content_type.map(content_type_str);
+        let rows = stmt
+            .query_map(params![filter], row_to_metadata)
+            .map_err(|e| ContentRegistryError::Storage(e.to_string()))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| ContentRegistryError::Storage(e.to_string()))
+    }
+
+    fn get(&self, content_id: &str) -> Result<Option<ContentMetadata>, ContentRegistryError> {
+        let conn = self
+            .conn
+            .lock()
+            .expect("content registry connection poisoned");
+        conn.query_row(
+            &format!("SELECT {ROW_COLUMNS} FROM content_registry WHERE id = ?1"),
+            params![content_id],
+            row_to_metadata,
+        )
+        .optional()
+        .map_err(|e| ContentRegistryError::Storage(e.to_string()))
+    }
+
+    fn register(&self, metadata: &ContentMetadata) -> Result<(), ContentRegistryError> {
+        if metadata.id.trim().is_empty() {
+            return Err(ContentRegistryError::InvalidMetadata(
+                "content id must not be empty".to_string(),
+            ));
+        }
+        let conn = self
+            .conn
+            .lock()
+            .expect("content registry connection poisoned");
+        conn.execute(
+            "INSERT INTO content_registry
+                (id, content_type, name, version, language, source, publisher, copyright,
+                 license, distribution, imported_at, checksum, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             ON CONFLICT(id) DO UPDATE SET
+                content_type = excluded.content_type,
+                name = excluded.name,
+                version = excluded.version,
+                language = excluded.language,
+                source = excluded.source,
+                publisher = excluded.publisher,
+                copyright = excluded.copyright,
+                license = excluded.license,
+                distribution = excluded.distribution,
+                imported_at = excluded.imported_at,
+                checksum = excluded.checksum,
+                status = excluded.status",
+            params![
+                metadata.id,
+                content_type_str(metadata.content_type),
+                metadata.name,
+                metadata.version,
+                metadata.language,
+                metadata.source,
+                metadata.publisher,
+                metadata.copyright,
+                metadata.license,
+                metadata.distribution,
+                metadata.imported_at.to_rfc3339(),
+                metadata.checksum,
+                status_str(metadata.status),
+            ],
+        )
+        .map_err(|e| ContentRegistryError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    fn set_enabled(&self, content_id: &str, enabled: bool) -> Result<(), ContentRegistryError> {
+        let conn = self
+            .conn
+            .lock()
+            .expect("content registry connection poisoned");
+        let changed = conn
+            .execute(
+                "UPDATE content_registry SET status = ?1 WHERE id = ?2",
+                params![
+                    status_str(if enabled {
+                        ContentStatus::Enabled
+                    } else {
+                        ContentStatus::Disabled
+                    }),
+                    content_id
+                ],
+            )
+            .map_err(|e| ContentRegistryError::Storage(e.to_string()))?;
+        if changed == 0 {
+            return Err(ContentRegistryError::NotFound(content_id.to_string()));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cip_core_content::ContentType;
+
+    fn migrated_registry() -> SqliteContentRegistry {
+        let mut conn = cip_database::open_in_memory().unwrap();
+        cip_database::run_migrations(&mut conn).unwrap();
+        SqliteContentRegistry::new(conn)
+    }
+
+    fn unknown_kjv() -> ContentMetadata {
+        ContentMetadata {
+            id: "bible:KJV".to_string(),
+            content_type: ContentType::Bible,
+            name: "King James Version".to_string(),
+            version: "1.0".to_string(),
+            language: "en".to_string(),
+            source: "development fixture".to_string(),
+            publisher: None,
+            copyright: None,
+            license: None,
+            distribution: None,
+            imported_at: Utc::now(),
+            checksum: None,
+            status: ContentStatus::Enabled,
+        }
+    }
+
+    #[test]
+    fn registers_and_round_trips_metadata_with_unknown_fields_preserved() {
+        let registry = migrated_registry();
+        registry.register(&unknown_kjv()).unwrap();
+
+        let loaded = registry.get("bible:KJV").unwrap().unwrap();
+        assert_eq!(loaded.name, "King James Version");
+        assert_eq!(loaded.publisher, None);
+        assert_eq!(loaded.status, ContentStatus::Enabled);
+    }
+
+    #[test]
+    fn register_is_an_upsert_not_a_duplicate_row() {
+        let registry = migrated_registry();
+        registry.register(&unknown_kjv()).unwrap();
+
+        let mut updated = unknown_kjv();
+        updated.version = "1.1".to_string();
+        updated.checksum = Some("abc123".to_string());
+        registry.register(&updated).unwrap();
+
+        let all = registry.list(None).unwrap();
+        assert_eq!(
+            all.len(),
+            1,
+            "re-registering the same id must not duplicate rows"
+        );
+        assert_eq!(all[0].version, "1.1");
+        assert_eq!(all[0].checksum.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn rejects_metadata_with_an_empty_id() {
+        let registry = migrated_registry();
+        let mut bad = unknown_kjv();
+        bad.id = String::new();
+        assert!(matches!(
+            registry.register(&bad),
+            Err(ContentRegistryError::InvalidMetadata(_))
+        ));
+    }
+
+    #[test]
+    fn list_filters_by_content_type_and_get_returns_none_for_unknown() {
+        let registry = migrated_registry();
+        registry.register(&unknown_kjv()).unwrap();
+
+        assert_eq!(registry.list(Some(ContentType::Bible)).unwrap().len(), 1);
+        assert_eq!(registry.list(Some(ContentType::Music)).unwrap().len(), 0);
+        assert!(registry.get("bible:NIV").unwrap().is_none());
+    }
+
+    #[test]
+    fn set_enabled_toggles_status_and_disabled_content_is_never_deleted() {
+        let registry = migrated_registry();
+        registry.register(&unknown_kjv()).unwrap();
+
+        registry.set_enabled("bible:KJV", false).unwrap();
+        let loaded = registry.get("bible:KJV").unwrap().unwrap();
+        assert_eq!(loaded.status, ContentStatus::Disabled);
+        assert_eq!(
+            loaded.name, "King James Version",
+            "content itself is untouched"
+        );
+    }
+
+    #[test]
+    fn set_enabled_reports_not_found_for_an_unregistered_id() {
+        let registry = migrated_registry();
+        assert!(matches!(
+            registry.set_enabled("bible:NIV", true),
+            Err(ContentRegistryError::NotFound(_))
+        ));
+    }
+}

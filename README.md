@@ -7,8 +7,9 @@ never auto-applied. It is being built in phases; this repository currently
 contains **Phase 1 - Foundation**, **Phase 1.1 - Bible Intelligence Core**,
 **Phase 1.2 - Live Speech Foundation**, **Phase 1.2.1 - Runtime
 Compatibility**, **Phase 1.3 - Live Service Intelligence & Operator
-Workflow**, and **Phase 1.4 - Presentation Foundation & Real-Service
-Validation**.
+Workflow**, **Phase 1.4 - Presentation Foundation & Real-Service
+Validation**, and **Phase 1.5 - Content/Dataset Foundation &
+Full-Service Validation**.
 
 ## Approved architecture
 
@@ -34,9 +35,14 @@ Brain UI, [`docs/live-service.md`](docs/live-service.md) for the service
 lifecycle and operator workflow built around that pipeline,
 [`docs/presentation.md`](docs/presentation.md) for the presentation
 preparation path from an approved suggestion to persisted, prepared
-output, [`docs/development.md`](docs/development.md) to get running
-locally, and [`docs/database.md`](docs/database.md) for the
-SQLite/migration story.
+output, [`docs/content-registry.md`](docs/content-registry.md) for what
+local content exists and its provenance/licensing,
+[`docs/bible-datasets.md`](docs/bible-datasets.md) for the Bible dataset
+importer/integrity checker and the licensing policy governing them,
+[`docs/full-service-validation.md`](docs/full-service-validation.md) for
+the realistic full-service validation results,
+[`docs/development.md`](docs/development.md) to get running locally, and
+[`docs/database.md`](docs/database.md) for the SQLite/migration story.
 
 ## What's implemented (and what isn't)
 
@@ -109,6 +115,27 @@ automatically become a prepared item, and no code path ever sets a
 presentation item to "active". See
 [`docs/presentation.md`](docs/presentation.md).
 
+**Phase 1.5 (Content/Dataset Foundation & Full-Service Validation)** built
+the scalable local content layer underneath that pipeline and validated
+the whole thing end to end against realistic transcripts. A new Content
+Registry (`core/content`/`integrations/content`) answers "what local
+content exists, and under what license?" for any content category
+(Bible today; music/sermon/media/reference are the reserved shape for
+later phases); a reusable, idempotent Bible dataset importer validates
+and loads a structured local dataset (never bulk-downloading or scraping
+a copyrighted translation); a dataset integrity checker distinguishes a
+development fixture from a complete canonical dataset without hard-coding
+Bible facts it can't verify; `core/bible` gained verse-range retrieval
+and a translation-aware local search dispatcher (reference/chapter/range/
+free-text, entirely offline); and a canonical full-service acceptance
+test proves context retention, context replacement, false-positive
+protection, operator overrides, and dataset-validation authority (an
+out-of-range verse never produces a suggestion) all hold together in one
+realistic scripted service. See
+[`docs/content-registry.md`](docs/content-registry.md),
+[`docs/bible-datasets.md`](docs/bible-datasets.md), and
+[`docs/full-service-validation.md`](docs/full-service-validation.md).
+
 Still deliberately **not** implemented: song recognition, sermon
 intelligence, semantic/paraphrase Bible search, automatic bullet
 extraction, a web research engine, online Bible fallback, content
@@ -125,7 +152,8 @@ apps/desktop/          Tauri + React + TypeScript desktop application
   src-tauri/            Rust backend (Tauri commands, app shell)
 
 core/                  Domain logic and contracts, one crate per domain
-  bible/               BibleProvider, text normalization, reference detection, Scripture Context Manager
+  bible/               BibleProvider, text normalization, reference detection, verse-range/search, integrity checker, Scripture Context Manager
+  content/              ContentRegistry - what local content exists, and its provenance/licensing
   music/                (placeholder - Phase 2+)
   sermon/               (placeholder - Phase 2+)
   service/              ServiceSession + AudioEngine
@@ -135,7 +163,7 @@ core/                  Domain logic and contracts, one crate per domain
   confidence/            ConfidenceResult (shared by every domain above)
 
 database/              Local-first SQLite: migrations, schema docs, seeds
-integrations/          Provider/adaptor implementations (bible, audio, music, web, obs, vmix)
+integrations/          Provider/adaptor implementations (bible - incl. dataset importer, content, audio, music, web, obs, vmix)
 ai/                    AI backend implementations (speech, embeddings, classifiers, models)
 presentation/          Rendering subsystem (renderer, templates, outputs)
 tests/                 Cross-crate integration tests

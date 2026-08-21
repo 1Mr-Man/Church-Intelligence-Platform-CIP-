@@ -211,16 +211,28 @@ fn normalize_token(input: &str) -> String {
         .join(" ")
 }
 
-/// Resolve arbitrary book text (`"Romans"`, `"Rom"`, `"Rom."`, `"rom"`) to
-/// its [`CanonicalBook`]. Returns `None` if nothing matches - callers must
-/// not guess a book on a failed lookup.
+/// Resolve arbitrary book text (`"Romans"`, `"Rom"`, `"Rom."`, `"rom"`, or
+/// the book's own stable code `"ROM"`) to its [`CanonicalBook`]. Returns
+/// `None` if nothing matches - callers must not guess a book on a failed
+/// lookup.
+///
+/// Matching a book's own `code` (case-insensitively) is independent of
+/// its `aliases` list: several codes (e.g. `"1SA"`, `"SNG"`) aren't
+/// themselves listed as aliases (the alias list has `"1 sa"`/`"1sam"`,
+/// not `"1sa"`), since aliases were curated for spoken/written text a
+/// pastor might actually say, not for exhaustively covering every stable
+/// code. A structured caller (the dataset importer, `core/bible::search`)
+/// that already has the canonical code must still resolve it - see
+/// `docs/bible-datasets.md`.
 pub fn canonicalize_book(input: &str) -> Option<&'static CanonicalBook> {
     let needle = normalize_token(input);
     if needle.is_empty() {
         return None;
     }
     BOOKS.iter().find(|book| {
-        normalize_token(book.name) == needle || book.aliases.iter().any(|alias| *alias == needle)
+        book.code.eq_ignore_ascii_case(&needle)
+            || normalize_token(book.name) == needle
+            || book.aliases.iter().any(|alias| *alias == needle)
     })
 }
 
@@ -273,5 +285,27 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn every_canonical_code_resolves_to_itself_case_insensitively() {
+        // Not every code is also listed as an alias (e.g. "1SA"'s aliases
+        // are "1 sa"/"1sam", not "1sa"; "SNG" has no "sng" alias at all) -
+        // a structured caller that already has the code must still
+        // resolve it regardless. Phase 1.5's dataset importer and search
+        // dispatcher both depend on this.
+        for book in BOOKS {
+            assert_eq!(canonicalize_book(book.code).unwrap().code, book.code);
+            assert_eq!(
+                canonicalize_book(&book.code.to_lowercase()).unwrap().code,
+                book.code
+            );
+        }
+    }
+
+    #[test]
+    fn a_code_not_listed_as_its_own_alias_still_resolves() {
+        assert_eq!(canonicalize_book("1SA").unwrap().code, "1SA");
+        assert_eq!(canonicalize_book("SNG").unwrap().code, "SNG");
     }
 }

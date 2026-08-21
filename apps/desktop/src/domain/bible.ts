@@ -61,6 +61,21 @@ export interface BibleChapter {
   verses: BibleVerse[];
 }
 
+/** One Bible search result (Phase 1.5) - mirrors
+ * `cip_core_bible::search::BibleSearchResult` (Rust). Enough to render and
+ * act on (Preview/Prepare) without a raw database row. */
+export interface BibleSearchResult {
+  translationId: string;
+  book: string;
+  chapter: number;
+  verse: number;
+  reference: string;
+  text: string;
+  /** `1.0` for an exact reference/chapter match, `null` for a free-text
+   * match (no fabricated ranking - see the Rust type's docs). */
+  relevance: number | null;
+}
+
 /**
  * The provider/adaptor contract for anything that can serve Bible content.
  * Concrete implementations (a local SQLite-backed provider today, network

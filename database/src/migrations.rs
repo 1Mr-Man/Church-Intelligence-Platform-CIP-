@@ -31,6 +31,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0004_presentation_traceability",
         sql: include_str!("../migrations/0004_presentation_traceability.sql"),
     },
+    Migration {
+        version: 5,
+        name: "0005_content_registry",
+        sql: include_str!("../migrations/0005_content_registry.sql"),
+    },
 ];
 
 /// A migration that was applied during this call to [`run_migrations`].
@@ -209,6 +214,32 @@ mod tests {
             index_exists,
             "missing idx_presentation_items_source_suggestion"
         );
+    }
+
+    #[test]
+    fn phase_1_5_content_registry_table_and_index_exist_after_migration() {
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+
+        let exists: bool = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'content_registry'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count == 1)
+            .unwrap();
+        assert!(exists, "expected table `content_registry` to exist");
+
+        let index_exists: bool = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_content_registry_type'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count == 1)
+            .unwrap();
+        assert!(index_exists, "missing idx_content_registry_type");
     }
 
     #[test]

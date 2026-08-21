@@ -8,11 +8,15 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  checkBibleDatasetIntegrity,
   createManualPresentation,
   getAppConfig,
+  importBibleDataset,
+  listContentRegistry,
   previewPresentation,
   previewScripture,
   searchBible,
+  setContentEnabled,
   TauriUnavailableError,
 } from "./commands";
 
@@ -49,7 +53,22 @@ describe("commands.ts Tauri IPC guard", () => {
 
     await searchBible("Romans 8:28");
 
-    expect(invokeMock).toHaveBeenCalledWith("search_bible", { query: "Romans 8:28" });
+    expect(invokeMock).toHaveBeenCalledWith("search_bible", {
+      query: "Romans 8:28",
+      translationId: null,
+    });
+  });
+
+  it("passes translationId through when explicitly given (Phase 1.5)", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await searchBible("Romans 8:28", "NIV");
+
+    expect(invokeMock).toHaveBeenCalledWith("search_bible", {
+      query: "Romans 8:28",
+      translationId: "NIV",
+    });
   });
 
   it("previewPresentation calls preview_presentation, never prepare_presentation (Phase 1.4)", async () => {
@@ -77,5 +96,50 @@ describe("commands.ts Tauri IPC guard", () => {
     await createManualPresentation("JHN 3:16");
 
     expect(invokeMock).toHaveBeenCalledWith("create_manual_presentation", { reference: "JHN 3:16" });
+  });
+
+  it("listContentRegistry passes null contentType when omitted (Phase 1.5)", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await listContentRegistry();
+
+    expect(invokeMock).toHaveBeenCalledWith("list_content_registry", { contentType: null });
+  });
+
+  it("listContentRegistry passes the requested contentType through", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await listContentRegistry("bible");
+
+    expect(invokeMock).toHaveBeenCalledWith("list_content_registry", { contentType: "bible" });
+  });
+
+  it("setContentEnabled calls set_content_enabled with the requested state", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await setContentEnabled("bible:KJV", false);
+
+    expect(invokeMock).toHaveBeenCalledWith("set_content_enabled", { contentId: "bible:KJV", enabled: false });
+  });
+
+  it("importBibleDataset never reads the filesystem itself - it only forwards already-read JSON text", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await importBibleDataset('{"translation":{}}');
+
+    expect(invokeMock).toHaveBeenCalledWith("import_bible_dataset", { datasetJson: '{"translation":{}}' });
+  });
+
+  it("checkBibleDatasetIntegrity calls check_bible_dataset_integrity with the translation id", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await checkBibleDatasetIntegrity("KJV");
+
+    expect(invokeMock).toHaveBeenCalledWith("check_bible_dataset_integrity", { translationId: "KJV" });
   });
 });

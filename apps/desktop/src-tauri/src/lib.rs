@@ -1,5 +1,6 @@
 mod commands;
 mod config;
+mod content;
 mod errors;
 pub mod events;
 pub mod logging;
@@ -88,11 +89,32 @@ pub fn run() {
             let bible_conn = cip_database::open(&config.database_path)?;
             let bible_provider = Box::new(cip_integrations_bible::SqliteBibleProvider::new(bible_conn));
 
+            let content_conn = cip_database::open(&config.database_path)?;
+            let content_registry = Box::new(cip_integrations_content::SqliteContentRegistry::new(
+                content_conn,
+            ));
+            // Dev/test convenience only, mirroring the dev-seed guard
+            // above: the dev-seeded KJV translation gets a Content
+            // Registry entry too, so it shows up in diagnostics - with
+            // every licensing field honestly `UNKNOWN` (`None`), since
+            // the dev fixture's real provenance was never recorded. See
+            // docs/bible-datasets.md.
+            if config.environment != config::AppEnvironment::Production {
+                content::register_dev_seed_content_if_missing(content_registry.as_ref())?;
+            }
+
             let audio_engine: Box<dyn cip_core_service::AudioEngine> =
                 Box::new(cip_integrations_audio::CpalAudioEngine::new());
             let speech_engine = create_speech_engine(&config);
 
-            app.manage(AppState::new(config, db, bible_provider, audio_engine, speech_engine));
+            app.manage(AppState::new(
+                config,
+                db,
+                bible_provider,
+                content_registry,
+                audio_engine,
+                speech_engine,
+            ));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -120,6 +142,11 @@ pub fn run() {
             commands::get_presentation_item,
             commands::cancel_presentation,
             commands::search_bible,
+            commands::list_content_registry,
+            commands::get_content_metadata,
+            commands::set_content_enabled,
+            commands::import_bible_dataset,
+            commands::check_bible_dataset_integrity,
             commands::get_live_status,
             commands::list_timeline,
             commands::list_service_history,
