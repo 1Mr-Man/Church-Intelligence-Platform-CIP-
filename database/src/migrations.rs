@@ -1,0 +1,142 @@
+use crate::DatabaseError;
+use rusqlite::{params, Connection, OptionalExtension};
+
+/// A single migration, embedded into the binary at compile time so the
+/// desktop app never depends on migration files being present on disk at
+/// runtime.
+struct Migration {
+    version: i64,
+    name: &'static str,
+    sql: &'static str,
+}
+
+const MIGRATIONS: &[Migration] = &[Migration {
+    version: 1,
+    name: "0001_initial_schema",
+    sql: include_str!("../migrations/0001_initial_schema.sql"),
+}];
+
+/// A migration that was applied during this call to [`run_migrations`].
+/// (Migrations already applied in a previous run are not included.)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppliedMigration {
+    pub version: i64,
+    pub name: String,
+}
+
+fn ensure_migrations_table(conn: &Connection) -> Result<(), DatabaseError> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS schema_migrations (
+            version    INTEGER PRIMARY KEY,
+            name       TEXT NOT NULL,
+            applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        );",
+    )
+    .map_err(|e| DatabaseError::Migration(e.to_string()))
+}
+
+fn is_applied(conn: &Connection, version: i64) -> Result<bool, DatabaseError> {
+    conn.query_row(
+        "SELECT 1 FROM schema_migrations WHERE version = ?1",
+        params![version],
+        |_| Ok(()),
+    )
+    .optional()
+    .map(|row| row.is_some())
+    .map_err(|e| DatabaseError::Migration(e.to_string()))
+}
+
+/// Apply every migration in `MIGRATIONS` that has not already been applied
+/// to `conn`, in ascending version order, each inside its own transaction.
+/// Idempotent: calling this on an already-current database is a no-op.
+pub fn run_migrations(conn: &mut Connection) -> Result<Vec<AppliedMigration>, DatabaseError> {
+    ensure_migrations_table(conn)?;
+    let mut applied = Vec::new();
+
+    for migration in MIGRATIONS {
+        if is_applied(conn, migration.version)? {
+            continue;
+        }
+
+        let tx = conn
+            .transaction()
+            .map_err(|e| DatabaseError::Migration(e.to_string()))?;
+        tx.execute_batch(migration.sql)
+            .map_err(|e| DatabaseError::Migration(format!("{}: {e}", migration.name)))?;
+        tx.execute(
+            "INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)",
+            params![migration.version, migration.name],
+        )
+        .map_err(|e| DatabaseError::Migration(e.to_string()))?;
+        tx.commit()
+            .map_err(|e| DatabaseError::Migration(e.to_string()))?;
+
+        applied.push(AppliedMigration {
+            version: migration.version,
+            name: migration.name.to_string(),
+        });
+    }
+
+    Ok(applied)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::connection::open_in_memory;
+
+    #[test]
+    fn applies_all_migrations_to_a_fresh_database() {
+        let mut conn = open_in_memory().unwrap();
+        let applied = run_migrations(&mut conn).unwrap();
+        assert_eq!(applied.len(), MIGRATIONS.len());
+
+        let table_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'services'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(table_count, 1);
+    }
+
+    #[test]
+    fn running_migrations_twice_is_a_no_op_the_second_time() {
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        let second_pass = run_migrations(&mut conn).unwrap();
+        assert!(second_pass.is_empty());
+    }
+
+    #[test]
+    fn all_ten_phase_1_domain_tables_exist_after_migration() {
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+
+        const EXPECTED_TABLES: [&str; 10] = [
+            "services",
+            "transcript_segments",
+            "bible_translations",
+            "bible_books",
+            "bible_chapters",
+            "bible_verses",
+            "scripture_detections",
+            "ai_suggestions",
+            "presentation_items",
+            "audit_events",
+        ];
+
+        for table in EXPECTED_TABLES {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    params![table],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|count| count == 1)
+                .unwrap();
+            assert!(exists, "expected table `{table}` to exist after migration");
+        }
+    }
+}

@@ -1,0 +1,10 @@
+[package]
+name = "cip-integrations-obs"
+description = "OBS Studio integration - placeholder. Explicitly out of scope for Phase 1."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

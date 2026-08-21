@@ -1,0 +1,15 @@
+[package]
+name = "cip-integrations-bible"
+description = "Bible provider adapters. Phase 1 ships one: a local SQLite-backed BibleProvider."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cip-core-bible.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+cip-database.workspace = true

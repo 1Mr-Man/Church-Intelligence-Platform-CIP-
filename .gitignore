@@ -1,0 +1,24 @@
+# Rust
+/target/
+**/target/
+
+# Node
+node_modules/
+apps/desktop/dist/
+apps/desktop/node_modules/.tmp/
+
+# Tauri
+apps/desktop/src-tauri/gen/schemas/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Local runtime data (dev/test SQLite files, logs) - never committed,
+# CIP is local-first and every install owns its own local database.
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.log

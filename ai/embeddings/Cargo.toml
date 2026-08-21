@@ -1,0 +1,10 @@
+[package]
+name = "cip-ai-embeddings"
+description = "Text/vector embedding generation - placeholder. Reserved for semantic search over sermon/scripture content."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

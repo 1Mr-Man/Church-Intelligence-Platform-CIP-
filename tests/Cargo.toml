@@ -1,0 +1,24 @@
+[package]
+name = "cip-integration-tests"
+description = "Cross-crate integration tests proving the Phase 1 foundation is wired together correctly."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]
+cip-core-bible.workspace = true
+cip-core-service.workspace = true
+cip-core-ai.workspace = true
+cip-core-presentation.workspace = true
+cip-core-confidence.workspace = true
+cip-database.workspace = true
+cip-integrations-bible.workspace = true
+cip-ai-speech.workspace = true
+cip-presentation-renderer.workspace = true
+uuid.workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = "cip-ai-speech"
+description = "SpeechEngine implementations. Phase 1 ships a NullSpeechEngine only, to prove the contract wiring."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cip-core-ai.workspace = true

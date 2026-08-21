@@ -1,0 +1,14 @@
+[package]
+name = "cip-presentation-renderer"
+description = "Renderer contract for turning a PresentationItem into on-screen output. Phase 1 ships a NullRenderer only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cip-core-presentation.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true

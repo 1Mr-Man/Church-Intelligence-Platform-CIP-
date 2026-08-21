@@ -1,0 +1,10 @@
+[package]
+name = "cip-ai-classifiers"
+description = "AI classifiers - placeholder. Reserved for sermon/topic/suggestion-kind classification."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

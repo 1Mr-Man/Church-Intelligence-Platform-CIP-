@@ -1,0 +1,33 @@
+[package]
+name = "cip-desktop"
+description = "Church Intelligence Platform desktop application (Tauri shell)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "cip_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+serde_json.workspace = true
+serde.workspace = true
+log.workspace = true
+thiserror.workspace = true
+rusqlite.workspace = true
+tauri = { version = "2.11.3", features = [] }
+tauri-plugin-log = "2"
+
+cip-database.workspace = true
+cip-core-bible.workspace = true
+cip-integrations-bible.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

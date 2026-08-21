@@ -1,0 +1,13 @@
+[package]
+name = "cip-core-search"
+description = "Search domain contract: a source-agnostic SearchEngine used to query across Bible, sermon, and presentation content."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+cip-core-confidence.workspace = true
