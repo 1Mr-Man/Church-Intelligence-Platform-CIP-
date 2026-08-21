@@ -63,6 +63,14 @@ and a v0.1 "Live Church Brain" operator UI. See
 model-download blocker in this development environment and how to verify
 real transcription with network access to a model host.
 
+**Phase 1.2.1 (Runtime Compatibility & Web Fallback)** made the frontend
+runtime-aware: this same build can be deployed as a static web app (e.g.
+Vercel) with no Tauri backend behind it. Every Tauri IPC call and event
+subscription now checks `isTauriRuntime()` first, so opening the web
+deployment in an ordinary browser shows a clear "Web Runtime" notice
+instead of the raw `TypeError` a bare `invoke()` call previously threw
+outside Tauri. See [`docs/live-speech.md`](docs/live-speech.md#cip-web-vs-cip-desktop-phase-121).
+
 Still deliberately **not** implemented: song recognition, sermon
 intelligence, semantic/paraphrase Bible search, cloud sync, OBS/vMix
 integration, and the full presentation designer. Those are later phases.

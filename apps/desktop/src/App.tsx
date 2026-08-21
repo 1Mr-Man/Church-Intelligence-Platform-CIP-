@@ -4,6 +4,8 @@ import type { AppConfig } from "./config/appConfig";
 import type { BibleTranslation } from "./domain";
 import { appHealthCheck, getAppConfig, listBibleTranslations, type HealthReport } from "./lib/commands";
 import { LiveChurchBrain } from "./components/LiveChurchBrain";
+import { WebRuntimeNotice } from "./components/WebRuntimeNotice";
+import { isTauriRuntime } from "./lib/runtime";
 
 interface FoundationState {
   config: AppConfig;
@@ -14,8 +16,12 @@ interface FoundationState {
 function App() {
   const [state, setState] = useState<FoundationState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Read once per mount - the runtime a page loaded in does not change
+  // during its lifetime.
+  const [tauriRuntime] = useState(isTauriRuntime);
 
   useEffect(() => {
+    if (!tauriRuntime) return;
     let cancelled = false;
 
     Promise.all([getAppConfig(), appHealthCheck(), listBibleTranslations()])
@@ -29,7 +35,11 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [tauriRuntime]);
+
+  if (!tauriRuntime) {
+    return <WebRuntimeNotice />;
+  }
 
   return (
     <>

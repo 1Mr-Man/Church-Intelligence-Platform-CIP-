@@ -4,6 +4,13 @@
  * calls behind named, typed functions (rather than calling `invoke` inline
  * from components) is the one indirection Phase 1 needs: it's the single
  * place that has to change if a command's name or payload shape changes.
+ *
+ * Every function here goes through {@link invokeCommand}, which checks
+ * {@link isTauriRuntime} first - see `lib/runtime.ts`. Outside the Tauri
+ * desktop shell (e.g. the web deployment opened in a plain browser),
+ * `@tauri-apps/api`'s real `invoke` is never called; callers get a
+ * rejected promise carrying {@link TauriUnavailableError} instead of a
+ * raw `TypeError` from a missing `window.__TAURI_INTERNALS__`.
  */
 import { invoke } from "@tauri-apps/api/core";
 import type { AppConfig, AppEnvironment } from "../config/appConfig";
@@ -19,6 +26,7 @@ import type {
   SuggestionStatus,
   TranscriptSegment,
 } from "../domain";
+import { isTauriRuntime } from "./runtime";
 
 export interface HealthReport {
   databaseConnected: boolean;
@@ -26,84 +34,100 @@ export interface HealthReport {
   environment: AppEnvironment;
 }
 
+/** Thrown instead of calling Tauri IPC when this frontend is not running
+ * inside the Tauri desktop shell - see `lib/runtime.ts`. */
+export class TauriUnavailableError extends Error {
+  constructor(command: string) {
+    super(`"${command}" requires the CIP desktop application and is not available in a web browser.`);
+    this.name = "TauriUnavailableError";
+  }
+}
+
+function invokeCommand<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  if (!isTauriRuntime()) {
+    return Promise.reject(new TauriUnavailableError(command));
+  }
+  return invoke<T>(command, args);
+}
+
 // --- foundation (Phase 1.0/1.1) --------------------------------------------
 
 export function getAppConfig(): Promise<AppConfig> {
-  return invoke("get_app_config");
+  return invokeCommand("get_app_config");
 }
 
 export function appHealthCheck(): Promise<HealthReport> {
-  return invoke("app_health_check");
+  return invokeCommand("app_health_check");
 }
 
 export function listBibleTranslations(): Promise<BibleTranslation[]> {
-  return invoke("list_bible_translations");
+  return invokeCommand("list_bible_translations");
 }
 
 // --- service lifecycle ------------------------------------------------------
 
 export function startService(title: string): Promise<ServiceSession> {
-  return invoke("start_service", { title });
+  return invokeCommand("start_service", { title });
 }
 
 export function endService(): Promise<ServiceSession> {
-  return invoke("end_service");
+  return invokeCommand("end_service");
 }
 
 // --- audio / live listening --------------------------------------------------
 
 export function listAudioDevices(): Promise<AudioDevice[]> {
-  return invoke("list_audio_devices");
+  return invokeCommand("list_audio_devices");
 }
 
 export function startListening(deviceId?: string): Promise<void> {
-  return invoke("start_listening", { deviceId: deviceId ?? null });
+  return invokeCommand("start_listening", { deviceId: deviceId ?? null });
 }
 
 export function stopListening(): Promise<void> {
-  return invoke("stop_listening");
+  return invokeCommand("stop_listening");
 }
 
 // --- deterministic transcript harness / manual entry -------------------------
 
 export function processTestTranscript(text: string): Promise<ProcessedSegment> {
-  return invoke("process_test_transcript", { text });
+  return invokeCommand("process_test_transcript", { text });
 }
 
 // --- transcript & suggestions -------------------------------------------------
 
 export function listTranscript(limit: number): Promise<TranscriptSegment[]> {
-  return invoke("list_transcript", { limit });
+  return invokeCommand("list_transcript", { limit });
 }
 
 export function listSuggestions(status?: SuggestionStatus): Promise<Suggestion[]> {
-  return invoke("list_suggestions", { status: status ?? null });
+  return invokeCommand("list_suggestions", { status: status ?? null });
 }
 
 export function approveSuggestion(suggestionId: string): Promise<Suggestion> {
-  return invoke("approve_suggestion", { suggestionId });
+  return invokeCommand("approve_suggestion", { suggestionId });
 }
 
 export function editSuggestion(suggestionId: string, newReference: string): Promise<Suggestion> {
-  return invoke("edit_suggestion", { suggestionId, newReference });
+  return invokeCommand("edit_suggestion", { suggestionId, newReference });
 }
 
 export function rejectSuggestion(suggestionId: string): Promise<Suggestion> {
-  return invoke("reject_suggestion", { suggestionId });
+  return invokeCommand("reject_suggestion", { suggestionId });
 }
 
 export function preparePresentation(suggestionId: string): Promise<PresentationItem> {
-  return invoke("prepare_presentation", { suggestionId });
+  return invokeCommand("prepare_presentation", { suggestionId });
 }
 
 // --- manual Bible search (works with no audio/speech/network) ---------------
 
 export function searchBible(query: string): Promise<BibleVerse[]> {
-  return invoke("search_bible", { query });
+  return invokeCommand("search_bible", { query });
 }
 
 // --- live status --------------------------------------------------------------
 
 export function getLiveStatus(): Promise<LiveStatus> {
-  return invoke("get_live_status");
+  return invokeCommand("get_live_status");
 }

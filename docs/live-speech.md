@@ -7,7 +7,8 @@ a spoken sentence all the way to a presented-on-approval suggestion.
 system and [`docs/bible-intelligence.md`](bible-intelligence.md) still owns
 the Bible Intelligence Core itself - this document only covers what's new:
 everything *before* `process_transcript_segment` (audio, speech,
-persistence, IPC, the Live Church Brain UI) plus how the two phases connect.
+persistence, IPC, the Live Church Brain UI, and - as of Phase 1.2.1 -
+Tauri-vs-web runtime detection) plus how the two phases connect.
 
 **Not in this phase:** song/hymn recognition, sermon intelligence,
 semantic/paraphrase Bible search, cloud speech, OBS/vMix integration, the
@@ -225,6 +226,53 @@ suggestion. `SUGGESTION_APPROVED`/`EDITED`/`REJECTED` and
 `PRESENTATION_PREPARED` fire only from their respective explicit-human-action
 commands - never from the speech pipeline.
 
+## CIP Web vs. CIP Desktop (Phase 1.2.1)
+
+This same frontend can also be deployed as a plain static site (e.g. to
+Vercel) and opened in a normal browser, with no Tauri runtime underneath:
+
+```
+CIP DESKTOP:  Browser/WebView -> Tauri -> Rust backend -> SQLite/CPAL/Whisper
+CIP WEB:      Normal browser -> React/Vite app -> NO Tauri backend
+```
+
+`@tauri-apps/api`'s `invoke`/`listen` reach into `window.__TAURI_INTERNALS__`,
+which only exists inside a real Tauri WebView; calling them from a plain
+browser throws `TypeError: Cannot read properties of undefined (reading
+'invoke')`. Nothing in this frontend may let that surface. `lib/runtime.ts`'s
+`isTauriRuntime()` (a thin wrapper over `@tauri-apps/api/core`'s own
+`isTauri()`, which reads a runtime-injected `globalThis.isTauri` boolean)
+is the single source of truth for which environment the page is running
+in, and every IPC boundary is gated behind it:
+
+- **`lib/commands.ts`** - every command wrapper goes through an internal
+  `invokeCommand` helper that checks `isTauriRuntime()` *before* calling
+  the real `invoke`. Outside Tauri, it rejects with a typed
+  `TauriUnavailableError` naming the command - `invoke` itself is never
+  called, so the raw `TypeError` never happens.
+- **`lib/liveEvents.ts`** - every `onXxx` subscription goes through an
+  internal `listenSafe` helper the same way. Outside Tauri there is no
+  backend to emit events at all, so subscribing resolves to a harmless
+  no-op `UnlistenFn` instead of calling the real `listen`.
+- **`App.tsx`** - checks `isTauriRuntime()` once on mount and, outside
+  Tauri, renders `WebRuntimeNotice` instead of `LiveChurchBrain` or the
+  foundation diagnostics. This is the outer guard: it means the web build
+  never even *attempts* an IPC call or event subscription, rather than
+  attempting one and recovering from the rejection.
+
+Nothing about Phase 1.0-1.2 changed to make this work - CIP Web has no
+Rust backend, no local SQLite database, and no audio/speech engine, so it
+offers no live-service functionality of its own; it only stops crashing
+when someone opens the desktop frontend's build in an ordinary browser,
+and says so clearly instead of showing a raw exception. `WebRuntimeNotice`
+(`components/WebRuntimeNotice.tsx`) is the only thing rendered in that
+case.
+
+```sh
+# frontend tests covering both wrappers' guard behavior
+pnpm --filter @cip/desktop test -- runtime commands liveEvents
+```
+
 ## Online/offline and AI availability
 
 `get_live_status` reports four independent signals - deliberately never
@@ -318,6 +366,13 @@ documents this as a test, not just a claim.
   `LiveStatus`) - there is no React Testing Library in this project, so
   these remain type/shape contract tests, consistent with the existing
   file's established pattern, rather than DOM rendering tests.
+- **Runtime detection (Phase 1.2.1)** - `lib/runtime.test.ts` exercises
+  the real `@tauri-apps/api/core::isTauri()` against `globalThis.isTauri`;
+  `lib/commands.test.ts` and `lib/liveEvents.test.ts` mock
+  `@tauri-apps/api` to prove the IPC/event guards reject with
+  `TauriUnavailableError`/resolve to a no-op respectively, and never call
+  the real `invoke`/`listen`, when outside the Tauri runtime - see "CIP
+  Web vs. CIP Desktop" above.
 
 ```sh
 cargo test --workspace
