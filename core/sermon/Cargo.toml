@@ -1,6 +1,6 @@
 [package]
 name = "cip-core-sermon"
-description = "Sermon domain placeholder. Reserved for sermon intelligence (out of scope for Phase 1 foundation)."
+description = "Sermon domain: taxonomy, deterministic structural detection, theme tracking, and sermon-state inference (Phase 2.3)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,3 +9,4 @@ repository.workspace = true
 
 [dependencies]
 serde.workspace = true
+regex.workspace = true

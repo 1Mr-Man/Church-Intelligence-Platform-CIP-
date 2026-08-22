@@ -1,22 +1,24 @@
-//! Sermon domain - placeholder for Phase 1.
+//! Sermon domain (Phase 2.3): pure, deterministic sermon structural/
+//! meaning detection with no dependency on `core/intelligence`,
+//! persistence, or Tauri - see `docs/sermon-intelligence.md`.
 //!
-//! This crate exists to hold the `core/sermon` architectural boundary in
-//! place. Sermon intelligence is explicitly out of scope for the Phase 1
-//! foundation; no domain logic lives here yet.
+//! This crate answers "what sermon-shaped things are present in this
+//! text" - it never assigns an [`AssertionLevel`]-equivalent epistemic
+//! label, confidence score, or `IntelligenceFinding`; that translation is
+//! `core/intelligence::sermon_adapter`'s job (mirroring `core/bible`'s
+//! split from `core/intelligence::bible_adapter`). Dependency direction is
+//! one-way: `core/intelligence` depends on this crate, never the reverse,
+//! and this crate never depends on any other domain crate (spec's
+//! cross-domain dependency rule).
 
-use serde::{Deserialize, Serialize};
+pub mod detection;
+pub mod state;
+pub mod structure;
+pub mod taxonomy;
+pub mod theme;
 
-/// Minimal identity marker so downstream code (and tests) can reference
-/// "the sermon domain" before any real domain type exists.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SermonDomainPlaceholder;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn placeholder_type_is_constructible() {
-        let _ = SermonDomainPlaceholder;
-    }
-}
+pub use detection::{detect_elements, SermonDetection};
+pub use state::{infer_state, SermonState};
+pub use structure::{SermonPoint, SermonStructure, SermonSubPoint};
+pub use taxonomy::SermonElementKind;
+pub use theme::{ThemeCandidate, ThemeTracker};

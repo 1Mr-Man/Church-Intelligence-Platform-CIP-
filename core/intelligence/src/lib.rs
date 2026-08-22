@@ -58,6 +58,7 @@ mod fixtures;
 pub mod music_adapter;
 mod queue;
 mod registry;
+pub mod sermon_adapter;
 
 pub use bible_adapter::{BibleIntelligenceEngine, BIBLE_ENGINE_ID, BIBLE_ENGINE_VERSION};
 pub use context::{
@@ -81,3 +82,6 @@ pub use music_adapter::{
 };
 pub use queue::{FindingQueue, QueueAddOutcome};
 pub use registry::{EngineOutcome, IntelligenceEngineRegistry};
+pub use sermon_adapter::{
+    SermonIntelligenceEngine, SermonStateSnapshot, SERMON_ENGINE_ID, SERMON_ENGINE_VERSION,
+};

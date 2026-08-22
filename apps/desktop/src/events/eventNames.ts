@@ -51,6 +51,16 @@ export const AppEvents = {
   /** The operator-confirmed "current song" changed (Phase 2.2) - payload
    * is `CurrentSong | null` (`null` when cleared). */
   CurrentSongChanged: "CURRENT_SONG_CHANGED",
+
+  SermonFindingDetected: "SERMON_FINDING_DETECTED",
+  SermonFindingAccepted: "SERMON_FINDING_ACCEPTED",
+  SermonFindingRejected: "SERMON_FINDING_REJECTED",
+  /** Payload is the updated `SermonPoint[]` (Phase 2.3). */
+  SermonStructureUpdated: "SERMON_STRUCTURE_UPDATED",
+  /** Payload is `ThemeCandidate | null` (Phase 2.3). */
+  SermonThemeChanged: "SERMON_THEME_CHANGED",
+  /** Payload is the new `SermonState` (Phase 2.3). */
+  SermonStateChanged: "SERMON_STATE_CHANGED",
 } as const;
 
 export type AppEventName = (typeof AppEvents)[keyof typeof AppEvents];

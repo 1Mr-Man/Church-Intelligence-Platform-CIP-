@@ -84,6 +84,25 @@ pub enum AppEvent {
     /// "event reuse over event proliferation" note), so there is no
     /// separate acoustic-candidate or song-transition event.
     CurrentSongChanged,
+
+    /// The Sermon Intelligence engine produced a new finding (Phase 2.3) -
+    /// never implies anything was presented or auto-approved; see
+    /// `docs/sermon-intelligence.md`.
+    SermonFindingDetected,
+    /// The operator accepted a sermon finding (Phase 2.3) - a review
+    /// decision only, still no presentation side effect.
+    SermonFindingAccepted,
+    SermonFindingRejected,
+    /// The sermon structure (a new main/sub-point recorded) changed
+    /// (Phase 2.3) - never implies any point was rewritten; earlier
+    /// points remain exactly as recorded.
+    SermonStructureUpdated,
+    /// The current theme candidate changed (Phase 2.3) - always
+    /// `Inferred`; never claims certainty the evidence doesn't support.
+    SermonThemeChanged,
+    /// The lightweight derived sermon state changed (Phase 2.3) - a
+    /// classification, never a rigid state machine transition.
+    SermonStateChanged,
 }
 
 impl AppEvent {
@@ -127,6 +146,13 @@ impl AppEvent {
             AppEvent::MusicFindingRejected => "MUSIC_FINDING_REJECTED",
 
             AppEvent::CurrentSongChanged => "CURRENT_SONG_CHANGED",
+
+            AppEvent::SermonFindingDetected => "SERMON_FINDING_DETECTED",
+            AppEvent::SermonFindingAccepted => "SERMON_FINDING_ACCEPTED",
+            AppEvent::SermonFindingRejected => "SERMON_FINDING_REJECTED",
+            AppEvent::SermonStructureUpdated => "SERMON_STRUCTURE_UPDATED",
+            AppEvent::SermonThemeChanged => "SERMON_THEME_CHANGED",
+            AppEvent::SermonStateChanged => "SERMON_STATE_CHANGED",
         }
     }
 }
@@ -179,6 +205,12 @@ mod tests {
             AppEvent::MusicFindingAccepted,
             AppEvent::MusicFindingRejected,
             AppEvent::CurrentSongChanged,
+            AppEvent::SermonFindingDetected,
+            AppEvent::SermonFindingAccepted,
+            AppEvent::SermonFindingRejected,
+            AppEvent::SermonStructureUpdated,
+            AppEvent::SermonThemeChanged,
+            AppEvent::SermonStateChanged,
         ];
         let mut names: Vec<&str> = events.iter().map(|e| e.name()).collect();
         let unique_before = names.len();

@@ -229,6 +229,13 @@ Phase 2.2's acoustic-sourced findings are the exact same
 them automatically - accepting an acoustic finding only ever sets
 `AppState.current_song`, never a `PresentationItem`; see
 [`docs/acoustic-music.md`](acoustic-music.md#finding-lifecycle---unchanged).
+Phase 2.3's Sermon findings hold to the identical standard:
+`apps/desktop/src-tauri/src/sermon.rs` has no dependency on
+`cip_core_presentation` at all, so accepting or rejecting a sermon
+finding (a main point, a theme, a key statement, ...) is structurally
+incapable of creating, activating, or otherwise touching a
+`PresentationItem` - see
+[`docs/sermon-intelligence.md`](sermon-intelligence.md#operator-workflow-tauri-commands).
 
 ## Offline and failure-fallback behavior
 

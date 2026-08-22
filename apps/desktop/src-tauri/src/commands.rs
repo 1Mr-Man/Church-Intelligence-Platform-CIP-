@@ -2204,6 +2204,222 @@ pub fn analyze_music_audio(
     Ok(queued)
 }
 
+// --- sermon intelligence (Phase 2.3) ----------------------------------------
+//
+// Deliberately manual-command-only, mirroring Music's Phase 2.1 lyric
+// path (`analyze_music_transcript`) - nothing here is wired into
+// `pipeline.rs::handle_final_transcript`, which stays exactly as Phase 1
+// left it. `SermonIntelligenceEngine` needs no provider/dataset, so there
+// is no dataset-import counterpart here.
+
+/// The deterministic sermon-analysis harness, exposed over IPC - the
+/// Sermon Intelligence counterpart to `analyze_music_transcript`. Persists
+/// `text` as an ordinary transcript segment, builds a real
+/// `IntelligenceContext` from this app's actual state (so scripture
+/// cross-linking can see `active_scripture_context`), and calls
+/// `AppState.sermon_engine` directly - the same accumulating-state
+/// instance every call goes through, never the separate diagnostic-only
+/// copy in `intelligence_registry` (see `sermon.rs`'s module docs).
+/// Findings are queued in `AppState.intelligence_findings`; this command
+/// never prepares or projects a presentation item, and never records a
+/// timeline entry for a mere detection (spec section 41) - only
+/// `accept_sermon_finding`/`reject_sermon_finding` do that.
+#[tauri::command]
+pub fn analyze_sermon_transcript(
+    text: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<IntelligenceFinding>, AppError> {
+    let text = require_non_empty(&text, "text").map_err(log_and_return)?;
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let sequence = state.transcript_sequence.fetch_add(1, Ordering::SeqCst);
+
+    let segment = TranscriptSegment {
+        id: Uuid::new_v4(),
+        sequence,
+        text,
+        is_final: true,
+        confidence: ConfidenceResult::new(
+            1.0,
+            ConfidenceSource::Human,
+            Some("manually entered test transcript for sermon analysis".to_string()),
+        ),
+        start_ms: 0,
+        end_ms: 0,
+        language: Some("en".to_string()),
+        speaker_id: None,
+    };
+
+    {
+        let db = state.db.lock().expect("db connection poisoned");
+        persistence::persist_transcript_segment(&db, service_id, &segment)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+    }
+    let _ = emit(&app, AppEvent::TranscriptUpdated, segment.clone());
+
+    let context = {
+        let db = state.db.lock().expect("db connection poisoned");
+        let recent_timeline = timeline::list_timeline(&db, service_id, 20)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        let active_service = state
+            .active_service
+            .lock()
+            .expect("active_service mutex poisoned");
+        let context_manager = state
+            .context_manager
+            .lock()
+            .expect("context_manager mutex poisoned");
+        crate::intelligence::build_intelligence_context(
+            &db,
+            state.content_registry.as_ref(),
+            active_service.as_ref(),
+            &*context_manager,
+            &recent_timeline,
+            Vec::new(),
+            ContextBounds::default(),
+        )
+        .map_err(AppError::from)
+        .map_err(log_and_return)?
+    };
+
+    let before = state.sermon_engine.snapshot();
+    let input = IntelligenceInput::new(service_id, segment);
+    let queued = {
+        let mut findings = state
+            .intelligence_findings
+            .lock()
+            .expect("intelligence_findings mutex poisoned");
+        crate::sermon::analyze_and_queue(&state.sermon_engine, &input, &context, &mut findings)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?
+    };
+    let after = state.sermon_engine.snapshot();
+
+    for finding in &queued {
+        let _ = emit(&app, AppEvent::SermonFindingDetected, finding.clone());
+    }
+    if after.state != before.state {
+        let _ = emit(&app, AppEvent::SermonStateChanged, after.state);
+    }
+    if after.theme != before.theme {
+        let _ = emit(&app, AppEvent::SermonThemeChanged, after.theme.clone());
+    }
+    if after.points.len() != before.points.len()
+        || after.points.last().map(|p| p.sub_points.len())
+            != before.points.last().map(|p| p.sub_points.len())
+    {
+        let _ = emit(&app, AppEvent::SermonStructureUpdated, after.points.clone());
+    }
+
+    Ok(queued)
+}
+
+/// Sermon findings still awaiting an operator decision (`Detected`/`Reviewed`),
+/// for the active service - mirrors `list_music_findings` exactly.
+#[tauri::command]
+pub fn list_sermon_findings(
+    state: State<'_, AppState>,
+) -> Result<Vec<IntelligenceFinding>, AppError> {
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let findings = state
+        .intelligence_findings
+        .lock()
+        .expect("intelligence_findings mutex poisoned");
+    Ok(findings
+        .pending()
+        .into_iter()
+        .filter(|f| f.service_id == service_id && f.domain == IntelligenceDomain::Sermon)
+        .cloned()
+        .collect())
+}
+
+/// Explicit operator acceptance of a sermon finding - changes only the
+/// finding's own status, exactly like `accept_music_finding`. There is no
+/// code path from here into `presentation::persist_prepared_item` or
+/// anything else that could project a slide (spec section 24/54).
+#[tauri::command]
+pub fn accept_sermon_finding(
+    finding_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<IntelligenceFinding, AppError> {
+    let id = parse_uuid(&finding_id).map_err(log_and_return)?;
+    let updated = {
+        let mut findings = state
+            .intelligence_findings
+            .lock()
+            .expect("intelligence_findings mutex poisoned");
+        findings
+            .accept(id)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        findings
+            .get(id)
+            .cloned()
+            .expect("just-accepted finding is still present")
+    };
+    let db = state.db.lock().expect("db connection poisoned");
+    record_timeline(
+        &db,
+        Some(updated.service_id),
+        AppEvent::SermonFindingAccepted,
+        LogCategory::App,
+        serde_json::json!({ "findingId": updated.id, "summary": &updated.summary }),
+    );
+    drop(db);
+    let _ = emit(&app, AppEvent::SermonFindingAccepted, updated.clone());
+    Ok(updated)
+}
+
+/// Explicit operator rejection of a sermon finding - the same auditable,
+/// explicit correction path spec section 40 asks for: rejecting a
+/// mis-detected theme/point is recorded (`SERMON_FINDING_REJECTED`) and
+/// never rewrites the transcript that led to it.
+#[tauri::command]
+pub fn reject_sermon_finding(
+    finding_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<IntelligenceFinding, AppError> {
+    let id = parse_uuid(&finding_id).map_err(log_and_return)?;
+    let updated = {
+        let mut findings = state
+            .intelligence_findings
+            .lock()
+            .expect("intelligence_findings mutex poisoned");
+        findings
+            .reject(id)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        findings
+            .get(id)
+            .cloned()
+            .expect("just-rejected finding is still present")
+    };
+    let db = state.db.lock().expect("db connection poisoned");
+    record_timeline(
+        &db,
+        Some(updated.service_id),
+        AppEvent::SermonFindingRejected,
+        LogCategory::App,
+        serde_json::json!({ "findingId": updated.id, "summary": &updated.summary }),
+    );
+    drop(db);
+    let _ = emit(&app, AppEvent::SermonFindingRejected, updated.clone());
+    Ok(updated)
+}
+
+/// The current theme/state/structure snapshot - read-only, never mutates
+/// anything. The manual sermon test-mode UI and the Live Church Brain's
+/// "SERMON INTELLIGENCE" panel both poll this rather than re-deriving it
+/// from the raw finding queue.
+#[tauri::command]
+pub fn get_sermon_state(state: State<'_, AppState>) -> cip_core_intelligence::SermonStateSnapshot {
+    state.sermon_engine.snapshot()
+}
+
 // --- live status -------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

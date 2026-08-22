@@ -490,6 +490,7 @@ dependencies = [
  "cip-core-confidence",
  "cip-core-content",
  "cip-core-music",
+ "cip-core-sermon",
  "cip-core-service",
  "serde",
  "serde_json",
@@ -530,6 +531,7 @@ dependencies = [
 name = "cip-core-sermon"
 version = "0.1.0"
 dependencies = [
+ "regex",
  "serde",
 ]
 

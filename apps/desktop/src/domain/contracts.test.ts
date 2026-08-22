@@ -31,6 +31,7 @@ import type {
   MusicImportReport,
   SongRecognitionCandidate,
 } from "./music";
+import type { SermonPoint, SermonState, SermonStateSnapshot, ThemeCandidate } from "./sermon";
 
 describe("domain contracts", () => {
   it("constructs a ScriptureReference and a matching BibleTranslation", () => {
@@ -482,5 +483,87 @@ describe("domain contracts", () => {
       method: "local_model",
       durationMs: 8000,
     });
+  });
+
+  // --- Phase 2.3: sermon intelligence ---------------------------------------
+
+  it("constructs a Sermon IntelligenceFinding distinguishing an Observed main point from an Inferred theme", () => {
+    const point: IntelligenceFinding = {
+      id: "99999999-9999-9999-9999-999999999999",
+      serviceId: "22222222-2222-2222-2222-222222222222",
+      domain: "sermon",
+      kind: "sermon",
+      assertionLevel: "observed",
+      status: "detected",
+      priority: "normal",
+      confidence: { score: 0.9, level: "high", source: "heuristic", reason: "explicit main-point trigger phrase matched" },
+      summary: "Main Point: My first point is that faith comes by hearing.",
+      transcriptSegmentIds: ["11111111-1111-1111-1111-111111111111"],
+      evidence: [
+        {
+          kind: "transcript",
+          segmentIds: ["11111111-1111-1111-1111-111111111111"],
+          excerpt: "My first point is that faith comes by hearing.",
+        },
+      ],
+      provenance: { contentId: null, note: null },
+      engineId: "sermon-core",
+      engineVersion: "0.1.0",
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    const theme: IntelligenceFinding = {
+      ...point,
+      id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      assertionLevel: "inferred",
+      summary: "Theme: faith",
+    };
+
+    expect(point.assertionLevel).toBe("observed");
+    expect(theme.assertionLevel).toBe("inferred");
+    // Never Generated - the core epistemic discipline Phase 2.3 must
+    // honor (spec section 7).
+    expect([point, theme].every((f) => f.assertionLevel !== "generated")).toBe(true);
+  });
+
+  it("constructs a SermonPoint that never carries a rewritten earlier point (Phase 2.3)", () => {
+    const points: SermonPoint[] = [
+      { sequence: 1, rawText: "My first point is faith.", subPoints: [] },
+      {
+        sequence: 2,
+        rawText: "The second thing is obedience.",
+        subPoints: [{ sequence: 1, rawText: "Under this point, obedience starts with listening." }],
+      },
+    ];
+    expect(points).toHaveLength(2);
+    expect(points[0].rawText).toContain("faith");
+    expect(points[1].subPoints[0].rawText).toContain("listening");
+  });
+
+  it("constructs a ThemeCandidate that is always Inferred-shaped, never claiming direct observation", () => {
+    const candidate: ThemeCandidate = {
+      label: "faith and obedience",
+      confidence: 0.75,
+      repetitionCount: 5,
+      structuralMentions: 2,
+    };
+    expect(candidate.confidence).toBeLessThan(1);
+    expect(candidate.label).toContain("and");
+  });
+
+  it("constructs a SermonStateSnapshot for every SermonState value", () => {
+    const states: SermonState[] = [
+      "introduction",
+      "teaching",
+      "main_point",
+      "illustration",
+      "application",
+      "conclusion",
+      "prayer",
+      "unknown",
+    ];
+    for (const state of states) {
+      const snapshot: SermonStateSnapshot = { state, theme: null, points: [] };
+      expect(snapshot.state).toBe(state);
+    }
   });
 });

@@ -13,6 +13,12 @@ import {
   onMusicFindingRejected,
   onPresentationPrepared,
   onPresentationPreviewed,
+  onSermonFindingAccepted,
+  onSermonFindingDetected,
+  onSermonFindingRejected,
+  onSermonStateChanged,
+  onSermonStructureUpdated,
+  onSermonThemeChanged,
   onSuggestionCreated,
 } from "./liveEvents";
 
@@ -88,6 +94,43 @@ describe("liveEvents.ts Tauri event-subscription guard", () => {
     isTauriMock.mockReturnValue(false);
 
     const unlisten = await onCurrentSongChanged(() => {});
+
+    expect(listenMock).not.toHaveBeenCalled();
+    expect(() => unlisten()).not.toThrow();
+  });
+
+  // --- sermon intelligence (Phase 2.3) --------------------------------------
+
+  it("subscribes to the three distinct sermon finding events", async () => {
+    isTauriMock.mockReturnValue(true);
+    listenMock.mockResolvedValue(() => {});
+
+    await onSermonFindingDetected(() => {});
+    await onSermonFindingAccepted(() => {});
+    await onSermonFindingRejected(() => {});
+
+    expect(listenMock).toHaveBeenCalledWith("SERMON_FINDING_DETECTED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("SERMON_FINDING_ACCEPTED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("SERMON_FINDING_REJECTED", expect.any(Function));
+  });
+
+  it("subscribes to structure/theme/state change events, distinct from raw finding events", async () => {
+    isTauriMock.mockReturnValue(true);
+    listenMock.mockResolvedValue(() => {});
+
+    await onSermonStructureUpdated(() => {});
+    await onSermonThemeChanged(() => {});
+    await onSermonStateChanged(() => {});
+
+    expect(listenMock).toHaveBeenCalledWith("SERMON_STRUCTURE_UPDATED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("SERMON_THEME_CHANGED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("SERMON_STATE_CHANGED", expect.any(Function));
+  });
+
+  it("resolves to a no-op unlisten for every sermon event outside the Tauri runtime", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    const unlisten = await onSermonFindingDetected(() => {});
 
     expect(listenMock).not.toHaveBeenCalled();
     expect(() => unlisten()).not.toThrow();

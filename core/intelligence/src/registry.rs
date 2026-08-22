@@ -374,4 +374,81 @@ mod tests {
             Err(IntelligenceError::EngineFailed { .. })
         ));
     }
+
+    // --- Phase 2.3: the real SermonIntelligenceEngine, registered
+    // alongside a real Bible engine and a deliberately failing Music
+    // engine - proves failure isolation holds for the actual production
+    // Sermon engine, not just the `PanickingEngine`/`FailingEngine` test
+    // doubles above.
+
+    #[test]
+    fn the_real_sermon_engine_registers_and_analyzes_alongside_bible_and_a_failing_music_engine() {
+        use crate::bible_adapter::BibleIntelligenceEngine;
+        use crate::fixtures::FakeBibleProvider;
+        use crate::sermon_adapter::SermonIntelligenceEngine;
+        use cip_core_ai::TranscriptSegment;
+
+        let mut registry = IntelligenceEngineRegistry::new();
+        registry
+            .register(Box::new(BibleIntelligenceEngine::new(
+                Box::new(FakeBibleProvider::kjv_fixture()),
+                "KJV",
+            )))
+            .unwrap();
+        registry.register(Box::new(FailingEngine)).unwrap();
+        registry
+            .register(Box::new(SermonIntelligenceEngine::new()))
+            .unwrap();
+
+        let service_id = Uuid::new_v4();
+        let segment = TranscriptSegment {
+            id: Uuid::new_v4(),
+            sequence: 0,
+            text: "My first point is that faith comes by hearing.".to_string(),
+            is_final: true,
+            confidence: ConfidenceResult::new(0.9, ConfidenceSource::Model, None),
+            start_ms: 0,
+            end_ms: 900,
+            language: Some("en".to_string()),
+            speaker_id: None,
+        };
+        let outcomes = registry.analyze_all(
+            &IntelligenceInput::new(service_id, segment),
+            &context(service_id),
+        );
+
+        assert_eq!(outcomes.len(), 3);
+        let bible = outcomes
+            .iter()
+            .find(|o| o.identity.domain == IntelligenceDomain::Bible)
+            .unwrap();
+        let music = outcomes
+            .iter()
+            .find(|o| o.identity.domain == IntelligenceDomain::Music)
+            .unwrap();
+        let sermon = outcomes
+            .iter()
+            .find(|o| o.identity.domain == IntelligenceDomain::Sermon)
+            .unwrap();
+
+        assert!(
+            bible.result.is_ok(),
+            "Bible must be unaffected by Music's failure"
+        );
+        assert!(
+            music.result.is_err(),
+            "Music's simulated failure must be observable"
+        );
+        let sermon_result = sermon
+            .result
+            .as_ref()
+            .expect("Sermon must be unaffected by Music's failure");
+        assert!(
+            sermon_result
+                .findings
+                .iter()
+                .any(|f| f.summary.starts_with("Main Point:")),
+            "the real Sermon engine must have actually analyzed the segment, not just avoided crashing"
+        );
+    }
 }

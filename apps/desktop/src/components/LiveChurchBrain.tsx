@@ -16,6 +16,7 @@ import type {
   ScriptureDetection,
   ScriptureReference,
   ServiceSession,
+  SermonStateSnapshot,
   SongRecognitionCandidate,
   Suggestion,
   TimelineEntry,
@@ -107,6 +108,13 @@ export function LiveChurchBrain() {
   const [musicSearchQuery, setMusicSearchQuery] = useState("");
   const [musicSearchType, setMusicSearchType] = useState<MusicQueryType>("title");
   const [musicSearchResults, setMusicSearchResults] = useState<SongRecognitionCandidate[] | null>(null);
+  // Sermon Intelligence (Phase 2.3) - findings await operator review the
+  // same way Music findings do, never auto-projected. `sermonState` is
+  // the read-only theme/state/structure snapshot, independent of finding
+  // review status (see docs/sermon-intelligence.md).
+  const [sermonFindings, setSermonFindings] = useState<IntelligenceFinding[]>([]);
+  const [sermonState, setSermonState] = useState<SermonStateSnapshot | null>(null);
+  const [sermonManualText, setSermonManualText] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -163,6 +171,8 @@ export function LiveChurchBrain() {
       commands.listTranscript(TRANSCRIPT_LIMIT).then(setTranscript).catch(() => {});
       commands.listTimeline(TIMELINE_LIMIT).then(setTimeline).catch(() => {});
       commands.listMusicFindings().then(setMusicFindings).catch(() => {});
+      commands.listSermonFindings().then(setSermonFindings).catch(() => {});
+      commands.getSermonState().then(setSermonState).catch(() => {});
     } else {
       setSuggestions([]);
       setApprovedSuggestions([]);
@@ -177,6 +187,8 @@ export function LiveChurchBrain() {
       setRecentReferences([]);
       setAmbiguous([]);
       setMusicFindings([]);
+      setSermonFindings([]);
+      setSermonState(null);
     }
   }, [activeServiceId]);
 
@@ -242,6 +254,22 @@ export function LiveChurchBrain() {
       ),
       liveEvents.onCurrentSongChanged((song) =>
         setStatus((prev) => (prev ? { ...prev, currentSong: song } : prev)),
+      ),
+      liveEvents.onSermonFindingDetected((finding) => setSermonFindings((prev) => [finding, ...prev])),
+      liveEvents.onSermonFindingAccepted((finding) =>
+        setSermonFindings((prev) => prev.filter((f) => f.id !== finding.id)),
+      ),
+      liveEvents.onSermonFindingRejected((finding) =>
+        setSermonFindings((prev) => prev.filter((f) => f.id !== finding.id)),
+      ),
+      liveEvents.onSermonStateChanged((state) =>
+        setSermonState((prev) => (prev ? { ...prev, state } : { state, theme: null, points: [] })),
+      ),
+      liveEvents.onSermonThemeChanged((theme) =>
+        setSermonState((prev) => (prev ? { ...prev, theme } : prev)),
+      ),
+      liveEvents.onSermonStructureUpdated((points) =>
+        setSermonState((prev) => (prev ? { ...prev, points } : prev)),
       ),
     ];
     return () => {
@@ -1140,6 +1168,134 @@ export function LiveChurchBrain() {
             </ul>
           )}
         </details>
+      </section>
+
+      <section className="live-brain__panel">
+        <h2>Sermon Intelligence</h2>
+        <p className="live-brain__hint">
+          Deterministic structural/theme detection from live or manually-entered transcript text (Phase 2.3).
+          Every item below is clearly marked Observed or Inferred - CIP never claims the pastor said something that
+          was not directly detected in the transcript, and nothing here is ever automatically presented.
+        </p>
+
+        <div className="live-brain__suggestion-card">
+          <div className="live-brain__suggestion-header">
+            <strong>Current state: {sermonState?.state ?? "introduction"}</strong>
+          </div>
+          {sermonState?.theme ? (
+            <p className="live-brain__hint">
+              Current theme (Inferred): <strong>{sermonState.theme.label}</strong>{" "}
+              ({Math.round(sermonState.theme.confidence * 100)}% - {sermonState.theme.repetitionCount} repetition(s),{" "}
+              {sermonState.theme.structuralMentions} structural mention(s))
+            </p>
+          ) : (
+            <p className="live-brain__hint">No theme candidate yet - needs more repeated, structurally-evidenced content.</p>
+          )}
+          {sermonState && sermonState.points.length > 0 ? (
+            <>
+              <p className="live-brain__hint">
+                Current main point: <strong>{sermonState.points[sermonState.points.length - 1].rawText}</strong>
+              </p>
+              <details className="live-brain__manual-entry">
+                <summary>Recent points ({sermonState.points.length})</summary>
+                <ul className="live-brain__content-items">
+                  {sermonState.points.map((point) => (
+                    <li key={point.sequence}>
+                      <strong>
+                        Point {point.sequence}: {point.rawText}
+                      </strong>
+                      {point.subPoints.length > 0 && (
+                        <ul>
+                          {point.subPoints.map((sub) => (
+                            <li key={sub.sequence}>{sub.rawText}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </>
+          ) : (
+            <p className="live-brain__hint">No main point recorded yet.</p>
+          )}
+        </div>
+
+        <details className="live-brain__manual-entry">
+          <summary>Manual / test sermon transcript entry</summary>
+          <p className="live-brain__hint">
+            Feeds text through the same `SermonIntelligenceEngine` real transcript would use - deterministic testing
+            without audio hardware (spec section 48).
+          </p>
+          <div className="live-brain__row">
+            <input
+              value={sermonManualText}
+              onChange={(e) => setSermonManualText(e.target.value)}
+              placeholder='e.g. "My first point is that faith comes by hearing."'
+              aria-label="Manual sermon transcript text"
+            />
+            <button
+              type="button"
+              disabled={!status?.service || !sermonManualText.trim() || isBusy("sermon-transcript")}
+              onClick={() =>
+                withBusy("sermon-transcript", async () => {
+                  await commands.analyzeSermonTranscript(sermonManualText.trim());
+                  setSermonManualText("");
+                  commands.getSermonState().then(setSermonState).catch(() => {});
+                })
+              }
+            >
+              Submit
+            </button>
+          </div>
+        </details>
+
+        {sermonFindings.length === 0 ? (
+          <p className="live-brain__hint">No pending sermon findings.</p>
+        ) : (
+          <ul className="live-brain__suggestions">
+            {sermonFindings.map((finding) => (
+              <li key={finding.id} className="live-brain__suggestion-card">
+                <div className="live-brain__suggestion-header">
+                  <strong>{finding.summary}</strong>
+                  <span className="live-brain__confidence">
+                    Confidence: {Math.round(finding.confidence.score * 100)}%
+                  </span>
+                </div>
+                <p className="live-brain__hint">
+                  {finding.assertionLevel.toUpperCase()}
+                  {finding.transcriptSegmentIds.length > 0 && (
+                    <> &middot; source segment(s): {finding.transcriptSegmentIds.length}</>
+                  )}
+                </p>
+                <div className="live-brain__row">
+                  <button
+                    type="button"
+                    disabled={isBusy(`sermon-accept-${finding.id}`)}
+                    onClick={() =>
+                      withBusy(`sermon-accept-${finding.id}`, async () => {
+                        await commands.acceptSermonFinding(finding.id);
+                      })
+                    }
+                  >
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isBusy(`sermon-reject-${finding.id}`)}
+                    onClick={() =>
+                      withBusy(`sermon-reject-${finding.id}`, async () => {
+                        await commands.rejectSermonFinding(finding.id);
+                      })
+                    }
+                  >
+                    Reject
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="live-brain__panel">

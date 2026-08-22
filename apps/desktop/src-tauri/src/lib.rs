@@ -10,6 +10,7 @@ mod music;
 mod persistence;
 mod pipeline;
 mod presentation;
+mod sermon;
 mod state;
 mod timeline;
 
@@ -167,6 +168,17 @@ pub fn run() {
                 music::register_dev_seed_music_content_if_missing(content_registry.as_ref())?;
             }
 
+            // Phase 2.3: a Sermon engine registered for diagnostic/
+            // failure-isolation symmetry with Bible/Music only - see
+            // `sermon.rs`'s module docs for why the app's actual, live-used
+            // instance is a separate one on `AppState.sermon_engine`.
+            // Needs no provider/database connection, unlike Bible/Music.
+            sermon::register_sermon_engine(&mut intelligence_registry)?;
+            log::info!(
+                target: LogCategory::App.target(),
+                "sermon intelligence engine initialized (deterministic, offline)"
+            );
+
             let audio_engine: Box<dyn cip_core_service::AudioEngine> =
                 Box::new(cip_integrations_audio::CpalAudioEngine::new());
             let speech_engine = create_speech_engine(&config);
@@ -245,6 +257,11 @@ pub fn run() {
             commands::get_service,
             commands::resolve_ambiguous_reference,
             commands::correct_scripture_context,
+            commands::analyze_sermon_transcript,
+            commands::list_sermon_findings,
+            commands::accept_sermon_finding,
+            commands::reject_sermon_finding,
+            commands::get_sermon_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

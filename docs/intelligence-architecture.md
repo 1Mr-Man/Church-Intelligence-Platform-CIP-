@@ -1,4 +1,4 @@
-# Intelligence Architecture (Phase 2.0, extended in Phase 2.1)
+# Intelligence Architecture (Phase 2.0, extended in Phase 2.1 and 2.3)
 
 This document explains `core/intelligence` - the shared contracts
 Bible/Music/Sermon/Content/Cross-Domain intelligence engines are built
@@ -6,8 +6,10 @@ on. Phase 2.0 established the architecture with exactly one real engine:
 a thin compatibility adapter over the Bible Intelligence Core Phase 1.1
 already built - see section 24. Phase 2.1 added the first real *second*
 engine, Music - see section 25 and
-[`docs/music-intelligence.md`](music-intelligence.md). Sermon, Content,
-and Cross-Domain intelligence remain **PLANNED / NOT IMPLEMENTED**.
+[`docs/music-intelligence.md`](music-intelligence.md). Phase 2.3 added a
+third, Sermon - see section 26 and
+[`docs/sermon-intelligence.md`](sermon-intelligence.md). Content and
+Cross-Domain intelligence remain **PLANNED / NOT IMPLEMENTED**.
 
 ## 1. Phase 2 vision
 
@@ -36,9 +38,10 @@ engines.
 
 `IntelligenceDomain` (`core/intelligence/src/domain.rs`) is a closed enum:
 `Bible`, `Music`, `Service`, `Sermon`, `Content`, `CrossDomain`. It answers
-*which* intelligence domain produced a finding. `Bible` (section 24) and,
-as of Phase 2.1, `Music` (section 25) have real engines registered;
-`Service`/`Sermon`/`Content`/`CrossDomain` remain reserved shape only.
+*which* intelligence domain produced a finding. `Bible` (section 24), as
+of Phase 2.1 `Music` (section 25), and as of Phase 2.3 `Sermon` (section
+26) have real engines registered; `Service`/`Content`/`CrossDomain`
+remain reserved shape only.
 
 ## 3. `IntelligenceFinding`
 
@@ -373,16 +376,46 @@ fusion, ambiguity/continuity/transitions, "Current Song," and honest
 `Unavailable` reporting - live in
 [`docs/acoustic-music.md`](acoustic-music.md).
 
-### Remaining Sermon / Content / CrossDomain engines - PLANNED / NOT IMPLEMENTED
+## 26. Sermon (the third real engine, Phase 2.3)
 
-`IntelligenceDomain::Sermon`/`Content`/`CrossDomain` and the matching
+`SermonIntelligenceEngine` (`core/intelligence/src/sermon_adapter.rs`) is
+Phase 2.3's proof that this architecture generalizes to a third,
+completely independent domain: it never calls `BibleIntelligenceEngine`
+or `MusicIntelligenceEngine` (or vice versa), sharing only what the
+orchestrator puts into `IntelligenceContext` - specifically,
+`active_scripture_context` for its one cross-linking case (see below).
+Like the Bible/Music adapters, it does not implement detection logic
+itself - every `SermonDetection` comes from `cip_core_sermon`, a pure,
+deterministic, phrase-anchored detector with no dependency on
+`core/intelligence` or any other domain crate.
+
+Unlike Bible/Music, `SermonIntelligenceEngine` needs no external provider
+or database connection at all - it is fully in-process, deterministic
+logic. It is registered twice in the desktop app
+(`apps/desktop/src-tauri/src/sermon.rs`): once into the shared
+`IntelligenceEngineRegistry` (diagnostics/failure-isolation symmetry
+only) and once as `AppState.sermon_engine` (the real, stateful instance
+every command actually uses) - see
+[`docs/sermon-intelligence.md`](sermon-intelligence.md#operator-workflow-tauri-commands)
+for why these are deliberately separate instances. Exercised by the
+manual `analyze_sermon_transcript` command; the live audio/speech
+transcript pipeline still only calls Bible detection, unchanged.
+
+Full details - the sermon taxonomy, theme-evidence policy, structure
+tracking, Scripture cross-linking, and the operator workflow - live in
+[`docs/sermon-intelligence.md`](sermon-intelligence.md), not duplicated
+here.
+
+### Remaining Content / CrossDomain engines - PLANNED / NOT IMPLEMENTED
+
+`IntelligenceDomain::Content`/`CrossDomain` and the matching
 `FindingKind` variants still only reserve the shape those engines will
-occupy. No sermon summarization, topic extraction, content generation,
-or real cross-domain correlation logic exists anywhere in this
-codebase. A future engine for any of these domains implements
-`IntelligenceEngine`, gets registered in `IntelligenceEngineRegistry`,
-and receives the same bounded `IntelligenceContext` Bible and Music
-already do - never a direct call to either existing engine.
+occupy. No content-domain intelligence or real cross-domain correlation
+logic exists anywhere in this codebase. A future engine for either of
+these domains implements `IntelligenceEngine`, gets registered in
+`IntelligenceEngineRegistry`, and receives the same bounded
+`IntelligenceContext` Bible, Music, and Sermon already do - never a
+direct call to any existing engine.
 
 ## Performance
 
@@ -401,10 +434,13 @@ before commit, matching the Phase 1.5 measurement methodology):
 
 See [`docs/music-intelligence.md`](music-intelligence.md#performance) for
 the Phase 2.1 Music-specific measurements (matcher, engine, and the full
-real-SQLite orchestration path), and
+real-SQLite orchestration path),
 [`docs/acoustic-music.md`](acoustic-music.md#performance) for the Phase
 2.2 acoustic-pipeline measurements (segmentation, the signal-quality
-gate, fusion, and the full `analyze_acoustic` path).
+gate, fusion, and the full `analyze_acoustic` path), and
+[`docs/sermon-intelligence.md`](sermon-intelligence.md#performance) for
+the Phase 2.3 Sermon-specific measurements (detection, and the full
+`analyze` path).
 
 Real numbers from one measurement pass, not "instant"/"real-time" claims.
 Every operation here is sub-millisecond even at these synthetic scales,
@@ -414,10 +450,13 @@ far above what a live service actually produces per transcript segment.
 
 ```sh
 cargo test -p cip-core-intelligence   # every type + the architectural
-                                       # acceptance scenarios (Bible +
-                                       # Music, Phase 2.0 and 2.1)
+                                       # acceptance scenarios (Bible,
+                                       # Music, and Sermon - Phase 2.0,
+                                       # 2.1, 2.3)
+cargo test -p cip-core-sermon               # pure sermon detection/theme/structure tests
 cargo test -p cip-desktop intelligence::   # real-app-state wiring tests
 cargo test -p cip-desktop music::           # Music orchestration + degradation tests
+cargo test -p cip-desktop sermon::          # Sermon orchestration + operator-workflow tests
 cargo test -p cip-core-service              # unchanged Bible regression suite
 ```
 

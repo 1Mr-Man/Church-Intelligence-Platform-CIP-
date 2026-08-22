@@ -11,8 +11,9 @@ Workflow**, **Phase 1.4 - Presentation Foundation & Real-Service
 Validation**, **Phase 1.5 - Content/Dataset Foundation &
 Full-Service Validation**, **Phase 2.0 - Intelligence Architecture &
 Unified Intelligence Context**, **Phase 2.1 - Music Intelligence
-Foundation & Song Recognition Architecture**, and **Phase 2.2 - Acoustic
-Music Recognition & Live Song Detection**.
+Foundation & Song Recognition Architecture**, **Phase 2.2 - Acoustic
+Music Recognition & Live Song Detection**, and **Phase 2.3 - Sermon
+Intelligence & Live Message Understanding**.
 
 ## Approved architecture
 
@@ -52,6 +53,10 @@ Intelligence engine (deterministic title/alias/number/lyric recognition
 - explicitly not audio fingerprinting),
 [`docs/music-datasets.md`](docs/music-datasets.md) for the music dataset
 importer and its licensing policy,
+[`docs/acoustic-music.md`](docs/acoustic-music.md) for acoustic
+(audio-fingerprint) song recognition,
+[`docs/sermon-intelligence.md`](docs/sermon-intelligence.md) for
+deterministic sermon structure/theme/meaning detection,
 [`docs/development.md`](docs/development.md) to get running locally, and
 [`docs/database.md`](docs/database.md) for the SQLite/migration story.
 
@@ -207,16 +212,34 @@ automatically, regardless of confidence. `pipeline.rs`, `core/bible`,
 and `bible_adapter.rs` were not modified by this phase. See
 [`docs/acoustic-music.md`](docs/acoustic-music.md).
 
+**Phase 2.3 (Sermon Intelligence & Live Message Understanding)** added a
+new `core/sermon` domain crate - deterministic, phrase-anchored detection
+of sermon theme, main/sub-points, definitions, key statements,
+declarations, questions, illustrations/stories/examples, applications,
+prayer points, reflections, transitions, and conclusion signals - and a
+`core/intelligence::sermon_adapter::SermonIntelligenceEngine` translating
+those detections into `IntelligenceFinding`s with strict Observed/Inferred
+epistemic labeling (never Suggested/Generated). A theme candidate requires
+both repeated mention *and* at least one structural mention before it
+qualifies - repetition alone is never enough. Scripture references are
+never re-detected: the engine only cross-links a freshly recorded main
+point to whatever Scripture context the unchanged Bible engine already
+established. `pipeline.rs` was not modified; Sermon Intelligence is
+manual-command-only, mirroring Music's Phase 2.1 lyric path. See
+[`docs/sermon-intelligence.md`](docs/sermon-intelligence.md).
+
 Still deliberately **not** implemented: a chosen/trained acoustic model
 (so real-world acoustic recognition accuracy remains unverified in this
 environment - see [`docs/acoustic-music.md`](docs/acoustic-music.md)'s
-"PROVEN vs NOT AVAILABLE" section), sermon intelligence, semantic/
-paraphrase Bible search, automatic bullet extraction, a web research
-engine, online Bible fallback, content generation, cloud sync, OBS/vMix
-integration, remote operator accounts, a mobile app, real display/
-projection output, and the full presentation designer (visual/
-typographic design beyond one deterministic template). Those are later
-phases.
+"PROVEN vs NOT AVAILABLE" section), any semantic/LLM-based sermon
+understanding beyond deterministic phrase-anchored detection (see
+[`docs/sermon-intelligence.md`](docs/sermon-intelligence.md)'s "NOT
+AVAILABLE" section), semantic/paraphrase Bible search, automatic bullet
+extraction, a web research engine, online Bible fallback, content
+generation, cloud sync, OBS/vMix integration, remote operator accounts, a
+mobile app, real display/projection output, and the full presentation
+designer (visual/typographic design beyond one deterministic template).
+Those are later phases.
 
 ## Repository layout
 
@@ -228,9 +251,9 @@ apps/desktop/          Tauri + React + TypeScript desktop application
 core/                  Domain logic and contracts, one crate per domain
   bible/               BibleProvider, text normalization, reference detection, verse-range/search, integrity checker, Scripture Context Manager
   content/              ContentRegistry - what local content exists, and its provenance/licensing
-  intelligence/          Shared intelligence architecture (Phase 2.0) - IntelligenceContext/Engine/Finding, the Bible compatibility adapter, the Music adapter (Phase 2.1, extended with acoustic fusion in Phase 2.2)
+  intelligence/          Shared intelligence architecture (Phase 2.0) - IntelligenceContext/Engine/Finding, the Bible compatibility adapter, the Music adapter (Phase 2.1, extended with acoustic fusion in Phase 2.2), the Sermon adapter (Phase 2.3)
   music/                 Song/lyric domain model, MusicProvider trait, deterministic title/alias/number/lyric matcher (Phase 2.1); AcousticMusicRecognizer trait, segmentation, signal-quality gate, evidence fusion (Phase 2.2)
-  sermon/                (placeholder - Phase 2+ engine implementation)
+  sermon/                Deterministic sermon taxonomy, structural/theme detection, sermon-state inference (Phase 2.3)
   service/              ServiceSession + AudioEngine
   presentation/         PresentationItem
   search/               SearchEngine

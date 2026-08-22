@@ -19,7 +19,10 @@ import type {
   PresentationItem,
   ProcessedSegment,
   ScriptureDetection,
+  SermonPoint,
+  SermonState,
   Suggestion,
+  ThemeCandidate,
   TranscriptSegment,
 } from "../domain";
 import { isTauriRuntime } from "./runtime";
@@ -98,6 +101,50 @@ export function onCurrentSongChanged(
   handler: (song: CurrentSong | null) => void,
 ): Promise<UnlistenFn> {
   return listenSafe<CurrentSong | null>(AppEvents.CurrentSongChanged, handler);
+}
+
+/** A new Sermon Intelligence finding (Phase 2.3) - never implies anything
+ * was presented or auto-approved; see `docs/sermon-intelligence.md`. */
+export function onSermonFindingDetected(
+  handler: (finding: IntelligenceFinding) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<IntelligenceFinding>(AppEvents.SermonFindingDetected, handler);
+}
+
+export function onSermonFindingAccepted(
+  handler: (finding: IntelligenceFinding) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<IntelligenceFinding>(AppEvents.SermonFindingAccepted, handler);
+}
+
+export function onSermonFindingRejected(
+  handler: (finding: IntelligenceFinding) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<IntelligenceFinding>(AppEvents.SermonFindingRejected, handler);
+}
+
+/** The sermon structure changed (a new main/sub-point recorded) - payload
+ * is the full, current `SermonPoint[]`; earlier points are never
+ * rewritten. */
+export function onSermonStructureUpdated(
+  handler: (points: SermonPoint[]) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<SermonPoint[]>(AppEvents.SermonStructureUpdated, handler);
+}
+
+/** The current theme candidate changed - always `Inferred`; `candidate`
+ * is `null` if evidence no longer supports one (should not normally
+ * happen, since evidence only accumulates within a service). */
+export function onSermonThemeChanged(
+  handler: (candidate: ThemeCandidate | null) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<ThemeCandidate | null>(AppEvents.SermonThemeChanged, handler);
+}
+
+/** The lightweight derived sermon state changed - a classification, never
+ * a rigid state machine transition. */
+export function onSermonStateChanged(handler: (state: SermonState) => void): Promise<UnlistenFn> {
+  return listenSafe<SermonState>(AppEvents.SermonStateChanged, handler);
 }
 
 /** Unused by `ProcessedSegment` directly but kept for reference/parity -

@@ -32,6 +32,7 @@ import type {
   ProcessedSegment,
   ScriptureContext,
   ServiceSession,
+  SermonStateSnapshot,
   SongRecognitionCandidate,
   Suggestion,
   SuggestionStatus,
@@ -349,6 +350,42 @@ export function analyzeMusicAudio(
   sampleRateHz: number,
 ): Promise<IntelligenceFinding[]> {
   return invokeCommand("analyze_music_audio", { samples, sampleRateHz });
+}
+
+// --- sermon intelligence (Phase 2.3) -------------------------------------------
+//
+// Deliberately manual-command-only, mirroring `analyzeMusicTranscript` -
+// nothing here is wired into live audio; the pastor's live transcript
+// reaches these through the same manual/test-mode entry point real audio
+// would eventually use.
+
+/** The deterministic sermon-analysis harness - the Sermon Intelligence
+ * counterpart to `analyzeMusicTranscript`. Never creates a presentation
+ * item; findings are queued for operator review only. */
+export function analyzeSermonTranscript(text: string): Promise<IntelligenceFinding[]> {
+  return invokeCommand("analyze_sermon_transcript", { text });
+}
+
+/** Sermon findings still awaiting an operator decision, for the active
+ * service - the Sermon Intelligence panel's data source. */
+export function listSermonFindings(): Promise<IntelligenceFinding[]> {
+  return invokeCommand("list_sermon_findings");
+}
+
+export function acceptSermonFinding(findingId: string): Promise<IntelligenceFinding> {
+  return invokeCommand("accept_sermon_finding", { findingId });
+}
+
+/** The generic, always-available correction path for a mis-detected
+ * theme/point (spec section 40) - rejecting is itself the explicit,
+ * auditable operator correction; it never rewrites transcript history. */
+export function rejectSermonFinding(findingId: string): Promise<IntelligenceFinding> {
+  return invokeCommand("reject_sermon_finding", { findingId });
+}
+
+/** The current theme/state/structure snapshot - read-only, safe to poll. */
+export function getSermonState(): Promise<SermonStateSnapshot> {
+  return invokeCommand("get_sermon_state");
 }
 
 // --- live status --------------------------------------------------------------

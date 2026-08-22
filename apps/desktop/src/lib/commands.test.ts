@@ -9,20 +9,25 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acceptMusicFinding,
+  acceptSermonFinding,
   analyzeMusicAudio,
   analyzeMusicTranscript,
+  analyzeSermonTranscript,
   checkBibleDatasetIntegrity,
   clearCurrentSong,
   createManualPresentation,
   getAppConfig,
   getIntelligenceCapabilities,
+  getSermonState,
   importBibleDataset,
   importMusicDataset,
   listContentRegistry,
   listMusicFindings,
+  listSermonFindings,
   previewPresentation,
   previewScripture,
   rejectMusicFinding,
+  rejectSermonFinding,
   searchBible,
   searchMusic,
   setContentEnabled,
@@ -272,6 +277,70 @@ describe("commands.ts Tauri IPC guard", () => {
 
     await expect(analyzeMusicAudio([], 16000)).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(clearCurrentSong()).rejects.toBeInstanceOf(TauriUnavailableError);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  // --- sermon intelligence (Phase 2.3) --------------------------------------
+
+  it("analyzeSermonTranscript calls analyze_sermon_transcript with the raw text", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await analyzeSermonTranscript("My first point is that faith comes by hearing.");
+
+    expect(invokeMock).toHaveBeenCalledWith("analyze_sermon_transcript", {
+      text: "My first point is that faith comes by hearing.",
+    });
+  });
+
+  it("listSermonFindings calls list_sermon_findings with no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await listSermonFindings();
+
+    expect(invokeMock).toHaveBeenCalledWith("list_sermon_findings", undefined);
+  });
+
+  /** Proves acceptance is exactly the finding-status command's own
+   * command - never a second, presentation-related call. */
+  it("acceptSermonFinding calls only accept_sermon_finding, never a presentation command", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await acceptSermonFinding("finding-1");
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("accept_sermon_finding", { findingId: "finding-1" });
+  });
+
+  it("rejectSermonFinding calls only reject_sermon_finding, never a presentation command", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await rejectSermonFinding("finding-1");
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("reject_sermon_finding", { findingId: "finding-1" });
+  });
+
+  it("getSermonState calls get_sermon_state with no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({ state: "introduction", theme: null, points: [] });
+
+    await getSermonState();
+
+    expect(invokeMock).toHaveBeenCalledWith("get_sermon_state", undefined);
+  });
+
+  it("rejects every sermon command outside the Tauri runtime, without calling invoke()", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    await expect(analyzeSermonTranscript("text")).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(listSermonFindings()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(acceptSermonFinding("id")).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(rejectSermonFinding("id")).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(getSermonState()).rejects.toBeInstanceOf(TauriUnavailableError);
     expect(invokeMock).not.toHaveBeenCalled();
   });
 });

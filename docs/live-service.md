@@ -55,6 +55,14 @@ the acoustic worker is a structurally separate path that only ever
 writes to the same in-memory `FindingQueue` Music findings already use.
 See [`docs/acoustic-music.md`](acoustic-music.md).
 
+Phase 2.3 registered a third real engine, Sermon, alongside Bible and
+Music, and added a "Sermon Intelligence" panel to the Live Church Brain
+UI (current theme/state/main point, recorded structure, manual transcript
+analysis, and pending-finding accept/reject) - manual-command-only, the
+same deliberate boundary the Bible and Music adapters keep;
+`pipeline.rs::handle_final_transcript` is unmodified. See
+[`docs/sermon-intelligence.md`](sermon-intelligence.md).
+
 ## Service lifecycle
 
 ```

@@ -18,7 +18,9 @@ use crate::config::AppConfig;
 use cip_core_ai::SpeechEngine;
 use cip_core_bible::{BibleProvider, DefaultScriptureContextManager};
 use cip_core_content::ContentRegistry;
-use cip_core_intelligence::{FindingQueue, IntelligenceEngineRegistry, MusicIntelligenceEngine};
+use cip_core_intelligence::{
+    FindingQueue, IntelligenceEngineRegistry, MusicIntelligenceEngine, SermonIntelligenceEngine,
+};
 use cip_core_music::{AcousticMusicRecognizer, CurrentSong, MusicProvider};
 use cip_core_service::{AudioEngine, ServiceSession};
 use std::sync::atomic::AtomicU64;
@@ -98,6 +100,15 @@ pub struct AppState {
     /// confidence alone, regardless of how high - see
     /// `cip_core_music::CurrentSong`'s own docs.
     pub current_song: Mutex<Option<CurrentSong>>,
+    /// The real, stateful Sermon Intelligence engine (Phase 2.3) - every
+    /// `analyze_sermon_transcript`/`get_sermon_state` call goes through
+    /// this exact instance, so its accumulated theme/structure/state stays
+    /// consistent across calls. A *separate* instance is also registered
+    /// into `intelligence_registry` for diagnostics/failure-isolation
+    /// symmetry only - see `sermon.rs`'s module docs for why these are
+    /// deliberately not the same instance (mirrors `acoustic_music_engine`
+    /// above).
+    pub sermon_engine: SermonIntelligenceEngine,
 }
 
 impl AppState {
@@ -134,6 +145,7 @@ impl AppState {
             acoustic_music_engine,
             acoustic_recognizer: Mutex::new(acoustic_recognizer),
             current_song: Mutex::new(None),
+            sermon_engine: SermonIntelligenceEngine::new(),
         }
     }
 }

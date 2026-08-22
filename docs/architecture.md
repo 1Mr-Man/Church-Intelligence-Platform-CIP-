@@ -41,27 +41,29 @@ not replace the operator's judgment.
 | ------------------------ | ------------------------------------------------------------------ |
 | `core/bible`            | `BibleProvider`, `ScriptureReference`, text normalization, reference detection, verse-range retrieval, local search, the dataset integrity checker, the Scripture Context Manager (see below) |
 | `core/content`          | `ContentRegistry` - what local content exists, and its provenance/licensing (Phase 1.5) |
-| `core/intelligence`     | The shared intelligence architecture (Phase 2.0) - `IntelligenceContext`, `IntelligenceEngine`, `IntelligenceFinding`, the engine registry, the Bible compatibility adapter, and the Music adapter (Phase 2.1, extended with acoustic fusion in Phase 2.2) |
+| `core/intelligence`     | The shared intelligence architecture (Phase 2.0) - `IntelligenceContext`, `IntelligenceEngine`, `IntelligenceFinding`, the engine registry, the Bible compatibility adapter, the Music adapter (Phase 2.1, extended with acoustic fusion in Phase 2.2), and the Sermon adapter (Phase 2.3) |
 | `core/music`            | Song/lyric domain model (`Song`, `SongSection`, `LyricLine`), `MusicProvider`, deterministic title/alias/number/lyric matching (Phase 2.1); `AcousticMusicRecognizer` trait, audio segmentation, signal-quality gate, evidence fusion (Phase 2.2) |
 | `core/service`          | `ServiceSession` lifecycle, `AudioEngine` capture contract        |
 | `core/ai`               | `SpeechEngine` transcription contract, `Suggestion`                |
 | `core/presentation`     | `PresentationItem` - *what* is shown, not how it's rendered       |
 | `core/search`           | `SearchEngine` - a single source-agnostic query contract          |
 | `core/confidence`       | `ConfidenceResult` - shared by every domain that produces an uncertain, AI-derived result |
-| `core/sermon`           | Placeholder reserving the architectural boundary for a future phase |
+| `core/sermon`           | Sermon taxonomy, deterministic phrase-anchored structural/theme detection, sermon-state inference (Phase 2.3) |
 
 `core/confidence` is the one crate every other domain may depend on; the
 rest do not depend on each other except through two documented
 composition points: `core/service` (composing `core/bible` + `core/ai`
 into the Bible Intelligence Core pipeline) and, one level up the same
-stack, `core/intelligence` (Phase 2.0, extended in Phase 2.1), which
-composes `core/bible` + `core/ai` + `core/service` + `core/content` +
-`core/music` into the shared `IntelligenceContext`/`IntelligenceEngine`
-contracts - reusing
+stack, `core/intelligence` (Phase 2.0, extended in Phase 2.1 and 2.3),
+which composes `core/bible` + `core/ai` + `core/service` + `core/content`
++ `core/music` + `core/sermon` into the shared
+`IntelligenceContext`/`IntelligenceEngine` contracts - reusing
 `ScriptureContext`/`TranscriptSegment`/`ServiceStatus`/`ContentMetadata`
-exactly rather than duplicating them. `core/music` itself depends on
-nothing beyond `core/confidence` (see
-[`docs/music-intelligence.md`](music-intelligence.md#offline-guarantee)),
+exactly rather than duplicating them. `core/music` and `core/sermon` each
+depend on nothing beyond `core/confidence`/`serde`/`regex` (see
+[`docs/music-intelligence.md`](music-intelligence.md#offline-guarantee)
+and
+[`docs/sermon-intelligence.md`](sermon-intelligence.md#offline-guarantee)),
 matching every other domain crate's rule below. See
 [`docs/intelligence-architecture.md`](intelligence-architecture.md) for
 why this dependency shape was chosen.
@@ -166,7 +168,15 @@ second, real recognition path to that same Music engine - acoustic
 (audio-fingerprint) recognition, fused with the existing lyric/title
 path via `core/music::fusion` - again without touching `pipeline.rs`,
 `core/bible`, or `bible_adapter.rs`; see
-[`docs/acoustic-music.md`](acoustic-music.md).
+[`docs/acoustic-music.md`](acoustic-music.md). Phase 2.3 registers a third
+engine, `core/intelligence::sermon_adapter::SermonIntelligenceEngine`,
+backed by a new pure-domain `core/sermon` crate (deterministic sermon
+taxonomy/structure/theme detection, no dependency on `core/intelligence`
+or any other domain crate) - proving a third independent engine shares the
+same `IntelligenceContext`/registry/failure-isolation architecture without
+touching `pipeline.rs`, `core/bible`, `bible_adapter.rs`, `core/music`, or
+`music_adapter.rs`; see
+[`docs/sermon-intelligence.md`](sermon-intelligence.md).
 
 ## Event architecture
 
