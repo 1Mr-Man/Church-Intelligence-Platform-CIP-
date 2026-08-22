@@ -14,6 +14,7 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AppEvents } from "../events/eventNames";
 import type {
+  CurrentSong,
   IntelligenceFinding,
   PresentationItem,
   ProcessedSegment,
@@ -89,6 +90,14 @@ export function onMusicFindingRejected(
   handler: (finding: IntelligenceFinding) => void,
 ): Promise<UnlistenFn> {
   return listenSafe<IntelligenceFinding>(AppEvents.MusicFindingRejected, handler);
+}
+
+/** The operator-confirmed "current song" changed (Phase 2.2) - `song` is
+ * `null` when the operator cleared it (`clearCurrentSong`). */
+export function onCurrentSongChanged(
+  handler: (song: CurrentSong | null) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<CurrentSong | null>(AppEvents.CurrentSongChanged, handler);
 }
 
 /** Unused by `ProcessedSegment` directly but kept for reference/parity -

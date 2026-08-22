@@ -505,6 +505,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "uuid",
 ]
 
 [[package]]
@@ -573,6 +574,7 @@ dependencies = [
  "cip-integrations-bible",
  "cip-integrations-content",
  "cip-integrations-music",
+ "cip-integrations-music-acoustic",
  "cip-presentation-renderer",
  "log",
  "rusqlite",
@@ -641,6 +643,16 @@ dependencies = [
  "rusqlite",
  "serde",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "cip-integrations-music-acoustic"
+version = "0.1.0"
+dependencies = [
+ "cip-core-confidence",
+ "cip-core-music",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]

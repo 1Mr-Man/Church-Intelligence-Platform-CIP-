@@ -8,11 +8,11 @@ use cip_core_content::{
     ContentMetadata, ContentRegistry, ContentRegistryError, ContentStatus, ContentType,
 };
 use cip_core_intelligence::{
-    FindingQueue, IntelligenceContext, IntelligenceEngine, IntelligenceEngineRegistry,
-    IntelligenceError, IntelligenceFinding, IntelligenceInput, MusicIntelligenceEngine,
-    QueueAddOutcome,
+    EvidenceSource, FindingQueue, IntelligenceContext, IntelligenceDomain, IntelligenceEngine,
+    IntelligenceEngineRegistry, IntelligenceError, IntelligenceFinding, IntelligenceInput,
+    MusicIntelligenceEngine, QueueAddOutcome,
 };
-use cip_core_music::MusicProvider;
+use cip_core_music::{CurrentSong, MusicProvider};
 use cip_integrations_music::{import_music_dataset, ImportError, ImportReport, MusicDatasetInput};
 use rusqlite::Connection;
 use thiserror::Error;
@@ -150,6 +150,38 @@ pub fn analyze_and_queue(
         }
     }
     Ok(queued)
+}
+
+/// Derive a [`CurrentSong`] from an accepted Music finding (Phase 2.2) -
+/// the one place `EvidenceSource::Context { description: "song_id:<id>" }`'s
+/// convention (see `core/intelligence::music_adapter`'s `previous_song`)
+/// is decoded outside `core/intelligence`. Works identically for a lyric-
+/// sourced or acoustic-sourced finding - both build their evidence the
+/// same way, so "current song" has exactly one derivation rule regardless
+/// of how the song was recognized.
+///
+/// Returns `None` if `finding` is not a Music-domain finding, or is
+/// missing a `content_id`/`song_id:` evidence entry a genuine Music
+/// finding always carries - never panics, never guesses. The caller
+/// (`commands::accept_music_finding`) leaves the existing `current_song`
+/// untouched when this returns `None`, rather than clearing it on a
+/// technicality.
+pub fn current_song_from_finding(finding: &IntelligenceFinding) -> Option<CurrentSong> {
+    if finding.domain != IntelligenceDomain::Music {
+        return None;
+    }
+    let content_id = finding.provenance.content_id.clone()?;
+    let song_id = finding.evidence.iter().find_map(|e| match e {
+        EvidenceSource::Context { description } if description.starts_with("song_id:") => {
+            Some(description.trim_start_matches("song_id:").to_string())
+        }
+        _ => None,
+    })?;
+    Some(CurrentSong {
+        content_id,
+        song_id,
+        confidence: finding.confidence.clone(),
+    })
 }
 
 #[cfg(test)]
@@ -479,5 +511,42 @@ mod tests {
             "a duplicate finding for the same service/domain/kind/summary is discarded, not re-queued"
         );
         assert_eq!(findings.pending().len(), 1);
+    }
+
+    // --- `current_song_from_finding` (Phase 2.2) ---------------------------
+
+    #[test]
+    fn current_song_is_derived_from_a_real_accepted_finding() {
+        let provider = SqliteMusicProvider::new(seeded_music_conn());
+        let engine = MusicIntelligenceEngine::new(Box::new(provider));
+        let reg = registry();
+        register_dev_seed_music_content_if_missing(&reg).unwrap();
+        let content_metadata = reg.list(None).unwrap();
+
+        let (input, context) =
+            input_and_context(Uuid::new_v4(), "Test Fixture Hymn One", content_metadata);
+        let mut findings = FindingQueue::new();
+        let queued = analyze_and_queue(&engine, &input, &context, &mut findings).unwrap();
+
+        let current_song = current_song_from_finding(&queued[0]).expect(
+            "a real Music finding produced by the engine always carries content_id/song_id evidence",
+        );
+        assert_eq!(current_song.content_id, "music:dev-hymnbook");
+        assert!(!current_song.song_id.is_empty());
+    }
+
+    #[test]
+    fn current_song_is_none_for_a_non_music_finding() {
+        let finding = IntelligenceFinding::new(
+            Uuid::new_v4(),
+            cip_core_intelligence::IntelligenceDomain::Bible,
+            cip_core_intelligence::FindingKind::Scripture,
+            cip_core_intelligence::AssertionLevel::Suggested,
+            ConfidenceResult::new(0.9, ConfidenceSource::Heuristic, None),
+            "ROM 8:28",
+            "bible",
+            "1.0",
+        );
+        assert!(current_song_from_finding(&finding).is_none());
     }
 }

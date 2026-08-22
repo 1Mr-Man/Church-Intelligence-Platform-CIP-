@@ -47,6 +47,10 @@ export const AppEvents = {
   MusicFindingDetected: "MUSIC_FINDING_DETECTED",
   MusicFindingAccepted: "MUSIC_FINDING_ACCEPTED",
   MusicFindingRejected: "MUSIC_FINDING_REJECTED",
+
+  /** The operator-confirmed "current song" changed (Phase 2.2) - payload
+   * is `CurrentSong | null` (`null` when cleared). */
+  CurrentSongChanged: "CURRENT_SONG_CHANGED",
 } as const;
 
 export type AppEventName = (typeof AppEvents)[keyof typeof AppEvents];

@@ -50,7 +50,12 @@ export type EvidenceSource =
   | { kind: "temporal"; description: string }
   | { kind: "another_finding"; findingId: string }
   | { kind: "service_event"; description: string }
-  | { kind: "operator_action"; description: string };
+  | { kind: "operator_action"; description: string }
+  /** Derived from acoustic (audio-fingerprint/embedding) recognition
+   * (Phase 2.2) - `method`/`durationMs` are honest facts about how the
+   * underlying acoustic candidate was produced, never a claim that
+   * acoustic recognition is more certain than `confidence` already says. */
+  | { kind: "acoustic"; segmentId: string; method: string; durationMs: number };
 
 /** Where a finding's underlying content traces back to - references the
  * Phase 1.5 Content Registry by id rather than re-implementing its

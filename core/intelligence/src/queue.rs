@@ -116,6 +116,19 @@ impl FindingQueue {
         self.findings.iter().find(|f| f.id == id)
     }
 
+    /// Every finding ever added, regardless of status, oldest first (the
+    /// order `add` pushes in, never reordered) - the chronological
+    /// convention `IntelligenceContext::build`'s `recent_findings`
+    /// parameter expects (see `context::truncate_to_most_recent`).
+    /// Deliberately distinct from [`Self::pending`] (which excludes
+    /// accepted/rejected/expired findings): continuity/fusion callers
+    /// need the *history* of what was found, including what an operator
+    /// already accepted - see `docs/acoustic-music.md`'s continuity
+    /// section and the Music engine's own song-continuity logic.
+    pub fn all(&self) -> Vec<&IntelligenceFinding> {
+        self.findings.iter().collect()
+    }
+
     pub fn len(&self) -> usize {
         self.findings.len()
     }
@@ -142,6 +155,32 @@ mod tests {
             "bible",
             "1.0",
         )
+    }
+
+    #[test]
+    fn all_includes_accepted_and_rejected_findings_unlike_pending() {
+        let mut queue = FindingQueue::new();
+        let service_id = Uuid::new_v4();
+        let a = queue.add(finding(service_id, "ROM 8:28", 0.9));
+        assert_eq!(a, QueueAddOutcome::Added);
+        let id = queue.all()[0].id;
+        queue.accept(id).unwrap();
+
+        assert_eq!(queue.all().len(), 1, "accepted findings stay in `all`");
+        assert!(
+            queue.pending().is_empty(),
+            "an accepted finding is no longer pending"
+        );
+    }
+
+    #[test]
+    fn all_preserves_insertion_order() {
+        let mut queue = FindingQueue::new();
+        let service_id = Uuid::new_v4();
+        queue.add(finding(service_id, "first", 0.5));
+        queue.add(finding(service_id, "second", 0.9));
+        let summaries: Vec<&str> = queue.all().iter().map(|f| f.summary.as_str()).collect();
+        assert_eq!(summaries, vec!["first", "second"]);
     }
 
     #[test]

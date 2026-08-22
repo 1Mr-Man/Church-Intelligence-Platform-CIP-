@@ -20,6 +20,7 @@ members = [
   "integrations/bible",
   "integrations/content",
   "integrations/music",
+  "integrations/music-acoustic",
   "integrations/web",
   "integrations/obs",
   "integrations/vmix",
@@ -70,6 +71,7 @@ cip-integrations-audio = { path = "integrations/audio" }
 cip-integrations-bible = { path = "integrations/bible" }
 cip-integrations-content = { path = "integrations/content" }
 cip-integrations-music = { path = "integrations/music" }
+cip-integrations-music-acoustic = { path = "integrations/music-acoustic" }
 cip-integrations-web = { path = "integrations/web" }
 cip-integrations-obs = { path = "integrations/obs" }
 cip-integrations-vmix = { path = "integrations/vmix" }

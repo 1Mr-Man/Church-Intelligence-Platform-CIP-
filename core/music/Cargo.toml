@@ -1,6 +1,6 @@
 [package]
 name = "cip-core-music"
-description = "Music domain contracts: the Song/lyric model, MusicProvider, and deterministic lyric/title/number recognition (Phase 2.1)."
+description = "Music domain contracts: the Song/lyric model, MusicProvider, deterministic lyric/title/number recognition (Phase 2.1), and the acoustic recognition boundary/evidence fusion (Phase 2.2)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +11,7 @@ repository.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 cip-core-confidence.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

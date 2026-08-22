@@ -18,8 +18,8 @@ use crate::config::AppConfig;
 use cip_core_ai::SpeechEngine;
 use cip_core_bible::{BibleProvider, DefaultScriptureContextManager};
 use cip_core_content::ContentRegistry;
-use cip_core_intelligence::{FindingQueue, IntelligenceEngineRegistry};
-use cip_core_music::MusicProvider;
+use cip_core_intelligence::{FindingQueue, IntelligenceEngineRegistry, MusicIntelligenceEngine};
+use cip_core_music::{AcousticMusicRecognizer, CurrentSong, MusicProvider};
 use cip_core_service::{AudioEngine, ServiceSession};
 use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
@@ -73,6 +73,31 @@ pub struct AppState {
     pub audio_error: Mutex<Option<String>>,
     /// Same as `audio_error`, for the speech engine (`SpeechStatusKind::Error`).
     pub speech_error: Mutex<Option<String>>,
+    /// A dedicated `MusicIntelligenceEngine` instance for acoustic
+    /// analysis (Phase 2.2), with its own `MusicProvider` connection -
+    /// mirroring the existing "every independent read path gets its own
+    /// connection" discipline (`music_provider` above, and
+    /// `intelligence_registry`'s own separate Music engine registration in
+    /// `lib.rs`). Kept separate from `intelligence_registry`'s trait-object
+    /// registration because `analyze_acoustic` is a `MusicIntelligenceEngine`
+    /// inherent method, not part of the shared `IntelligenceEngine` trait
+    /// (see that method's own docs) - a `Box<dyn IntelligenceEngine>` looked
+    /// up from the registry cannot be downcast back to call it.
+    pub acoustic_music_engine: MusicIntelligenceEngine,
+    /// The acoustic recognizer implementation this app is configured with -
+    /// `NullAcousticMusicRecognizer` unless `AppConfig.acoustic` names a
+    /// real, present model (see `lib.rs::create_acoustic_recognizer`).
+    /// Mirrors `speech_engine`'s `Mutex<Box<dyn ...>>` shape exactly; "no
+    /// acoustic recognizer configured" is never fatal, the same way "no
+    /// speech model" is never fatal.
+    pub acoustic_recognizer: Mutex<Box<dyn AcousticMusicRecognizer>>,
+    /// The song a human operator has explicitly confirmed as currently
+    /// being sung (Phase 2.2) - `None` until an operator accepts a Music
+    /// finding, and cleared only by an explicit operator action
+    /// (`clear_current_song`). Never set automatically by acoustic/lyric
+    /// confidence alone, regardless of how high - see
+    /// `cip_core_music::CurrentSong`'s own docs.
+    pub current_song: Mutex<Option<CurrentSong>>,
 }
 
 impl AppState {
@@ -86,6 +111,8 @@ impl AppState {
         music_provider: Box<dyn MusicProvider>,
         audio_engine: Box<dyn AudioEngine>,
         speech_engine: Box<dyn SpeechEngine>,
+        acoustic_music_engine: MusicIntelligenceEngine,
+        acoustic_recognizer: Box<dyn AcousticMusicRecognizer>,
     ) -> Self {
         Self {
             config,
@@ -104,6 +131,9 @@ impl AppState {
             transcript_sequence: AtomicU64::new(0),
             audio_error: Mutex::new(None),
             speech_error: Mutex::new(None),
+            acoustic_music_engine,
+            acoustic_recognizer: Mutex::new(acoustic_recognizer),
+            current_song: Mutex::new(None),
         }
     }
 }

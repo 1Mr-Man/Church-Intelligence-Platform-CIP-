@@ -72,6 +72,18 @@ pub enum AppEvent {
     /// decision only, still no presentation side effect.
     MusicFindingAccepted,
     MusicFindingRejected,
+
+    /// The operator-confirmed "current song" changed (Phase 2.2) - set by
+    /// `accept_music_finding`/`resolve_music_ambiguity` (operator
+    /// acceptance) or cleared by `clear_current_song`. Never emitted for
+    /// a merely-detected/candidate song - see `cip_core_music::CurrentSong`'s
+    /// docs. Deliberately the only genuinely new Phase 2.2 event: acoustic
+    /// findings reuse `MusicFindingDetected` (Phase 2.1's event already
+    /// carries an `IntelligenceFinding` regardless of whether lyric or
+    /// acoustic evidence produced it - see `docs/acoustic-music.md`'s
+    /// "event reuse over event proliferation" note), so there is no
+    /// separate acoustic-candidate or song-transition event.
+    CurrentSongChanged,
 }
 
 impl AppEvent {
@@ -113,6 +125,8 @@ impl AppEvent {
             AppEvent::MusicFindingDetected => "MUSIC_FINDING_DETECTED",
             AppEvent::MusicFindingAccepted => "MUSIC_FINDING_ACCEPTED",
             AppEvent::MusicFindingRejected => "MUSIC_FINDING_REJECTED",
+
+            AppEvent::CurrentSongChanged => "CURRENT_SONG_CHANGED",
         }
     }
 }
@@ -164,6 +178,7 @@ mod tests {
             AppEvent::MusicFindingDetected,
             AppEvent::MusicFindingAccepted,
             AppEvent::MusicFindingRejected,
+            AppEvent::CurrentSongChanged,
         ];
         let mut names: Vec<&str> = events.iter().map(|e| e.name()).collect();
         let unique_before = names.len();

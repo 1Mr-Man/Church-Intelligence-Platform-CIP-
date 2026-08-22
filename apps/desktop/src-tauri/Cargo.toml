@@ -41,6 +41,7 @@ cip-integrations-bible.workspace = true
 cip-integrations-audio.workspace = true
 cip-core-music.workspace = true
 cip-integrations-music.workspace = true
+cip-integrations-music-acoustic.workspace = true
 cip-ai-speech.workspace = true
 
 [features]

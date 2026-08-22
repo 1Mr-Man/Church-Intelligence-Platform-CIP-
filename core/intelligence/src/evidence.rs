@@ -34,6 +34,18 @@ pub enum EvidenceSource {
     ServiceEvent { description: String },
     /// Derived from an explicit operator action.
     OperatorAction { description: String },
+    /// Derived from acoustic (audio-fingerprint/embedding) recognition
+    /// (Phase 2.2) - `method`/`duration_ms` are honest facts about how
+    /// the underlying `AcousticRecognitionCandidate` was produced
+    /// (mirrored as plain data here, the same way `Content`/`Context`
+    /// carry plain strings rather than importing another domain's enum
+    /// type), never a claim that acoustic recognition is more certain
+    /// than the confidence score already says.
+    Acoustic {
+        segment_id: Uuid,
+        method: String,
+        duration_ms: u64,
+    },
 }
 
 /// Where a finding's underlying content traces back to. Deliberately thin:

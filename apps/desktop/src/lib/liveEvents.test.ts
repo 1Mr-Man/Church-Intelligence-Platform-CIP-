@@ -7,6 +7,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  onCurrentSongChanged,
   onMusicFindingAccepted,
   onMusicFindingDetected,
   onMusicFindingRejected,
@@ -72,5 +73,23 @@ describe("liveEvents.ts Tauri event-subscription guard", () => {
     expect(listenMock).toHaveBeenCalledWith("MUSIC_FINDING_DETECTED", expect.any(Function));
     expect(listenMock).toHaveBeenCalledWith("MUSIC_FINDING_ACCEPTED", expect.any(Function));
     expect(listenMock).toHaveBeenCalledWith("MUSIC_FINDING_REJECTED", expect.any(Function));
+  });
+
+  it("subscribes to CURRENT_SONG_CHANGED (Phase 2.2)", async () => {
+    isTauriMock.mockReturnValue(true);
+    listenMock.mockResolvedValue(() => {});
+
+    await onCurrentSongChanged(() => {});
+
+    expect(listenMock).toHaveBeenCalledWith("CURRENT_SONG_CHANGED", expect.any(Function));
+  });
+
+  it("resolves to a no-op unlisten for onCurrentSongChanged outside the Tauri runtime", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    const unlisten = await onCurrentSongChanged(() => {});
+
+    expect(listenMock).not.toHaveBeenCalled();
+    expect(() => unlisten()).not.toThrow();
   });
 });

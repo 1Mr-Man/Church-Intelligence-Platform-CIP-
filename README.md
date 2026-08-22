@@ -10,8 +10,9 @@ Compatibility**, **Phase 1.3 - Live Service Intelligence & Operator
 Workflow**, **Phase 1.4 - Presentation Foundation & Real-Service
 Validation**, **Phase 1.5 - Content/Dataset Foundation &
 Full-Service Validation**, **Phase 2.0 - Intelligence Architecture &
-Unified Intelligence Context**, and **Phase 2.1 - Music Intelligence
-Foundation & Song Recognition Architecture**.
+Unified Intelligence Context**, **Phase 2.1 - Music Intelligence
+Foundation & Song Recognition Architecture**, and **Phase 2.2 - Acoustic
+Music Recognition & Live Song Detection**.
 
 ## Approved architecture
 
@@ -185,13 +186,37 @@ modified by this phase. See
 [`docs/music-intelligence.md`](docs/music-intelligence.md) and
 [`docs/music-datasets.md`](docs/music-datasets.md).
 
-Still deliberately **not** implemented: real audio fingerprinting/
-acoustic song recognition, sermon intelligence, semantic/paraphrase
-Bible search, automatic bullet extraction, a web research engine, online
-Bible fallback, content generation, cloud sync, OBS/vMix integration,
-remote operator accounts, a mobile app, real display/projection output,
-and the full presentation designer (visual/typographic design beyond one
-deterministic template). Those are later phases.
+**Phase 2.2 (Acoustic Music Recognition & Live Song Detection)** added a
+second, real recognition path for Music Intelligence: acoustic
+(audio-fingerprint/embedding) recognition, fused with the existing
+lyric/title path rather than replacing it. A new `cip_core_music::AcousticMusicRecognizer`
+trait (mirroring `SpeechEngine`'s pattern exactly) is implemented by a
+new `integrations/music-acoustic` crate
+(`NullAcousticMusicRecognizer`/`ScriptedAcousticMusicRecognizer`/
+`LocalAcousticMusicRecognizer`) - the last honestly reports
+`Unavailable` in this build, since no acoustic inference backend has
+been chosen or implemented, matching Phase 2.2's explicit "never fake
+recognition" requirement. Evidence fusion (`core/music::fusion`, a
+noisy-or combination, never a simple average) lets acoustic and lyric
+evidence for the same song corroborate each other without creating a
+second finding/confidence system; song continuity, transitions, and
+ambiguity all reuse Phase 2.1's existing policy unchanged. A new,
+deliberately minimal `CurrentSong` concept is set only by an explicit
+operator accept and cleared only by an explicit operator clear - never
+automatically, regardless of confidence. `pipeline.rs`, `core/bible`,
+and `bible_adapter.rs` were not modified by this phase. See
+[`docs/acoustic-music.md`](docs/acoustic-music.md).
+
+Still deliberately **not** implemented: a chosen/trained acoustic model
+(so real-world acoustic recognition accuracy remains unverified in this
+environment - see [`docs/acoustic-music.md`](docs/acoustic-music.md)'s
+"PROVEN vs NOT AVAILABLE" section), sermon intelligence, semantic/
+paraphrase Bible search, automatic bullet extraction, a web research
+engine, online Bible fallback, content generation, cloud sync, OBS/vMix
+integration, remote operator accounts, a mobile app, real display/
+projection output, and the full presentation designer (visual/
+typographic design beyond one deterministic template). Those are later
+phases.
 
 ## Repository layout
 
@@ -203,8 +228,8 @@ apps/desktop/          Tauri + React + TypeScript desktop application
 core/                  Domain logic and contracts, one crate per domain
   bible/               BibleProvider, text normalization, reference detection, verse-range/search, integrity checker, Scripture Context Manager
   content/              ContentRegistry - what local content exists, and its provenance/licensing
-  intelligence/          Shared intelligence architecture (Phase 2.0) - IntelligenceContext/Engine/Finding, the Bible compatibility adapter, the Music adapter (Phase 2.1)
-  music/                 Song/lyric domain model, MusicProvider trait, deterministic title/alias/number/lyric matcher (Phase 2.1)
+  intelligence/          Shared intelligence architecture (Phase 2.0) - IntelligenceContext/Engine/Finding, the Bible compatibility adapter, the Music adapter (Phase 2.1, extended with acoustic fusion in Phase 2.2)
+  music/                 Song/lyric domain model, MusicProvider trait, deterministic title/alias/number/lyric matcher (Phase 2.1); AcousticMusicRecognizer trait, segmentation, signal-quality gate, evidence fusion (Phase 2.2)
   sermon/                (placeholder - Phase 2+ engine implementation)
   service/              ServiceSession + AudioEngine
   presentation/         PresentationItem
@@ -213,7 +238,7 @@ core/                  Domain logic and contracts, one crate per domain
   confidence/            ConfidenceResult (shared by every domain above)
 
 database/              Local-first SQLite: migrations, schema docs, seeds
-integrations/          Provider/adaptor implementations (bible - incl. dataset importer, content, audio, music - incl. dataset importer, web, obs, vmix)
+integrations/          Provider/adaptor implementations (bible - incl. dataset importer, content, audio, music - incl. dataset importer, music-acoustic, web, obs, vmix)
 ai/                    AI backend implementations (speech, embeddings, classifiers, models)
 presentation/          Rendering subsystem (renderer, templates, outputs)
 tests/                 Cross-crate integration tests

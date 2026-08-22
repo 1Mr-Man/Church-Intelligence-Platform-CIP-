@@ -1,3 +1,4 @@
+mod acoustic;
 mod commands;
 mod config;
 mod content;
@@ -13,6 +14,7 @@ mod state;
 mod timeline;
 
 use cip_core_ai::SpeechEngine;
+use cip_core_music::AcousticMusicRecognizer;
 use config::AppConfig;
 use logging::LogCategory;
 use state::AppState;
@@ -47,6 +49,28 @@ fn create_speech_engine(config: &AppConfig) -> Box<dyn SpeechEngine> {
     );
 
     Box::new(cip_ai_speech::NullSpeechEngine)
+}
+
+/// Choose an `AcousticMusicRecognizer` (Phase 2.2): `LocalAcousticMusicRecognizer`,
+/// configured from `AppConfig.acoustic` - honestly reports `Disabled`/
+/// `Unavailable`/`Error` (never fake recognition) when turned off, or when
+/// no model manifest is configured/present/well-formed, exactly mirroring
+/// `create_speech_engine`'s "missing model is never fatal" discipline. See
+/// `docs/acoustic-music.md` for why this build never reports `Available`.
+fn create_acoustic_recognizer(config: &AppConfig) -> Box<dyn AcousticMusicRecognizer> {
+    let recognizer = cip_integrations_music_acoustic::LocalAcousticMusicRecognizer::configure(
+        cip_integrations_music_acoustic::LocalAcousticConfig {
+            model_dir: Some(config.acoustic.model_dir.clone()),
+            enabled: config.acoustic.enabled,
+        },
+    );
+    log::info!(
+        target: LogCategory::Music.target(),
+        "acoustic recognizer status: {:?} ({})",
+        recognizer.status(),
+        recognizer.status_reason().unwrap_or_default()
+    );
+    Box::new(recognizer)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -147,6 +171,21 @@ pub fn run() {
                 Box::new(cip_integrations_audio::CpalAudioEngine::new());
             let speech_engine = create_speech_engine(&config);
 
+            // Phase 2.2: a fourth independent Music read path, dedicated
+            // to acoustic analysis - same "every independent read path
+            // gets its own connection" discipline as
+            // `intelligence_music_conn`/`music_conn` above (see
+            // `state::AppState::acoustic_music_engine`'s docs for why this
+            // can't just reuse the trait object already registered in
+            // `intelligence_registry`).
+            let acoustic_music_conn = cip_database::open(&config.database_path)?;
+            let acoustic_music_engine = cip_core_intelligence::MusicIntelligenceEngine::new(
+                Box::new(cip_integrations_music::SqliteMusicProvider::new(
+                    acoustic_music_conn,
+                )),
+            );
+            let acoustic_recognizer = create_acoustic_recognizer(&config);
+
             app.manage(AppState::new(
                 config,
                 db,
@@ -156,6 +195,8 @@ pub fn run() {
                 music_provider,
                 audio_engine,
                 speech_engine,
+                acoustic_music_engine,
+                acoustic_recognizer,
             ));
             Ok(())
         })
@@ -196,6 +237,8 @@ pub fn run() {
             commands::list_music_findings,
             commands::accept_music_finding,
             commands::reject_music_finding,
+            commands::clear_current_song,
+            commands::analyze_music_audio,
             commands::get_live_status,
             commands::list_timeline,
             commands::list_service_history,

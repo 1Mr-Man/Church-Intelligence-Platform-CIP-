@@ -354,11 +354,24 @@ live audio/speech transcript pipeline still only calls Bible detection,
 unchanged.
 
 Full details - the confidence hierarchy, text normalization policy,
-free-text dispatch heuristic, song continuity, ambiguity handling, the
-operator workflow, and why acoustic recognition is honestly reported
-unavailable - live in
-[`docs/music-intelligence.md`](music-intelligence.md), not duplicated
-here.
+free-text dispatch heuristic, song continuity, and ambiguity handling -
+live in [`docs/music-intelligence.md`](music-intelligence.md), not
+duplicated here.
+
+### Acoustic recognition (Phase 2.2)
+
+`MusicIntelligenceEngine::analyze_acoustic` (an inherent method, not part
+of the shared `IntelligenceEngine` trait - it takes an `AudioSegment`,
+which does not fit `IntelligenceInput`'s shape) adds a second, real
+recognition path: audio-fingerprint/embedding recognition, fused with
+lyric/title evidence rather than competing with it. Same non-negotiable
+rule as the rest of this architecture: it never calls Bible logic, and
+Bible never calls it - both still only ever share what's in
+`IntelligenceContext`. Full details - segmentation, the signal-quality
+gate, the recognizer contract and its three implementations, evidence
+fusion, ambiguity/continuity/transitions, "Current Song," and honest
+`Unavailable` reporting - live in
+[`docs/acoustic-music.md`](acoustic-music.md).
 
 ### Remaining Sermon / Content / CrossDomain engines - PLANNED / NOT IMPLEMENTED
 
@@ -388,7 +401,10 @@ before commit, matching the Phase 1.5 measurement methodology):
 
 See [`docs/music-intelligence.md`](music-intelligence.md#performance) for
 the Phase 2.1 Music-specific measurements (matcher, engine, and the full
-real-SQLite orchestration path).
+real-SQLite orchestration path), and
+[`docs/acoustic-music.md`](acoustic-music.md#performance) for the Phase
+2.2 acoustic-pipeline measurements (segmentation, the signal-quality
+gate, fusion, and the full `analyze_acoustic` path).
 
 Real numbers from one measurement pass, not "instant"/"real-time" claims.
 Every operation here is sub-millisecond even at these synthetic scales,

@@ -9,7 +9,7 @@
 use crate::acceptance_tests::support::segment;
 use crate::bible_adapter::BibleIntelligenceEngine;
 use crate::context::{ContextBounds, IntelligenceContext};
-use crate::domain::{AssertionLevel, FindingKind, IntelligenceDomain};
+use crate::domain::{AssertionLevel, FindingKind, FindingStatus, IntelligenceDomain};
 use crate::engine::{
     EngineCapability, EngineIdentity, IntelligenceEngine, IntelligenceError, IntelligenceInput,
     IntelligenceResult,
@@ -21,6 +21,7 @@ use crate::registry::IntelligenceEngineRegistry;
 use chrono::Utc;
 use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
 use cip_core_content::{ContentMetadata, ContentStatus, ContentType};
+use cip_core_music::{AcousticRecognitionCandidate, AcousticRecognitionMethod};
 use uuid::Uuid;
 
 mod support {
@@ -605,4 +606,176 @@ fn music_engine_is_deterministic_for_identical_input_and_context() {
     };
 
     assert_eq!(run(), run());
+}
+
+// --- Phase 2.2: acoustic recognition + fusion failure isolation ------------
+
+fn acoustic_candidate(song_id: &str, content_id: &str, score: f32) -> AcousticRecognitionCandidate {
+    AcousticRecognitionCandidate {
+        song_id: song_id.to_string(),
+        content_id: content_id.to_string(),
+        confidence: ConfidenceResult::new(score, ConfidenceSource::Model, None),
+        method: AcousticRecognitionMethod::Test,
+        segment_id: Uuid::nil(),
+        duration_ms: 8_000,
+        evidence: vec!["acoustic acceptance-test evidence".to_string()],
+    }
+}
+
+/// Phase 2.2 rule (mirrors Phase 2.1 spec section 34, applied to the new
+/// acoustic entry point): acoustic recognition and lyric/title recognition
+/// on the *same* `MusicIntelligenceEngine` instance must not interfere.
+/// Feeding a genuinely unresolvable acoustic candidate (naming a dataset
+/// that is not enabled) must never affect a later lyric-path call on the
+/// same engine.
+#[test]
+fn acoustic_analysis_failure_does_not_affect_lyric_recognition_on_the_same_engine() {
+    let engine = music_engine();
+    let service_id = Uuid::new_v4();
+    let content = vec![enabled_music_content()];
+    let context = IntelligenceContext::build(
+        service_id,
+        None,
+        None,
+        Vec::new(),
+        None,
+        Vec::new(),
+        Vec::new(),
+        content,
+        ContextBounds::default(),
+    );
+
+    let unresolvable = vec![acoustic_candidate("h1", "music:not-enabled", 0.9)];
+    let acoustic_result = engine
+        .analyze_acoustic(service_id, &unresolvable, &context)
+        .unwrap();
+    assert!(
+        acoustic_result.findings.is_empty(),
+        "a candidate naming a non-enabled dataset must never resolve into a finding"
+    );
+
+    let lyric_input = IntelligenceInput::new(service_id, segment("Test Hymn One", 0));
+    let lyric_result = engine.analyze(&lyric_input, &context).unwrap();
+    assert_eq!(
+        lyric_result.findings.len(),
+        1,
+        "lyric recognition on the same engine instance is unaffected by the failed acoustic call"
+    );
+}
+
+/// Phase 2.2 rule (mirrors `bible_and_music_engines_share_one_context_without_calling_each_other`):
+/// the Bible engine and an acoustic-sourced Music finding both read the
+/// same shared `IntelligenceContext`; the acoustic path never calls Bible
+/// logic, and both findings coexist in one context.
+#[test]
+fn acoustic_and_bible_share_one_context_without_calling_each_other() {
+    let bible = bible_engine();
+    let music = music_engine();
+    let service_id = Uuid::new_v4();
+    let content = vec![enabled_music_content()];
+    let context = IntelligenceContext::build(
+        service_id,
+        None,
+        None,
+        Vec::new(),
+        None,
+        Vec::new(),
+        Vec::new(),
+        content.clone(),
+        ContextBounds::default(),
+    );
+
+    let bible_input = IntelligenceInput::new(service_id, segment("Romans 8:28", 0));
+    let bible_result = bible.analyze(&bible_input, &context).unwrap();
+    assert_eq!(bible_result.findings[0].domain, IntelligenceDomain::Bible);
+
+    let candidates = vec![acoustic_candidate("h1", "music:test-hymnbook", 0.8)];
+    let acoustic_result = music
+        .analyze_acoustic(service_id, &candidates, &context)
+        .unwrap();
+    assert_eq!(
+        acoustic_result.findings[0].domain,
+        IntelligenceDomain::Music
+    );
+
+    let shared_context = IntelligenceContext::build(
+        service_id,
+        None,
+        None,
+        Vec::new(),
+        None,
+        vec![
+            bible_result.findings[0].clone(),
+            acoustic_result.findings[0].clone(),
+        ],
+        Vec::new(),
+        content,
+        ContextBounds::default(),
+    );
+    assert_eq!(shared_context.recent_findings.len(), 2);
+    assert!(shared_context
+        .recent_findings
+        .iter()
+        .any(|f| f.domain == IntelligenceDomain::Bible));
+    assert!(shared_context
+        .recent_findings
+        .iter()
+        .any(|f| f.domain == IntelligenceDomain::Music));
+}
+
+/// Phase 2.2 rule: acoustic-sourced findings must never be automatically
+/// approved/projected - they start `Detected` exactly like every other
+/// finding this crate produces (Phase 2.0 spec section 36, unchanged).
+#[test]
+fn acoustic_sourced_findings_never_start_anything_but_detected() {
+    let music = music_engine();
+    let service_id = Uuid::new_v4();
+    let content = vec![enabled_music_content()];
+    let context = IntelligenceContext::build(
+        service_id,
+        None,
+        None,
+        Vec::new(),
+        None,
+        Vec::new(),
+        Vec::new(),
+        content,
+        ContextBounds::default(),
+    );
+
+    let candidates = vec![acoustic_candidate("h1", "music:test-hymnbook", 0.9)];
+    let result = music
+        .analyze_acoustic(service_id, &candidates, &context)
+        .unwrap();
+    assert_eq!(result.findings.len(), 1);
+    assert_eq!(result.findings[0].status, FindingStatus::Detected);
+}
+
+/// Phase 2.2 rule: a disabled/unregistered Music dataset must never be
+/// resolved by acoustic recognition, mirroring the lyric-path degradation
+/// proof (`failure_of_either_real_engine_does_not_affect_the_other`) - a
+/// registry-less, direct `analyze_acoustic` call against no enabled
+/// content degrades to "no result," never an error and never a resolved
+/// finding.
+#[test]
+fn acoustic_recognition_with_no_enabled_music_content_yields_no_findings_and_no_error() {
+    let music = music_engine();
+    let service_id = Uuid::new_v4();
+    let context = IntelligenceContext::build(
+        service_id,
+        None,
+        None,
+        Vec::new(),
+        None,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(), // no content_metadata at all - nothing enabled.
+        ContextBounds::default(),
+    );
+
+    let candidates = vec![acoustic_candidate("h1", "music:test-hymnbook", 0.9)];
+    let result = music
+        .analyze_acoustic(service_id, &candidates, &context)
+        .unwrap();
+    assert!(result.findings.is_empty());
 }

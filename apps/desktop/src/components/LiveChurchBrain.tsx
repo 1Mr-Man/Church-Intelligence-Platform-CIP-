@@ -240,6 +240,9 @@ export function LiveChurchBrain() {
       liveEvents.onMusicFindingRejected((finding) =>
         setMusicFindings((prev) => prev.filter((f) => f.id !== finding.id)),
       ),
+      liveEvents.onCurrentSongChanged((song) =>
+        setStatus((prev) => (prev ? { ...prev, currentSong: song } : prev)),
+      ),
     ];
     return () => {
       subscriptions.forEach((p) => p.then((unlisten) => unlisten()));
@@ -969,9 +972,45 @@ export function LiveChurchBrain() {
       <section className="live-brain__panel">
         <h2>Music Intelligence</h2>
         <p className="live-brain__hint">
-          Deterministic title/alias/number/lyric recognition (Phase 2.1) - never audio fingerprinting. Findings are
-          never automatically prepared as a presentation item; accept or reject each one explicitly.
+          Deterministic title/alias/number/lyric recognition (Phase 2.1), plus acoustic (audio-fingerprint)
+          recognition (Phase 2.2) when a local model is configured. Findings are never automatically prepared as a
+          presentation item; accept or reject each one explicitly.
         </p>
+
+        {status?.acousticStatus && (
+          <p className="live-brain__hint">
+            Acoustic recognition: <strong>{status.acousticStatus.status}</strong>
+            {status.acousticStatus.method !== "none" && <> ({status.acousticStatus.method})</>}
+            {status.acousticStatus.reason && <> &mdash; {status.acousticStatus.reason}</>}
+          </p>
+        )}
+
+        <div className="live-brain__suggestion-card">
+          {status?.currentSong ? (
+            <>
+              <div className="live-brain__suggestion-header">
+                <strong>
+                  Current song: {status.currentSong.songId} ({status.currentSong.contentId})
+                </strong>
+                <span className="live-brain__confidence">
+                  {Math.round(status.currentSong.confidence.score * 100)}%
+                </span>
+              </div>
+              <button
+                type="button"
+                disabled={isBusy("clear-current-song")}
+                onClick={() => withBusy("clear-current-song", () => commands.clearCurrentSong())}
+              >
+                Clear current song
+              </button>
+            </>
+          ) : (
+            <p className="live-brain__hint">
+              No current song - accept a finding below to confirm one. A pending finding is only ever a candidate,
+              never automatically current.
+            </p>
+          )}
+        </div>
 
         <details className="live-brain__manual-entry">
           <summary>Manual / test music transcript entry</summary>
@@ -1014,6 +1053,7 @@ export function LiveChurchBrain() {
                 </div>
                 <p className="live-brain__hint">
                   {finding.assertionLevel} &middot; {finding.provenance.contentId ?? "unknown dataset"}
+                  {finding.evidence.some((e) => e.kind === "acoustic") && <> &middot; acoustic</>}
                 </p>
                 <div className="live-brain__row">
                   <button

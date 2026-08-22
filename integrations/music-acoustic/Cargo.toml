@@ -1,0 +1,16 @@
+[package]
+name = "cip-integrations-music-acoustic"
+description = "AcousticMusicRecognizer implementations: NullAcousticMusicRecognizer (safe default), ScriptedAcousticMusicRecognizer (deterministic test adapter), and LocalAcousticMusicRecognizer (the real local-model integration boundary - honestly reports Unavailable when no model is configured)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cip-core-music.workspace = true
+cip-core-confidence.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

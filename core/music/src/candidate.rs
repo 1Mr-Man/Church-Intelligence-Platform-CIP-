@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 
 use cip_core_confidence::ConfidenceResult;
 
-/// How a candidate was matched. `Acoustic` is part of this enum so the
-/// architecture has somewhere to put a future acoustic recognizer's
-/// output without a breaking change - nothing in this crate ever
-/// constructs `Acoustic` today (see `docs/music-intelligence.md`'s
-/// acoustic-recognition section for why).
+/// How a candidate was matched. `Acoustic` (Phase 2.2) is now genuinely
+/// constructed - by `crate::fusion`, from an
+/// `AcousticRecognitionCandidate` a real `AcousticMusicRecognizer`
+/// returned, never fabricated when no recognizer is configured (see
+/// `docs/acoustic-music.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MatchType {

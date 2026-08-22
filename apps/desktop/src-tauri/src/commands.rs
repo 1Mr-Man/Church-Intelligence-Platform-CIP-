@@ -5,6 +5,7 @@
 //! reach the frontend as a clear message rather than a panic - per the
 //! "manual fallback" requirement, nothing here may crash the application.
 
+use crate::acoustic;
 use crate::config::AppConfig;
 use crate::content;
 use crate::errors::AppError;
@@ -25,7 +26,8 @@ use cip_core_bible::{
 use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
 use cip_core_content::{ContentMetadata, ContentRegistryError, ContentStatus, ContentType};
 use cip_core_intelligence::{
-    ContextBounds, EngineCapability, IntelligenceDomain, IntelligenceFinding, IntelligenceInput,
+    ContextBounds, EngineCapability, IntelligenceContext, IntelligenceDomain, IntelligenceFinding,
+    IntelligenceInput,
 };
 use cip_core_music::{search_songs, MatchThresholds, MusicQuery, SongRecognitionCandidate};
 use cip_core_presentation::{PresentationContent, PresentationItem, PresentationItemStatus};
@@ -39,7 +41,7 @@ use cip_presentation_renderer::{RenderedSlide, SCRIPTURE_DEFAULT_TEMPLATE};
 use rusqlite::Connection;
 use serde::Serialize;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
@@ -499,8 +501,20 @@ pub fn start_listening(
         )));
     }
 
+    // Phase 2.2: a second consumer inside the same single sink closure,
+    // never a second `AudioEngine::start()` call - the trait allows
+    // exactly one sink. `try_send`/bounded channel so a slow/backed-up
+    // acoustic worker can never block the audio capture thread or the
+    // speech-engine feed right after it; a dropped chunk here only means
+    // one less acoustic analysis window, never lost transcript audio
+    // (only `acoustic_tx`'s clone below feeds the acoustic path).
+    let (acoustic_tx, acoustic_rx) =
+        mpsc::sync_channel::<AudioChunk>(acoustic::ACOUSTIC_CHANNEL_CAPACITY);
+    spawn_acoustic_worker(app.clone(), service_id, acoustic_rx);
+
     let sink_app = app.clone();
     let sink: AudioChunkSink = Arc::new(move |chunk: AudioChunk| {
+        let _ = acoustic_tx.try_send(chunk.clone());
         handle_audio_chunk(&sink_app, service_id, chunk);
     });
 
@@ -594,6 +608,131 @@ pub fn stop_listening(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
     let _ = emit(&app, AppEvent::AudioStopped, serde_json::json!({}));
     let _ = emit(&app, AppEvent::SpeechStopped, serde_json::json!({}));
     Ok(())
+}
+
+/// Background worker thread for acoustic (audio-fingerprint) recognition
+/// (Phase 2.2) - reads `AudioChunk`s from `rx` (fed by `start_listening`'s
+/// sink closure, alongside but never blocking the speech-engine feed)
+/// until the channel closes, which happens automatically and cleanly when
+/// `stop_listening`/a failed `start_listening` causes the audio engine to
+/// drop the sink that held `rx`'s matching sender (see this function's
+/// caller). Owns its own `acoustic::AcousticWorkerState` exclusively -
+/// never shared with any other thread, unlike `AppState`'s
+/// `Mutex`-guarded fields this loop does still need to reach (the
+/// recognizer, the finding queue, the database).
+///
+/// Every genuine failure - a bad `IntelligenceContext` build, a recognizer
+/// error, an engine error - is logged and recorded to the timeline, then
+/// the loop simply continues to the next window. One bad window must
+/// never end acoustic recognition for the rest of the service (Phase
+/// 2.2's failure-isolation requirement), and this loop must never take
+/// down the process - nothing here panics on a data-dependent path.
+fn spawn_acoustic_worker(app: AppHandle, service_id: Uuid, rx: mpsc::Receiver<AudioChunk>) {
+    std::thread::spawn(move || {
+        let config = {
+            let state = app.state::<AppState>();
+            let acoustic_config = &state.config.acoustic;
+            cip_core_music::AcousticAnalysisConfig {
+                window_ms: acoustic_config.analysis_window_ms,
+                overlap_ms: acoustic_config.overlap_ms,
+                min_duration_ms: acoustic_config.minimum_audio_ms,
+                ..cip_core_music::AcousticAnalysisConfig::default()
+            }
+        };
+        let mut worker = acoustic::AcousticWorkerState::new(config);
+
+        while let Ok(chunk) = rx.recv() {
+            let Some(segment) = worker.ingest(&chunk.samples, chunk.sample_rate_hz) else {
+                continue;
+            };
+            if !worker.should_attempt_recognition(&segment) {
+                continue;
+            }
+
+            let state = app.state::<AppState>();
+            let context = match build_music_context(&state, service_id) {
+                Ok(context) => context,
+                Err(e) => {
+                    log::error!(
+                        target: LogCategory::Music.target(),
+                        "acoustic worker: failed to build intelligence context: {e}"
+                    );
+                    continue;
+                }
+            };
+            let content_ids = acoustic::enabled_music_dataset_ids(&context);
+            if content_ids.is_empty() {
+                // No enabled Music dataset to resolve into - never call
+                // the recognizer at all, and never count this as a
+                // recognition attempt (see `record_recognition_attempt`
+                // below, deliberately skipped here) so the very next
+                // window is retried immediately once a dataset is
+                // enabled, rather than staying rate-limited by a call
+                // that never happened.
+                continue;
+            }
+            worker.record_recognition_attempt(&segment);
+
+            let outcome = {
+                let mut recognizer = state
+                    .acoustic_recognizer
+                    .lock()
+                    .expect("acoustic_recognizer mutex poisoned");
+                let mut findings = state
+                    .intelligence_findings
+                    .lock()
+                    .expect("intelligence_findings mutex poisoned");
+                acoustic::recognize_fuse_and_queue(
+                    recognizer.as_mut(),
+                    &state.acoustic_music_engine,
+                    &segment,
+                    &content_ids,
+                    service_id,
+                    &context,
+                    &mut findings,
+                )
+            };
+
+            match outcome {
+                Ok(queued) if queued.is_empty() => {}
+                Ok(queued) => {
+                    let db = state.db.lock().expect("db connection poisoned");
+                    for finding in &queued {
+                        record_timeline(
+                            &db,
+                            Some(service_id),
+                            AppEvent::MusicFindingDetected,
+                            LogCategory::Music,
+                            serde_json::json!({
+                                "findingId": finding.id,
+                                "summary": &finding.summary,
+                                "confidence": finding.confidence.score,
+                                "source": "acoustic",
+                            }),
+                        );
+                    }
+                    drop(db);
+                    for finding in queued {
+                        let _ = emit(&app, AppEvent::MusicFindingDetected, finding);
+                    }
+                }
+                Err(e) => {
+                    log::warn!(
+                        target: LogCategory::Music.target(),
+                        "acoustic recognition failed: {e}"
+                    );
+                    let db = state.db.lock().expect("db connection poisoned");
+                    record_timeline(
+                        &db,
+                        Some(service_id),
+                        AppEvent::ErrorOccurred,
+                        LogCategory::Music,
+                        serde_json::json!({ "context": "acoustic_recognition", "error": e.to_string() }),
+                    );
+                }
+            }
+        }
+    });
 }
 
 /// Runs on the `AudioEngine`'s own capture thread (see
@@ -1734,6 +1873,7 @@ pub fn analyze_music_transcript(
             active_service.as_ref(),
             &*context_manager,
             &recent_timeline,
+            Vec::new(),
             ContextBounds::default(),
         )
         .map_err(AppError::from)
@@ -1843,6 +1983,33 @@ pub fn accept_music_finding(
     );
     drop(db);
     let _ = emit(&app, AppEvent::MusicFindingAccepted, updated.clone());
+
+    // Phase 2.2: accepting a Music finding is the *only* way `current_song`
+    // is ever set - never automatically from acoustic/lyric confidence
+    // alone (see `cip_core_music::CurrentSong`'s docs). A finding missing
+    // the `song_id:`/`content_id` evidence a real Music finding always
+    // carries leaves `current_song` untouched rather than clearing it.
+    if let Some(current) = music::current_song_from_finding(&updated) {
+        *state
+            .current_song
+            .lock()
+            .expect("current_song mutex poisoned") = Some(current.clone());
+        let db = state.db.lock().expect("db connection poisoned");
+        record_timeline(
+            &db,
+            Some(updated.service_id),
+            AppEvent::CurrentSongChanged,
+            LogCategory::Music,
+            serde_json::json!({
+                "contentId": &current.content_id,
+                "songId": &current.song_id,
+                "reason": "accepted",
+            }),
+        );
+        drop(db);
+        let _ = emit(&app, AppEvent::CurrentSongChanged, current);
+    }
+
     Ok(updated)
 }
 
@@ -1878,6 +2045,163 @@ pub fn reject_music_finding(
     drop(db);
     let _ = emit(&app, AppEvent::MusicFindingRejected, updated.clone());
     Ok(updated)
+}
+
+/// Explicit operator clear of `current_song` (Phase 2.2) - the only other
+/// way `current_song` ever changes besides `accept_music_finding` setting
+/// it. Never inferred from silence/a song ending/a new detection; an
+/// operator must actively call this.
+#[tauri::command]
+pub fn clear_current_song(app: AppHandle, state: State<'_, AppState>) -> Result<(), AppError> {
+    let had_song = {
+        let mut current = state
+            .current_song
+            .lock()
+            .expect("current_song mutex poisoned");
+        let had_song = current.is_some();
+        *current = None;
+        had_song
+    };
+    if had_song {
+        let service_id = state
+            .active_service
+            .lock()
+            .expect("active_service mutex poisoned")
+            .as_ref()
+            .map(|s| s.id);
+        let db = state.db.lock().expect("db connection poisoned");
+        record_timeline(
+            &db,
+            service_id,
+            AppEvent::CurrentSongChanged,
+            LogCategory::Music,
+            serde_json::json!({ "reason": "cleared" }),
+        );
+        drop(db);
+        let _ = emit(&app, AppEvent::CurrentSongChanged, ());
+    }
+    Ok(())
+}
+
+/// Build a real `IntelligenceContext` from this app's actual state,
+/// including real `recent_findings` (unlike `analyze_music_transcript`'s
+/// own context, which - unchanged since Phase 2.1 - passes `Vec::new()`).
+/// Shared by `analyze_music_audio` and the acoustic worker
+/// (`spawn_acoustic_worker`) so both see the same song-continuity history
+/// `intelligence::build_intelligence_context`'s `recent_findings`
+/// parameter now supports.
+fn build_music_context(
+    state: &AppState,
+    service_id: Uuid,
+) -> Result<IntelligenceContext, AppError> {
+    let db = state.db.lock().expect("db connection poisoned");
+    let recent_timeline = timeline::list_timeline(&db, service_id, 20)?;
+    let active_service = state
+        .active_service
+        .lock()
+        .expect("active_service mutex poisoned");
+    let context_manager = state
+        .context_manager
+        .lock()
+        .expect("context_manager mutex poisoned");
+    let recent_findings = state
+        .intelligence_findings
+        .lock()
+        .expect("intelligence_findings mutex poisoned")
+        .all()
+        .into_iter()
+        .cloned()
+        .collect();
+    crate::intelligence::build_intelligence_context(
+        &db,
+        state.content_registry.as_ref(),
+        active_service.as_ref(),
+        &*context_manager,
+        &recent_timeline,
+        recent_findings,
+        ContextBounds::default(),
+    )
+    .map_err(AppError::from)
+}
+
+/// The deterministic acoustic-analysis harness, exposed over IPC - the
+/// Phase 2.2 counterpart to `analyze_music_transcript`, and the primary
+/// way this app's acoustic pipeline is tested/demonstrated without a
+/// microphone (Phase 2.2's "manual test mode" requirement). Wraps `samples`
+/// directly into one `AudioSegment` (bypassing `AcousticWorkerState`'s
+/// windowing/rate-limiting - a manual, single-shot call is not subject to
+/// the same "how often can the recognizer be called" concern live audio
+/// is) and runs it through the same `acoustic::recognize_fuse_and_queue`
+/// path the live worker uses, so a `ScriptedAcousticMusicRecognizer` can
+/// exercise the exact real pipeline end to end. Still gated by the
+/// signal-quality check: a caller who feeds silence/too-short audio gets
+/// an honest empty result, not a fake one.
+#[tauri::command]
+pub fn analyze_music_audio(
+    samples: Vec<i16>,
+    sample_rate_hz: u32,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<IntelligenceFinding>, AppError> {
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let segment = cip_core_music::AudioSegment::new(samples, sample_rate_hz, 0);
+    let quality = cip_core_music::assess_signal_quality(
+        &segment,
+        &cip_core_music::AcousticAnalysisConfig::default(),
+    );
+    if quality != cip_core_music::SignalQuality::Ready {
+        return Ok(Vec::new());
+    }
+
+    let context = build_music_context(&state, service_id).map_err(log_and_return)?;
+    let content_ids = acoustic::enabled_music_dataset_ids(&context);
+    if content_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let queued = {
+        let mut recognizer = state
+            .acoustic_recognizer
+            .lock()
+            .expect("acoustic_recognizer mutex poisoned");
+        let mut findings = state
+            .intelligence_findings
+            .lock()
+            .expect("intelligence_findings mutex poisoned");
+        acoustic::recognize_fuse_and_queue(
+            recognizer.as_mut(),
+            &state.acoustic_music_engine,
+            &segment,
+            &content_ids,
+            service_id,
+            &context,
+            &mut findings,
+        )
+        .map_err(|e| AppError::InvalidInput(e.to_string()))
+        .map_err(log_and_return)?
+    };
+
+    let db = state.db.lock().expect("db connection poisoned");
+    for finding in &queued {
+        record_timeline(
+            &db,
+            Some(service_id),
+            AppEvent::MusicFindingDetected,
+            LogCategory::Music,
+            serde_json::json!({
+                "findingId": finding.id,
+                "summary": &finding.summary,
+                "confidence": finding.confidence.score,
+                "source": "acoustic",
+            }),
+        );
+    }
+    drop(db);
+    for finding in &queued {
+        let _ = emit(&app, AppEvent::MusicFindingDetected, finding.clone());
+    }
+
+    Ok(queued)
 }
 
 // --- live status -------------------------------------------------------------
@@ -1955,6 +2279,15 @@ pub struct LiveStatus {
     pub network_status: NetworkStatusKind,
     pub ai_status: AiStatusKind,
     pub database_status: DatabaseStatusKind,
+    /// Phase 2.2: whether/why acoustic recognition can currently run -
+    /// reused here rather than a separate `get_acoustic_music_status`
+    /// command, since the frontend already polls `get_live_status` for
+    /// every other engine's status.
+    pub acoustic_status: acoustic::AcousticEngineStatus,
+    /// Phase 2.2: the operator-confirmed current song, if any - `None`
+    /// until an operator accepts a Music finding. See
+    /// `cip_core_music::CurrentSong`'s docs.
+    pub current_song: Option<cip_core_music::CurrentSong>,
 }
 
 fn check_network_online() -> bool {
@@ -2046,6 +2379,19 @@ pub fn get_live_status(state: State<'_, AppState>) -> LiveStatus {
         }
     };
 
+    let acoustic_status = acoustic::describe_status(
+        state
+            .acoustic_recognizer
+            .lock()
+            .expect("acoustic_recognizer mutex poisoned")
+            .as_ref(),
+    );
+    let current_song = state
+        .current_song
+        .lock()
+        .expect("current_song mutex poisoned")
+        .clone();
+
     LiveStatus {
         service,
         service_status,
@@ -2055,6 +2401,8 @@ pub fn get_live_status(state: State<'_, AppState>) -> LiveStatus {
         network_status,
         ai_status,
         database_status,
+        acoustic_status,
+        current_song,
     }
 }
 
@@ -2311,6 +2659,12 @@ mod tests {
             network_status: NetworkStatusKind::Offline,
             ai_status: AiStatusKind::Degraded,
             database_status: DatabaseStatusKind::Connected,
+            acoustic_status: acoustic::AcousticEngineStatus {
+                status: cip_core_music::AcousticRecognitionStatus::Unavailable,
+                method: cip_core_music::AcousticRecognitionMethod::None,
+                reason: Some("no acoustic recognizer configured".to_string()),
+            },
+            current_song: None,
         };
         let value = serde_json::to_value(&status).unwrap();
         assert!(value.get("serviceStatus").is_some());
@@ -2319,8 +2673,11 @@ mod tests {
         assert!(value.get("networkStatus").is_some());
         assert!(value.get("aiStatus").is_some());
         assert!(value.get("databaseStatus").is_some());
+        assert!(value.get("acousticStatus").is_some());
+        assert!(value.get("currentSong").is_some());
         assert_eq!(value["serviceStatus"], "planned");
         assert_eq!(value["audio"]["isCapturing"], false);
+        assert_eq!(value["acousticStatus"]["status"], "unavailable");
     }
 
     #[test]

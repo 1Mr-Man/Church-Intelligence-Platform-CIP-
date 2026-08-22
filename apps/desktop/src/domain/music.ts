@@ -32,8 +32,10 @@ export type SectionKind =
 
 /** How `search_music` matched a candidate - see
  * `core/music::matcher`'s module docs for the full confidence hierarchy
- * this ordering reflects. `acoustic` is reserved: nothing in Phase 2.1
- * ever constructs it (see `docs/music-intelligence.md`). */
+ * this ordering reflects. `acoustic` (Phase 2.2) is now genuinely
+ * constructed, by evidence fusion, from a real `AcousticMusicRecognizer`
+ * result - never fabricated when no recognizer is configured (see
+ * `docs/acoustic-music.md`). */
 export type MatchType =
   | "explicit_title"
   | "alias"
@@ -124,4 +126,44 @@ export interface MusicDatasetInput {
   distribution?: string | null;
   datasetVersion: string;
   songs: MusicSongInput[];
+}
+
+// --- acoustic recognition (Phase 2.2) --------------------------------------
+//
+// Mirrors `cip_core_music::acoustic`/`apps/desktop/src-tauri/src/acoustic.rs`
+// (Rust). Acoustic recognition never runs automatically into the
+// projector - the shapes here are diagnostic/read-model only. See
+// `docs/acoustic-music.md`.
+
+/** Whether an `AcousticMusicRecognizer` is even worth calling right now -
+ * distinguishes "not installed"/`unavailable` from "installed but
+ * currently broken"/`error` from "installed but turned off"/`disabled`.
+ * Never treat `unavailable` as an error to work around: it is the honest,
+ * expected state when no acoustic model is configured, and lyric/title
+ * Music Intelligence keeps working regardless. */
+export type AcousticRecognitionStatus = "available" | "unavailable" | "disabled" | "error";
+
+/** How a recognizer is implemented - never a specific vendor/model name.
+ * `none` means no recognizer is configured at all (the safe default). */
+export type AcousticRecognitionMethod = "local_model" | "external_provider" | "test" | "none";
+
+/** Part of `LiveStatus.acousticStatus` - `reason` is a real, human-readable
+ * explanation (e.g. "no acoustic model directory configured"), never a
+ * placeholder string, and always present when `status` is not
+ * `available`. */
+export interface AcousticEngineStatus {
+  status: AcousticRecognitionStatus;
+  method: AcousticRecognitionMethod;
+  reason: string | null;
+}
+
+/** The song a human operator has explicitly confirmed as currently being
+ * sung - never set automatically by acoustic/lyric confidence alone,
+ * regardless of how high. Set only by `acceptMusicFinding` deriving one
+ * from the accepted finding's evidence, and cleared only by
+ * `clearCurrentSong`. See `docs/acoustic-music.md`'s Current Song section. */
+export interface CurrentSong {
+  contentId: string;
+  songId: string;
+  confidence: ConfidenceResult;
 }

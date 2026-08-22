@@ -41,8 +41,8 @@ not replace the operator's judgment.
 | ------------------------ | ------------------------------------------------------------------ |
 | `core/bible`            | `BibleProvider`, `ScriptureReference`, text normalization, reference detection, verse-range retrieval, local search, the dataset integrity checker, the Scripture Context Manager (see below) |
 | `core/content`          | `ContentRegistry` - what local content exists, and its provenance/licensing (Phase 1.5) |
-| `core/intelligence`     | The shared intelligence architecture (Phase 2.0) - `IntelligenceContext`, `IntelligenceEngine`, `IntelligenceFinding`, the engine registry, the Bible compatibility adapter, and the Music adapter (Phase 2.1) |
-| `core/music`            | Song/lyric domain model (`Song`, `SongSection`, `LyricLine`), `MusicProvider`, deterministic title/alias/number/lyric matching (Phase 2.1) |
+| `core/intelligence`     | The shared intelligence architecture (Phase 2.0) - `IntelligenceContext`, `IntelligenceEngine`, `IntelligenceFinding`, the engine registry, the Bible compatibility adapter, and the Music adapter (Phase 2.1, extended with acoustic fusion in Phase 2.2) |
+| `core/music`            | Song/lyric domain model (`Song`, `SongSection`, `LyricLine`), `MusicProvider`, deterministic title/alias/number/lyric matching (Phase 2.1); `AcousticMusicRecognizer` trait, audio segmentation, signal-quality gate, evidence fusion (Phase 2.2) |
 | `core/service`          | `ServiceSession` lifecycle, `AudioEngine` capture contract        |
 | `core/ai`               | `SpeechEngine` transcription contract, `Suggestion`                |
 | `core/presentation`     | `PresentationItem` - *what* is shown, not how it's rendered       |
@@ -79,6 +79,13 @@ why this dependency shape was chosen.
   implementation, `SqliteMusicProvider`, plus the reusable local music
   dataset importer (`import_music_dataset`) - see
   [`docs/music-datasets.md`](music-datasets.md).
+- `integrations/music-acoustic` (Phase 2.2) - `AcousticMusicRecognizer`
+  implementations: `NullAcousticMusicRecognizer` (the safe default),
+  `ScriptedAcousticMusicRecognizer` (deterministic test/demo adapter),
+  and `LocalAcousticMusicRecognizer` (the real local-model integration
+  boundary - honestly reports `Unavailable` when no model is
+  configured, since no acoustic inference backend is implemented in
+  this build) - see [`docs/acoustic-music.md`](acoustic-music.md).
 - `integrations/content` - Phase 1.5's one `ContentRegistry`
   implementation, `SqliteContentRegistry`, mirroring
   `integrations/bible`'s shape. See
@@ -154,7 +161,12 @@ the new `core/music`/`integrations/music` crates, proving two
 independent engines can share one `IntelligenceContext` without ever
 calling each other - again without touching `core/bible`, `core/service`,
 or `bible_adapter.rs`; see
-[`docs/music-intelligence.md`](music-intelligence.md).
+[`docs/music-intelligence.md`](music-intelligence.md). Phase 2.2 adds a
+second, real recognition path to that same Music engine - acoustic
+(audio-fingerprint) recognition, fused with the existing lyric/title
+path via `core/music::fusion` - again without touching `pipeline.rs`,
+`core/bible`, or `bible_adapter.rs`; see
+[`docs/acoustic-music.md`](acoustic-music.md).
 
 ## Event architecture
 

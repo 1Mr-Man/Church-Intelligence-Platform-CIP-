@@ -3,6 +3,7 @@
  * its component enums (Rust) - the Live Church Brain's status header reads
  * directly from these, via `get_live_status`.
  */
+import type { AcousticEngineStatus, CurrentSong } from "./music";
 import type { AudioEngineStatus, ServiceSession } from "./service";
 
 /** Display-level service status - not `core/service::ServiceStatus`
@@ -39,6 +40,11 @@ export interface LiveStatus {
   networkStatus: NetworkStatusKind;
   aiStatus: AiStatusKind;
   databaseStatus: DatabaseStatusKind;
+  /** Phase 2.2: whether/why acoustic recognition can currently run. */
+  acousticStatus: AcousticEngineStatus;
+  /** Phase 2.2: the operator-confirmed current song, if any - `null`
+   * until an operator accepts a Music finding. */
+  currentSong: CurrentSong | null;
 }
 
 /**

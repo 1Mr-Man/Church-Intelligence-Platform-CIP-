@@ -17,6 +17,7 @@
 //! | `ExactLyric` (single line) | up to 0.80, modulated by distinctiveness |
 //! | `PartialLyric` | up to 0.55, modulated by distinctiveness |
 //! | `Contextual` | 0.35 (continuity only - see `continuity.rs`) |
+//! | `Acoustic` | not from this table - the recognizer's own reported score, fused per `crate::fusion` (Phase 2.2) |
 //!
 //! Title/alias/number/multi-line matches are already structural
 //! (exact-equality or exact-adjacency), so they are not modulated by
@@ -93,7 +94,12 @@ fn base_confidence(match_type: MatchType) -> f32 {
         MatchType::ExactLyric => 0.80,
         MatchType::PartialLyric => 0.55,
         MatchType::Contextual => 0.35,
-        MatchType::Acoustic => 0.0, // never constructed by this crate
+        // Acoustic candidates never go through this fixed table - their
+        // confidence comes directly from the recognizer's own reported
+        // score (see `crate::fusion`), since "how sure the recognizer is"
+        // is a continuous signal a fixed base constant would flatten.
+        // This arm exists only so the match stays exhaustive.
+        MatchType::Acoustic => 0.0,
     }
 }
 

@@ -142,7 +142,17 @@ attempted and blocked: the standard model host, `huggingface.co`, returns
 `403` under this environment's egress policy (a deliberate proxy block,
 not a transient failure - see the proxy README, which instructs not to
 retry or route around it). That is a documented **environmental**
-limitation of this sandbox, not a defect in `WhisperSpeechEngine`:
+limitation of this sandbox, not a defect in `WhisperSpeechEngine`.
+
+Phase 2.2's `LocalAcousticMusicRecognizer` (`integrations/music-acoustic`)
+follows this exact "honest model absence" precedent for acoustic
+(audio-fingerprint) song recognition - see
+[`docs/acoustic-music.md`](acoustic-music.md), with one difference worth
+noting: `WhisperSpeechEngine` has a real, working inference backend and
+is only blocked by the absence of a *model file*, whereas Phase 2.2 does
+not yet choose or implement any acoustic inference backend at all, so
+`LocalAcousticMusicRecognizer` never reaches `Available` in this build
+regardless of what is configured.
 
 - The engine's code is real, compiles fully offline once whisper-rs's
   vendored whisper.cpp source is fetched from crates.io (no model

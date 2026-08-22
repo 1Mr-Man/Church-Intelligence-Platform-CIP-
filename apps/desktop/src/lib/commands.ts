@@ -323,6 +323,34 @@ export function rejectMusicFinding(findingId: string): Promise<IntelligenceFindi
   return invokeCommand("reject_music_finding", { findingId });
 }
 
+// --- acoustic music recognition (Phase 2.2) ------------------------------------
+//
+// `get_acoustic_music_status` has no dedicated command - its status/reason
+// is reused from `getLiveStatus().acousticStatus` rather than adding a
+// second query command for the same data.
+
+/** Explicit operator clear of the "current song" - the only other way it
+ * ever changes besides `acceptMusicFinding` setting it. Never inferred
+ * automatically. */
+export function clearCurrentSong(): Promise<void> {
+  return invokeCommand("clear_current_song");
+}
+
+/** The deterministic acoustic-analysis harness - the Phase 2.2 counterpart
+ * to `analyzeMusicTranscript`, and the primary way to exercise the
+ * acoustic pipeline without a microphone (e.g. with a scripted recognizer
+ * configured on the backend for manual testing). `samples` is raw mono
+ * PCM16 audio; a caller with no real audio can pass a synthetic buffer
+ * (never real copyrighted audio - see `docs/acoustic-music.md`). Still
+ * gated by the signal-quality check: silence/too-short audio returns an
+ * honest empty result, never a fake one. */
+export function analyzeMusicAudio(
+  samples: number[],
+  sampleRateHz: number,
+): Promise<IntelligenceFinding[]> {
+  return invokeCommand("analyze_music_audio", { samples, sampleRateHz });
+}
+
 // --- live status --------------------------------------------------------------
 
 export function getLiveStatus(): Promise<LiveStatus> {

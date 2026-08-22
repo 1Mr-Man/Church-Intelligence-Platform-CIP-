@@ -224,6 +224,11 @@ standard: `apps/desktop/src-tauri/src/music.rs` and
 finding is structurally incapable of creating, activating, or otherwise
 touching a `PresentationItem` - see
 [`docs/music-intelligence.md`](music-intelligence.md#findings-and-the-operator-workflow).
+Phase 2.2's acoustic-sourced findings are the exact same
+`IntelligenceFinding`/`FindingQueue` types, so this guarantee extends to
+them automatically - accepting an acoustic finding only ever sets
+`AppState.current_song`, never a `PresentationItem`; see
+[`docs/acoustic-music.md`](acoustic-music.md#finding-lifecycle---unchanged).
 
 ## Offline and failure-fallback behavior
 

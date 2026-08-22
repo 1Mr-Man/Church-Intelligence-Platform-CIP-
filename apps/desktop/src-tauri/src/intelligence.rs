@@ -17,7 +17,7 @@ use cip_core_bible::{BibleProvider, ScriptureContextManager};
 use cip_core_content::ContentRegistry;
 use cip_core_intelligence::{
     BibleIntelligenceEngine, ContextBounds, IntelligenceContext, IntelligenceDomain,
-    IntelligenceEngineRegistry, ServiceEventSummary,
+    IntelligenceEngineRegistry, IntelligenceFinding, ServiceEventSummary,
 };
 use cip_core_service::ServiceSession;
 use rusqlite::Connection;
@@ -68,20 +68,27 @@ pub const ALL_DOMAINS: [IntelligenceDomain; 6] = [
 /// shared context can be built from real transcript/service/content-
 /// registry data, not just synthetic test fixtures. Exercised by this
 /// module's own tests against a real `SqliteBibleProvider`/
-/// `SqliteContentRegistry`; deliberately not yet called from any Tauri
-/// command - Phase 2.0's one diagnostic command
-/// (`get_intelligence_capabilities`) only needs engine identity/
-/// capability, not a full context, and the spec is explicit that adding
-/// IPC surface beyond what's genuinely required is out of scope. A future
-/// phase's real Music/Sermon/Content engine is the actual consumer this
-/// function exists for.
-#[allow(dead_code)]
+/// `SqliteContentRegistry`, and (Phase 2.2) by the acoustic worker
+/// (`acoustic.rs`), which is the first real caller to pass a non-empty
+/// `recent_findings` - see that parameter's own docs.
+///
+/// `recent_findings` is an explicit parameter, not read from a database,
+/// because Phase 2.0 findings are deliberately in-memory only (see
+/// `docs/intelligence-architecture.md`'s persistence-decision section) -
+/// a caller with no findings source of its own (like
+/// `commands::analyze_music_transcript`, unchanged since Phase 2.1) passes
+/// `Vec::new()` and gets exactly the behavior it always has; a caller that
+/// does have one (Phase 2.2's acoustic worker, reading
+/// `AppState.intelligence_findings`) can now let continuity/fusion see it,
+/// without this function reaching into `AppState` itself - it stays
+/// Tauri-agnostic like the rest of this module.
 pub fn build_intelligence_context(
     conn: &Connection,
     content_registry: &dyn ContentRegistry,
     service: Option<&ServiceSession>,
     context_manager: &dyn ScriptureContextManager,
     recent_timeline: &[TimelineEntry],
+    recent_findings: Vec<IntelligenceFinding>,
     bounds: ContextBounds,
 ) -> Result<IntelligenceContext, ContextBuildError> {
     let service_id = service.map(|s| s.id).unwrap_or_else(Uuid::nil);
@@ -109,7 +116,7 @@ pub fn build_intelligence_context(
         current_transcript_segment,
         recent_transcript_segments,
         context_manager.active_context(),
-        Vec::new(), // no persisted finding source yet in Phase 2.0 - see docs.
+        recent_findings,
         recent_service_events,
         content_metadata,
         bounds,
@@ -158,6 +165,7 @@ mod tests {
             None,
             &context_manager,
             &[],
+            Vec::new(),
             ContextBounds::default(),
         )
         .unwrap();
@@ -187,6 +195,7 @@ mod tests {
             None,
             &context_manager,
             &[],
+            Vec::new(),
             ContextBounds::default(),
         )
         .unwrap();

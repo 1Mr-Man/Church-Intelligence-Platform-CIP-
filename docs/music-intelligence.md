@@ -7,6 +7,11 @@ Read that document first - this one only explains what's specific to
 Music, not the shared `IntelligenceEngine`/`IntelligenceContext`/
 `FindingQueue` contracts Music reuses unchanged.
 
+**Phase 2.2 added real acoustic (audio-fingerprint) recognition** on top
+of everything below, fused with this text-matching path rather than
+replacing it - see [`docs/acoustic-music.md`](acoustic-music.md). This
+document still accurately describes the text-matching path unchanged.
+
 **Not in this phase:** real audio fingerprinting, a large copyrighted
 song database, sermon intelligence, or automatic presentation of a
 recognized song. This subsystem recognizes song titles, aliases, hymn/
@@ -20,18 +25,28 @@ installed dataset. It does **not** listen to audio and identify a song
 by its acoustic signature ("Shazam-style" fingerprinting). These are
 different capabilities, and this codebase never blurs them:
 
-- `cip_core_music::MatchType::Acoustic` exists in the type (so a future
-  real acoustic recognizer has somewhere to put its output without a
-  breaking change) but nothing in this crate, `core/intelligence`, or
-  `integrations/music` ever constructs it.
-- `cip_core_intelligence::acoustic_recognition_available()` returns
-  `false`, always, with a doc comment explaining why. No command,
-  finding, or UI element ever claims acoustic recognition is available.
+- `cip_core_music::MatchType::Acoustic` existed in this type since Phase
+  2.1 for exactly this reason: so a future real acoustic recognizer would
+  have somewhere to put its output without a breaking change. **Phase
+  2.2 is that future phase** - `Acoustic` is now genuinely constructed,
+  by `core/music::fusion`, from a real `AcousticRecognitionCandidate` a
+  real `AcousticMusicRecognizer` returned. See
+  [`docs/acoustic-music.md`](acoustic-music.md) for the full
+  architecture; this document (Phase 2.1) still describes only the
+  text-matching path below.
+- `cip_core_intelligence::acoustic_recognition_available()` still
+  returns `false`, unchanged - but that was always a narrower claim than
+  "no acoustic recognizer could ever be wired into this application":
+  it means only that `MusicIntelligenceEngine::analyze()` (the
+  transcript-text path) itself never performs acoustic matching. Phase
+  2.2's separate `analyze_acoustic` entry point is the real acoustic
+  path - see [`docs/acoustic-music.md`](acoustic-music.md).
 - The architecture (`Transcript -> Music Intelligence -> Music Findings
-  -> Operator -> Presentation`) is deliberately the same shape a future
+  -> Operator -> Presentation`) was deliberately the same shape a future
   `Audio -> Acoustic Recognition Engine -> Music Intelligence -> Findings`
-  path would use, so adding real acoustic recognition later is additive,
-  not a redesign - but that engine does not exist today.
+  path would use, so adding real acoustic recognition later was additive,
+  not a redesign - and Phase 2.2 proves that: no change to this path was
+  needed to add the acoustic one alongside it.
 
 ## Architecture
 
@@ -123,7 +138,7 @@ Base confidence by match type, before any distinctiveness modulation:
 | Exact lyric (single line) | up to 0.80, modulated by distinctiveness |
 | Partial lyric | up to 0.55, modulated by distinctiveness |
 | Contextual (continuity only) | 0.35 |
-| Acoustic | 0.0 - never constructed (see above) |
+| Acoustic | not from this table - the recognizer's own reported score, fused via noisy-or (Phase 2.2, see [`docs/acoustic-music.md`](acoustic-music.md)) |
 
 Title/alias/number/multi-line matches are structural (exact-equality or
 exact-adjacency), so they are not modulated. A single-line lyric match

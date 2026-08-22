@@ -46,6 +46,15 @@ search) - also not wired into the live audio/speech pipeline itself, the
 same deliberate boundary the Bible adapter keeps. See
 [`docs/music-intelligence.md`](music-intelligence.md).
 
+Phase 2.2 is the first phase to wire a second real-time consumer into
+the live audio stream: an acoustic recognition worker, running on its
+own background thread, fed from `start_listening`'s existing sink
+closure alongside (never replacing) the speech-engine feed.
+`pipeline.rs::handle_final_transcript` remains completely unchanged -
+the acoustic worker is a structurally separate path that only ever
+writes to the same in-memory `FindingQueue` Music findings already use.
+See [`docs/acoustic-music.md`](acoustic-music.md).
+
 ## Service lifecycle
 
 ```

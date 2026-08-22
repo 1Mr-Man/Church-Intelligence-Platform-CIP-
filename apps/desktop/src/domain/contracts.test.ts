@@ -24,7 +24,13 @@ import type {
 import type { PresentationItem, PresentationPreview, RenderedSlide } from "./presentation";
 import type { ServiceSession } from "./service";
 import type { LiveStatus, TimelineEntry } from "./live";
-import type { MusicDatasetInput, MusicImportReport, SongRecognitionCandidate } from "./music";
+import type {
+  AcousticEngineStatus,
+  CurrentSong,
+  MusicDatasetInput,
+  MusicImportReport,
+  SongRecognitionCandidate,
+} from "./music";
 
 describe("domain contracts", () => {
   it("constructs a ScriptureReference and a matching BibleTranslation", () => {
@@ -160,11 +166,15 @@ describe("domain contracts", () => {
       networkStatus: "offline",
       aiStatus: "available",
       databaseStatus: "connected",
+      acousticStatus: { status: "unavailable", method: "none", reason: "no acoustic recognizer configured" },
+      currentSong: null,
     };
     expect(status.serviceStatus).toBe("live");
     expect(status.networkStatus).toBe("offline");
     expect(status.aiStatus).toBe("available");
     expect(status.databaseStatus).toBe("connected");
+    expect(status.acousticStatus.status).toBe("unavailable");
+    expect(status.currentSong).toBeNull();
   });
 
   it("constructs a PresentationItem traceable to its source suggestion and template (Phase 1.4)", () => {
@@ -414,5 +424,63 @@ describe("domain contracts", () => {
     };
     expect(dataset.songs).toHaveLength(1);
     expect(dataset.songs[0].sections?.[0].kind).toBe("verse");
+  });
+
+  // --- Phase 2.2: acoustic recognition ------------------------------------
+
+  it("constructs an AcousticEngineStatus honestly reporting an unconfigured recognizer", () => {
+    const status: AcousticEngineStatus = {
+      status: "unavailable",
+      method: "none",
+      reason: "no acoustic model directory configured",
+    };
+    expect(status.status).toBe("unavailable");
+    expect(status.reason).not.toBeNull();
+  });
+
+  it("constructs a CurrentSong distinct from a merely-detected finding", () => {
+    const song: CurrentSong = {
+      contentId: "music:dev-hymnbook",
+      songId: "h1",
+      confidence: { score: 0.9, level: "high", source: "model", reason: null },
+    };
+    expect(song.songId).toBe("h1");
+  });
+
+  it("constructs an acoustic-sourced IntelligenceFinding carrying an Acoustic evidence entry (Phase 2.2)", () => {
+    const finding: IntelligenceFinding = {
+      id: "77777777-7777-7777-7777-777777777777",
+      serviceId: "22222222-2222-2222-2222-222222222222",
+      domain: "music",
+      kind: "music",
+      assertionLevel: "suggested",
+      status: "detected",
+      priority: "normal",
+      confidence: { score: 0.85, level: "high", source: "model", reason: null },
+      summary: "Acoustic match (local_model)",
+      transcriptSegmentIds: [],
+      evidence: [
+        {
+          kind: "acoustic",
+          segmentId: "88888888-8888-8888-8888-888888888888",
+          method: "local_model",
+          durationMs: 8000,
+        },
+        { kind: "context", description: "song_id:h1" },
+      ],
+      provenance: { contentId: "music:dev-hymnbook", note: null },
+      engineId: "music-lyric",
+      engineVersion: "0.1.0",
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    // Acoustic-sourced findings never start anywhere but Detected - no
+    // automatic approval/projection (Phase 2.0 spec section 36, unchanged).
+    expect(finding.status).toBe("detected");
+    expect(finding.evidence[0]).toEqual({
+      kind: "acoustic",
+      segmentId: "88888888-8888-8888-8888-888888888888",
+      method: "local_model",
+      durationMs: 8000,
+    });
   });
 });

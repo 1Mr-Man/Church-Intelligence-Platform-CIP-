@@ -9,8 +9,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acceptMusicFinding,
+  analyzeMusicAudio,
   analyzeMusicTranscript,
   checkBibleDatasetIntegrity,
+  clearCurrentSong,
   createManualPresentation,
   getAppConfig,
   getIntelligenceCapabilities,
@@ -239,5 +241,37 @@ describe("commands.ts Tauri IPC guard", () => {
 
     expect(invokeMock).toHaveBeenCalledTimes(1);
     expect(invokeMock).toHaveBeenCalledWith("reject_music_finding", { findingId: "finding-1" });
+  });
+
+  // --- Phase 2.2: acoustic recognition ------------------------------------
+
+  it("analyzeMusicAudio forwards raw samples and sampleRateHz to analyze_music_audio", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await analyzeMusicAudio([1, 2, 3], 16000);
+
+    expect(invokeMock).toHaveBeenCalledWith("analyze_music_audio", {
+      samples: [1, 2, 3],
+      sampleRateHz: 16000,
+    });
+  });
+
+  it("clearCurrentSong calls only clear_current_song, never a presentation command", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue(undefined);
+
+    await clearCurrentSong();
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("clear_current_song", undefined);
+  });
+
+  it("rejects analyzeMusicAudio/clearCurrentSong outside the Tauri runtime, without calling invoke()", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    await expect(analyzeMusicAudio([], 16000)).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(clearCurrentSong()).rejects.toBeInstanceOf(TauriUnavailableError);
+    expect(invokeMock).not.toHaveBeenCalled();
   });
 });
