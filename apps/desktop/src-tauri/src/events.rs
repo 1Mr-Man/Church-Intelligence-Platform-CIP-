@@ -103,6 +103,18 @@ pub enum AppEvent {
     /// The lightweight derived sermon state changed (Phase 2.3) - a
     /// classification, never a rigid state machine transition.
     SermonStateChanged,
+
+    /// The Phase 2.4 correlation engine produced a new cross-domain
+    /// correlation - never implies anything was presented, approved, or
+    /// projected; see `docs/cross-domain-intelligence.md`.
+    CrossDomainCorrelationDetected,
+    /// The operator reviewed a correlation without dismissing it (Phase
+    /// 2.4) - informational only, mirrors `IntelligenceFinding::review`'s
+    /// semantics.
+    CrossDomainCorrelationReviewed,
+    /// The operator explicitly dismissed a correlation (Phase 2.4) - never
+    /// automatic, and never alters the source findings it was built from.
+    CrossDomainCorrelationDismissed,
 }
 
 impl AppEvent {
@@ -153,6 +165,10 @@ impl AppEvent {
             AppEvent::SermonStructureUpdated => "SERMON_STRUCTURE_UPDATED",
             AppEvent::SermonThemeChanged => "SERMON_THEME_CHANGED",
             AppEvent::SermonStateChanged => "SERMON_STATE_CHANGED",
+
+            AppEvent::CrossDomainCorrelationDetected => "CROSS_DOMAIN_CORRELATION_DETECTED",
+            AppEvent::CrossDomainCorrelationReviewed => "CROSS_DOMAIN_CORRELATION_REVIEWED",
+            AppEvent::CrossDomainCorrelationDismissed => "CROSS_DOMAIN_CORRELATION_DISMISSED",
         }
     }
 }
@@ -211,6 +227,9 @@ mod tests {
             AppEvent::SermonStructureUpdated,
             AppEvent::SermonThemeChanged,
             AppEvent::SermonStateChanged,
+            AppEvent::CrossDomainCorrelationDetected,
+            AppEvent::CrossDomainCorrelationReviewed,
+            AppEvent::CrossDomainCorrelationDismissed,
         ];
         let mut names: Vec<&str> = events.iter().map(|e| e.name()).collect();
         let unique_before = names.len();

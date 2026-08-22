@@ -224,6 +224,14 @@ standard: `apps/desktop/src-tauri/src/music.rs` and
 finding is structurally incapable of creating, activating, or otherwise
 touching a `PresentationItem` - see
 [`docs/music-intelligence.md`](music-intelligence.md#findings-and-the-operator-workflow).
+
+Phase 2.4's `IntelligenceCorrelation`s are held to the same standard:
+`apps/desktop/src-tauri/src/cross_domain.rs` and
+`cip_core_intelligence::CorrelationQueue` have no dependency on
+`cip_core_presentation` at all, so running a cross-domain analysis, or
+reviewing/dismissing a correlation, is structurally incapable of creating,
+activating, or otherwise touching a `PresentationItem` - see
+[`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md).
 Phase 2.2's acoustic-sourced findings are the exact same
 `IntelligenceFinding`/`FindingQueue` types, so this guarantee extends to
 them automatically - accepting an acoustic finding only ever sets

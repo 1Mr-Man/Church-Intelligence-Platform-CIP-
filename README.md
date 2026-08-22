@@ -12,8 +12,9 @@ Validation**, **Phase 1.5 - Content/Dataset Foundation &
 Full-Service Validation**, **Phase 2.0 - Intelligence Architecture &
 Unified Intelligence Context**, **Phase 2.1 - Music Intelligence
 Foundation & Song Recognition Architecture**, **Phase 2.2 - Acoustic
-Music Recognition & Live Song Detection**, and **Phase 2.3 - Sermon
-Intelligence & Live Message Understanding**.
+Music Recognition & Live Song Detection**, **Phase 2.3 - Sermon
+Intelligence & Live Message Understanding**, and **Phase 2.4 -
+Cross-Domain Intelligence & Correlation**.
 
 ## Approved architecture
 
@@ -57,6 +58,9 @@ importer and its licensing policy,
 (audio-fingerprint) song recognition,
 [`docs/sermon-intelligence.md`](docs/sermon-intelligence.md) for
 deterministic sermon structure/theme/meaning detection,
+[`docs/cross-domain-intelligence.md`](docs/cross-domain-intelligence.md)
+for the deterministic rule engine that correlates Bible/Music/Sermon
+findings with each other,
 [`docs/development.md`](docs/development.md) to get running locally, and
 [`docs/database.md`](docs/database.md) for the SQLite/migration story.
 
@@ -228,6 +232,25 @@ established. `pipeline.rs` was not modified; Sermon Intelligence is
 manual-command-only, mirroring Music's Phase 2.1 lyric path. See
 [`docs/sermon-intelligence.md`](docs/sermon-intelligence.md).
 
+**Phase 2.4 (Cross-Domain Intelligence & Correlation)** added the first
+layer that reasons about relationships *between* findings from the Bible,
+Music, and Sermon engines - a deterministic
+`core/intelligence::cross_domain::CrossDomainCorrelationEngine` that reads
+`IntelligenceContext.recent_findings` (never calling another engine
+directly) and derives `IntelligenceCorrelation`s such as "this sermon
+point references the same verse as this Bible finding." Every correlation
+carries an explicit rule id/version and evidence; none is ever fabricated
+from mere transcript proximity alone - "Amazing Grace" recognized
+elsewhere in a service that also mentions Romans 8 does not automatically
+correlate. Correlations are their own type, reviewed/dismissed through the
+same human-in-the-loop discipline as every other finding, and never
+auto-converted into a presentation item. `core/bible`, `core/service`, and
+every existing engine's own logic were not modified; the one new bridge
+(`analyze_bible_transcript`) exposes the already-registered Bible engine
+to make its findings reachable for correlation, mirroring Music's and
+Sermon's existing manual-command pattern. See
+[`docs/cross-domain-intelligence.md`](docs/cross-domain-intelligence.md).
+
 Still deliberately **not** implemented: a chosen/trained acoustic model
 (so real-world acoustic recognition accuracy remains unverified in this
 environment - see [`docs/acoustic-music.md`](docs/acoustic-music.md)'s
@@ -251,7 +274,7 @@ apps/desktop/          Tauri + React + TypeScript desktop application
 core/                  Domain logic and contracts, one crate per domain
   bible/               BibleProvider, text normalization, reference detection, verse-range/search, integrity checker, Scripture Context Manager
   content/              ContentRegistry - what local content exists, and its provenance/licensing
-  intelligence/          Shared intelligence architecture (Phase 2.0) - IntelligenceContext/Engine/Finding, the Bible compatibility adapter, the Music adapter (Phase 2.1, extended with acoustic fusion in Phase 2.2), the Sermon adapter (Phase 2.3)
+  intelligence/          Shared intelligence architecture (Phase 2.0) - IntelligenceContext/Engine/Finding, the Bible compatibility adapter, the Music adapter (Phase 2.1, extended with acoustic fusion in Phase 2.2), the Sermon adapter (Phase 2.3), the cross-domain correlation rule engine (Phase 2.4)
   music/                 Song/lyric domain model, MusicProvider trait, deterministic title/alias/number/lyric matcher (Phase 2.1); AcousticMusicRecognizer trait, segmentation, signal-quality gate, evidence fusion (Phase 2.2)
   sermon/                Deterministic sermon taxonomy, structural/theme detection, sermon-state inference (Phase 2.3)
   service/              ServiceSession + AudioEngine

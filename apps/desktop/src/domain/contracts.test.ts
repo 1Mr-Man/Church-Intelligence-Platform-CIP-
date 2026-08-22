@@ -18,6 +18,7 @@ import type { ProcessedSegment, ScriptureDetection, Suggestion, TranscriptSegmen
 import type { ContentMetadata, ImportReport, IntegrityReport } from "./content";
 import type {
   DomainCapabilityReport,
+  FindingStatus,
   IntelligenceCorrelation,
   IntelligenceFinding,
 } from "./intelligence";
@@ -317,14 +318,54 @@ describe("domain contracts", () => {
     const confidence: ConfidenceResult = { score: 0.6, level: "medium", source: "heuristic", reason: null };
     const correlation: IntelligenceCorrelation = {
       id: "44444444-4444-4444-4444-444444444444",
+      serviceId: "22222222-2222-2222-2222-222222222222",
       sourceFindingIds: ["11111111-1111-1111-1111-111111111111", "55555555-5555-5555-5555-555555555555"],
+      domains: ["bible", "sermon"],
       kind: { kind: "temporal_proximity" },
+      assertionLevel: "inferred",
+      status: "detected",
       confidence,
+      summary: "findings occurred near the same point in the transcript",
       evidence: [],
+      ruleId: "temporal_association_v1",
+      ruleVersion: "1.0",
       createdAt: "2026-01-01T00:00:00Z",
     };
     expect(correlation.sourceFindingIds).toHaveLength(2);
     expect(correlation.kind.kind).toBe("temporal_proximity");
+    expect(correlation.status).toBe("detected");
+  });
+
+  it("constructs a Phase 2.4 ScriptureSermon correlation carrying both domains and rule provenance", () => {
+    const confidence: ConfidenceResult = { score: 0.95, level: "high", source: "heuristic", reason: "exact shared scripture reference" };
+    const correlation: IntelligenceCorrelation = {
+      id: "77777777-7777-7777-7777-777777777777",
+      serviceId: "22222222-2222-2222-2222-222222222222",
+      sourceFindingIds: ["11111111-1111-1111-1111-111111111111", "66666666-6666-6666-6666-666666666666"],
+      domains: ["sermon", "bible"],
+      kind: { kind: "scripture_sermon" },
+      assertionLevel: "inferred",
+      status: "detected",
+      confidence,
+      summary: "Sermon references ROM 8:28, matching Bible finding ROM 8:28",
+      evidence: [
+        { kind: "another_finding", findingId: "11111111-1111-1111-1111-111111111111" },
+        { kind: "another_finding", findingId: "66666666-6666-6666-6666-666666666666" },
+      ],
+      ruleId: "scripture_sermon_v1",
+      ruleVersion: "1.0",
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    expect(correlation.kind.kind).toBe("scripture_sermon");
+    expect(correlation.domains).toEqual(["sermon", "bible"]);
+    expect(correlation.ruleId).toBe("scripture_sermon_v1");
+  });
+
+  it("moves a correlation through the review/dismiss lifecycle using FindingStatus, never a separate status enum", () => {
+    const detected: FindingStatus = "detected";
+    const reviewed: FindingStatus = "reviewed";
+    const rejected: FindingStatus = "rejected";
+    expect([detected, reviewed, rejected]).toEqual(["detected", "reviewed", "rejected"]);
   });
 
   it("constructs a DomainCapabilityReport leaving engine identity null for an unregistered domain (Phase 2.0)", () => {

@@ -435,6 +435,17 @@ corpus.
   tests (`commands.test.ts`, including the outside-Tauri-runtime guard for
   every new command), and event-subscription tests (`liveEvents.test.ts`).
 
+## Cross-domain correlation (Phase 2.4)
+
+Sermon findings - especially the `"Supporting Scripture: ..."` cross-link
+and theme candidates - are the primary source Phase 2.4's
+`CrossDomainCorrelationEngine` reads to connect a sermon point back to a
+Bible finding, or to a Music finding recognized nearby. `core/sermon` and
+`sermon_adapter.rs` are unchanged by this - the correlation engine only
+reads already-produced `IntelligenceFinding`s from `IntelligenceContext`,
+never calls into `SermonIntelligenceEngine`. See
+[`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md).
+
 ## PROVEN
 
 - Deterministic sermon structure extraction (main points, sub-points,

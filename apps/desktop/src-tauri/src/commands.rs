@@ -26,8 +26,9 @@ use cip_core_bible::{
 use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
 use cip_core_content::{ContentMetadata, ContentRegistryError, ContentStatus, ContentType};
 use cip_core_intelligence::{
-    ContextBounds, EngineCapability, IntelligenceContext, IntelligenceDomain, IntelligenceFinding,
-    IntelligenceInput,
+    ContextBounds, CrossDomainCorrelationEngine, EngineCapability, IntelligenceContext,
+    IntelligenceCorrelation, IntelligenceDomain, IntelligenceFinding, IntelligenceInput,
+    QueueAddOutcome,
 };
 use cip_core_music::{search_songs, MatchThresholds, MusicQuery, SongRecognitionCandidate};
 use cip_core_presentation::{PresentationContent, PresentationItem, PresentationItemStatus};
@@ -1728,6 +1729,115 @@ pub fn get_intelligence_capabilities(state: State<'_, AppState>) -> Vec<DomainCa
         .collect()
 }
 
+/// The deterministic Bible-analysis harness, exposed over IPC - the Phase
+/// 2.4 bridge that makes a Bible-domain `IntelligenceFinding` reachable in
+/// `AppState.intelligence_findings` at all. Mirrors `analyze_music_transcript`/
+/// `analyze_sermon_transcript` exactly: persists `text` as an ordinary
+/// transcript segment, builds a real `IntelligenceContext`, and calls the
+/// already-registered (since Phase 2.0) `BibleIntelligenceEngine` via
+/// `intelligence_registry.resolve(IntelligenceDomain::Bible)` - the same
+/// engine `get_intelligence_capabilities` has always reported `Available`,
+/// just never previously invoked from a live command. This is new,
+/// additive wiring only: `core/bible` and `core/service`'s existing
+/// `ScriptureDetection`/`Suggestion` pipeline (`handle_final_transcript`)
+/// is completely unchanged and remains the operator-facing Bible workflow;
+/// this command exists solely so a Bible finding can appear in
+/// `context.recent_findings` for `analyze_cross_domain` to correlate
+/// against (Phase 2.4 spec section 9's "if a compatibility fix is needed,
+/// document it before changing it" - no fix to Bible Intelligence itself
+/// was needed, only this new bridge). Never prepares or projects a
+/// presentation item.
+#[tauri::command]
+pub fn analyze_bible_transcript(
+    text: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<IntelligenceFinding>, AppError> {
+    let text = require_non_empty(&text, "text").map_err(log_and_return)?;
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let sequence = state.transcript_sequence.fetch_add(1, Ordering::SeqCst);
+
+    let segment = TranscriptSegment {
+        id: Uuid::new_v4(),
+        sequence,
+        text,
+        is_final: true,
+        confidence: ConfidenceResult::new(
+            1.0,
+            ConfidenceSource::Human,
+            Some("manually entered test transcript for bible analysis".to_string()),
+        ),
+        start_ms: 0,
+        end_ms: 0,
+        language: Some("en".to_string()),
+        speaker_id: None,
+    };
+
+    {
+        let db = state.db.lock().expect("db connection poisoned");
+        persistence::persist_transcript_segment(&db, service_id, &segment)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+    }
+    let _ = emit(&app, AppEvent::TranscriptUpdated, segment.clone());
+
+    let context = {
+        let db = state.db.lock().expect("db connection poisoned");
+        let recent_timeline = timeline::list_timeline(&db, service_id, 20)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        let active_service = state
+            .active_service
+            .lock()
+            .expect("active_service mutex poisoned");
+        let context_manager = state
+            .context_manager
+            .lock()
+            .expect("context_manager mutex poisoned");
+        crate::intelligence::build_intelligence_context(
+            &db,
+            state.content_registry.as_ref(),
+            active_service.as_ref(),
+            &*context_manager,
+            &recent_timeline,
+            Vec::new(),
+            ContextBounds::default(),
+        )
+        .map_err(AppError::from)
+        .map_err(log_and_return)?
+    };
+
+    let input = IntelligenceInput::new(service_id, segment);
+    let engine = state
+        .intelligence_registry
+        .resolve(IntelligenceDomain::Bible)
+        .ok_or_else(|| {
+            log_and_return(AppError::InvalidInput(
+                "bible intelligence engine is not registered".to_string(),
+            ))
+        })?;
+
+    let result = engine
+        .analyze(&input, &context)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
+    let queued = {
+        let mut findings = state
+            .intelligence_findings
+            .lock()
+            .expect("intelligence_findings mutex poisoned");
+        let mut queued = Vec::new();
+        for finding in result.findings {
+            if findings.add(finding.clone()) == QueueAddOutcome::Added {
+                queued.push(finding);
+            }
+        }
+        queued
+    };
+
+    Ok(queued)
+}
+
 // --- music intelligence (Phase 2.1) -----------------------------------------
 //
 // Dataset listing deliberately reuses `list_content_registry(Some("music"))`
@@ -2418,6 +2528,157 @@ pub fn reject_sermon_finding(
 #[tauri::command]
 pub fn get_sermon_state(state: State<'_, AppState>) -> cip_core_intelligence::SermonStateSnapshot {
     state.sermon_engine.snapshot()
+}
+
+// --- cross-domain intelligence (Phase 2.4) ----------------------------------
+//
+// The correlation layer only ever *reads* `state.intelligence_findings`
+// (every domain, via `build_music_context` - generic despite its name, see
+// that function's own docs) and writes to its own, separate
+// `state.correlation_queue`. It never calls another engine directly and
+// never mutates a source finding - see `cross_domain.rs`'s module docs.
+
+/// Run the Phase 2.4 correlation engine against this app's real,
+/// current state and queue any new correlations - an explicit operator/
+/// diagnostic action, never triggered automatically by a transcript
+/// segment arriving (spec section 24: "read-only... never automatic").
+/// Reuses `build_music_context` to see every domain's queued findings,
+/// not just Music's.
+#[tauri::command]
+pub fn analyze_cross_domain(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<IntelligenceCorrelation>, AppError> {
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let context = build_music_context(&state, service_id).map_err(log_and_return)?;
+
+    let engine = CrossDomainCorrelationEngine::new();
+    let queued = {
+        let mut correlations = state
+            .correlation_queue
+            .lock()
+            .expect("correlation_queue mutex poisoned");
+        crate::cross_domain::analyze_and_queue(&engine, &context, &mut correlations)
+    };
+
+    let db = state.db.lock().expect("db connection poisoned");
+    for correlation in &queued {
+        record_timeline(
+            &db,
+            Some(service_id),
+            AppEvent::CrossDomainCorrelationDetected,
+            LogCategory::App,
+            serde_json::json!({
+                "correlationId": correlation.id,
+                "kind": correlation.kind.label(),
+                "summary": &correlation.summary,
+                "confidence": correlation.confidence.score,
+            }),
+        );
+    }
+    drop(db);
+    for correlation in &queued {
+        let _ = emit(
+            &app,
+            AppEvent::CrossDomainCorrelationDetected,
+            correlation.clone(),
+        );
+    }
+
+    Ok(queued)
+}
+
+/// Cross-domain correlations still awaiting an operator decision
+/// (`Detected`/`Reviewed`), for the active service - the Cross-Domain
+/// Intelligence panel's read-only data source. Mirrors
+/// `list_music_findings`/`list_sermon_findings`.
+#[tauri::command]
+pub fn list_cross_domain_correlations(
+    state: State<'_, AppState>,
+) -> Result<Vec<IntelligenceCorrelation>, AppError> {
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let correlations = state
+        .correlation_queue
+        .lock()
+        .expect("correlation_queue mutex poisoned");
+    Ok(correlations
+        .pending()
+        .into_iter()
+        .filter(|c| c.service_id == service_id)
+        .cloned()
+        .collect())
+}
+
+/// Explicit operator review of a correlation - informational only
+/// (spec section 25), changes only this correlation's own status.
+#[tauri::command]
+pub fn review_cross_domain_correlation(
+    correlation_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<IntelligenceCorrelation, AppError> {
+    let id = parse_uuid(&correlation_id).map_err(log_and_return)?;
+    let updated = {
+        let mut correlations = state
+            .correlation_queue
+            .lock()
+            .expect("correlation_queue mutex poisoned");
+        correlations
+            .review(id)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        correlations
+            .get(id)
+            .cloned()
+            .expect("just-reviewed correlation is still present")
+    };
+    let _ = emit(
+        &app,
+        AppEvent::CrossDomainCorrelationReviewed,
+        updated.clone(),
+    );
+    Ok(updated)
+}
+
+/// Explicit operator dismissal of a correlation (spec section 25) - never
+/// automatic, and has no way to alter the source findings, the transcript,
+/// or the active Scripture context.
+#[tauri::command]
+pub fn dismiss_cross_domain_correlation(
+    correlation_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<IntelligenceCorrelation, AppError> {
+    let id = parse_uuid(&correlation_id).map_err(log_and_return)?;
+    let updated = {
+        let mut correlations = state
+            .correlation_queue
+            .lock()
+            .expect("correlation_queue mutex poisoned");
+        correlations
+            .dismiss(id)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        correlations
+            .get(id)
+            .cloned()
+            .expect("just-dismissed correlation is still present")
+    };
+    let db = state.db.lock().expect("db connection poisoned");
+    record_timeline(
+        &db,
+        Some(updated.service_id),
+        AppEvent::CrossDomainCorrelationDismissed,
+        LogCategory::App,
+        serde_json::json!({ "correlationId": updated.id, "summary": &updated.summary }),
+    );
+    drop(db);
+    let _ = emit(
+        &app,
+        AppEvent::CrossDomainCorrelationDismissed,
+        updated.clone(),
+    );
+    Ok(updated)
 }
 
 // --- live status -------------------------------------------------------------

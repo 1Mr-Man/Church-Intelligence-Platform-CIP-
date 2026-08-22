@@ -15,6 +15,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AppEvents } from "../events/eventNames";
 import type {
   CurrentSong,
+  IntelligenceCorrelation,
   IntelligenceFinding,
   PresentationItem,
   ProcessedSegment,
@@ -145,6 +146,30 @@ export function onSermonThemeChanged(
  * a rigid state machine transition. */
 export function onSermonStateChanged(handler: (state: SermonState) => void): Promise<UnlistenFn> {
   return listenSafe<SermonState>(AppEvents.SermonStateChanged, handler);
+}
+
+/** The Phase 2.4 correlation engine produced a new cross-domain
+ * correlation - never implies anything was presented, approved, or
+ * projected; see `docs/cross-domain-intelligence.md`. */
+export function onCrossDomainCorrelationDetected(
+  handler: (correlation: IntelligenceCorrelation) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<IntelligenceCorrelation>(AppEvents.CrossDomainCorrelationDetected, handler);
+}
+
+/** The operator reviewed a correlation without dismissing it - the same
+ * informational-only semantics as `IntelligenceFinding.review`. */
+export function onCrossDomainCorrelationReviewed(
+  handler: (correlation: IntelligenceCorrelation) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<IntelligenceCorrelation>(AppEvents.CrossDomainCorrelationReviewed, handler);
+}
+
+/** The operator explicitly dismissed a correlation - never automatic. */
+export function onCrossDomainCorrelationDismissed(
+  handler: (correlation: IntelligenceCorrelation) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<IntelligenceCorrelation>(AppEvents.CrossDomainCorrelationDismissed, handler);
 }
 
 /** Unused by `ProcessedSegment` directly but kept for reference/parity -

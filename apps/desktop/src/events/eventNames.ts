@@ -61,6 +61,11 @@ export const AppEvents = {
   SermonThemeChanged: "SERMON_THEME_CHANGED",
   /** Payload is the new `SermonState` (Phase 2.3). */
   SermonStateChanged: "SERMON_STATE_CHANGED",
+
+  /** Payload is the new `IntelligenceCorrelation` (Phase 2.4). */
+  CrossDomainCorrelationDetected: "CROSS_DOMAIN_CORRELATION_DETECTED",
+  CrossDomainCorrelationReviewed: "CROSS_DOMAIN_CORRELATION_REVIEWED",
+  CrossDomainCorrelationDismissed: "CROSS_DOMAIN_CORRELATION_DISMISSED",
 } as const;
 
 export type AppEventName = (typeof AppEvents)[keyof typeof AppEvents];

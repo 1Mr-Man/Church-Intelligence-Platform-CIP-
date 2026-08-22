@@ -7,6 +7,7 @@ import type {
   DomainCapabilityReport,
   ImportReport,
   IntegrityReport,
+  IntelligenceCorrelation,
   IntelligenceFinding,
   LiveStatus,
   MusicQueryType,
@@ -115,6 +116,13 @@ export function LiveChurchBrain() {
   const [sermonFindings, setSermonFindings] = useState<IntelligenceFinding[]>([]);
   const [sermonState, setSermonState] = useState<SermonStateSnapshot | null>(null);
   const [sermonManualText, setSermonManualText] = useState("");
+  // Cross-Domain Intelligence (Phase 2.4) - read-only: correlations only
+  // ever appear from an explicit "Run analysis" action or the
+  // review/dismiss operator actions below, never automatically. `bibleManualText`
+  // feeds `analyzeBibleTranscript`, the bridge that makes a Bible finding
+  // reachable for correlation at all (see `commands.ts`'s own docs).
+  const [crossDomainCorrelations, setCrossDomainCorrelations] = useState<IntelligenceCorrelation[]>([]);
+  const [bibleManualText, setBibleManualText] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -173,6 +181,7 @@ export function LiveChurchBrain() {
       commands.listMusicFindings().then(setMusicFindings).catch(() => {});
       commands.listSermonFindings().then(setSermonFindings).catch(() => {});
       commands.getSermonState().then(setSermonState).catch(() => {});
+      commands.listCrossDomainCorrelations().then(setCrossDomainCorrelations).catch(() => {});
     } else {
       setSuggestions([]);
       setApprovedSuggestions([]);
@@ -189,6 +198,7 @@ export function LiveChurchBrain() {
       setMusicFindings([]);
       setSermonFindings([]);
       setSermonState(null);
+      setCrossDomainCorrelations([]);
     }
   }, [activeServiceId]);
 
@@ -270,6 +280,15 @@ export function LiveChurchBrain() {
       ),
       liveEvents.onSermonStructureUpdated((points) =>
         setSermonState((prev) => (prev ? { ...prev, points } : prev)),
+      ),
+      liveEvents.onCrossDomainCorrelationDetected((correlation) =>
+        setCrossDomainCorrelations((prev) => [correlation, ...prev]),
+      ),
+      liveEvents.onCrossDomainCorrelationReviewed((correlation) =>
+        setCrossDomainCorrelations((prev) => prev.map((c) => (c.id === correlation.id ? correlation : c))),
+      ),
+      liveEvents.onCrossDomainCorrelationDismissed((correlation) =>
+        setCrossDomainCorrelations((prev) => prev.filter((c) => c.id !== correlation.id)),
       ),
     ];
     return () => {
@@ -1290,6 +1309,107 @@ export function LiveChurchBrain() {
                     }
                   >
                     Reject
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="live-brain__panel">
+        <h2>Cross-Domain Intelligence</h2>
+        <p className="live-brain__hint">
+          Correlations between Bible/Music/Sermon findings, derived by a deterministic rule engine - never a new
+          detection, never automatic presentation. Every correlation names the rule that produced it and the exact
+          findings it connects (spec section 48: engines produce findings, correlation connects findings, operators
+          review, presentation stays separate).
+        </p>
+
+        <details className="live-brain__manual-entry">
+          <summary>Manual / test bible transcript entry</summary>
+          <p className="live-brain__hint">
+            Feeds text through the already-registered `BibleIntelligenceEngine` so a Bible finding becomes reachable
+            for correlation - the live Scripture-detection workflow above is unchanged and unaffected by this.
+          </p>
+          <div className="live-brain__row">
+            <input
+              value={bibleManualText}
+              onChange={(e) => setBibleManualText(e.target.value)}
+              placeholder='e.g. "Romans chapter eight verse twenty eight"'
+              aria-label="Manual bible transcript text"
+            />
+            <button
+              type="button"
+              disabled={!status?.service || !bibleManualText.trim() || isBusy("bible-transcript")}
+              onClick={() =>
+                withBusy("bible-transcript", async () => {
+                  await commands.analyzeBibleTranscript(bibleManualText.trim());
+                  setBibleManualText("");
+                })
+              }
+            >
+              Submit
+            </button>
+          </div>
+        </details>
+
+        <div className="live-brain__row">
+          <button
+            type="button"
+            disabled={!status?.service || isBusy("cross-domain-analyze")}
+            onClick={() =>
+              withBusy("cross-domain-analyze", async () => {
+                const found = await commands.analyzeCrossDomain();
+                setCrossDomainCorrelations((prev) => {
+                  const existingIds = new Set(prev.map((c) => c.id));
+                  return [...found.filter((c) => !existingIds.has(c.id)), ...prev];
+                });
+              })
+            }
+          >
+            Run cross-domain analysis
+          </button>
+        </div>
+
+        {crossDomainCorrelations.length === 0 ? (
+          <p className="live-brain__hint">No pending cross-domain correlations.</p>
+        ) : (
+          <ul className="live-brain__suggestions">
+            {crossDomainCorrelations.map((correlation) => (
+              <li key={correlation.id} className="live-brain__suggestion-card">
+                <div className="live-brain__suggestion-header">
+                  <strong>{correlation.summary}</strong>
+                  <span className="live-brain__confidence">
+                    Confidence: {Math.round(correlation.confidence.score * 100)}%
+                  </span>
+                </div>
+                <p className="live-brain__hint">
+                  {correlation.kind.kind.toUpperCase()} &middot; {correlation.domains.join(" + ")} &middot; rule{" "}
+                  {correlation.ruleId} &middot; {correlation.status.toUpperCase()}
+                </p>
+                <div className="live-brain__row">
+                  <button
+                    type="button"
+                    disabled={isBusy(`cross-domain-review-${correlation.id}`)}
+                    onClick={() =>
+                      withBusy(`cross-domain-review-${correlation.id}`, async () => {
+                        await commands.reviewCrossDomainCorrelation(correlation.id);
+                      })
+                    }
+                  >
+                    Review
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isBusy(`cross-domain-dismiss-${correlation.id}`)}
+                    onClick={() =>
+                      withBusy(`cross-domain-dismiss-${correlation.id}`, async () => {
+                        await commands.dismissCrossDomainCorrelation(correlation.id);
+                      })
+                    }
+                  >
+                    Dismiss
                   </button>
                 </div>
               </li>

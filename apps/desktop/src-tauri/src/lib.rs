@@ -2,6 +2,7 @@ mod acoustic;
 mod commands;
 mod config;
 mod content;
+mod cross_domain;
 mod errors;
 pub mod events;
 mod intelligence;
@@ -262,6 +263,11 @@ pub fn run() {
             commands::accept_sermon_finding,
             commands::reject_sermon_finding,
             commands::get_sermon_state,
+            commands::analyze_bible_transcript,
+            commands::analyze_cross_domain,
+            commands::list_cross_domain_correlations,
+            commands::review_cross_domain_correlation,
+            commands::dismiss_cross_domain_correlation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

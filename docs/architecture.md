@@ -41,7 +41,7 @@ not replace the operator's judgment.
 | ------------------------ | ------------------------------------------------------------------ |
 | `core/bible`            | `BibleProvider`, `ScriptureReference`, text normalization, reference detection, verse-range retrieval, local search, the dataset integrity checker, the Scripture Context Manager (see below) |
 | `core/content`          | `ContentRegistry` - what local content exists, and its provenance/licensing (Phase 1.5) |
-| `core/intelligence`     | The shared intelligence architecture (Phase 2.0) - `IntelligenceContext`, `IntelligenceEngine`, `IntelligenceFinding`, the engine registry, the Bible compatibility adapter, the Music adapter (Phase 2.1, extended with acoustic fusion in Phase 2.2), and the Sermon adapter (Phase 2.3) |
+| `core/intelligence`     | The shared intelligence architecture (Phase 2.0) - `IntelligenceContext`, `IntelligenceEngine`, `IntelligenceFinding`, the engine registry, the Bible compatibility adapter, the Music adapter (Phase 2.1, extended with acoustic fusion in Phase 2.2), the Sermon adapter (Phase 2.3), and the cross-domain correlation rule engine (Phase 2.4) - see [`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md) |
 | `core/music`            | Song/lyric domain model (`Song`, `SongSection`, `LyricLine`), `MusicProvider`, deterministic title/alias/number/lyric matching (Phase 2.1); `AcousticMusicRecognizer` trait, audio segmentation, signal-quality gate, evidence fusion (Phase 2.2) |
 | `core/service`          | `ServiceSession` lifecycle, `AudioEngine` capture contract        |
 | `core/ai`               | `SpeechEngine` transcription contract, `Suggestion`                |
@@ -176,7 +176,13 @@ or any other domain crate) - proving a third independent engine shares the
 same `IntelligenceContext`/registry/failure-isolation architecture without
 touching `pipeline.rs`, `core/bible`, `bible_adapter.rs`, `core/music`, or
 `music_adapter.rs`; see
-[`docs/sermon-intelligence.md`](sermon-intelligence.md).
+[`docs/sermon-intelligence.md`](sermon-intelligence.md). Phase 2.4 adds
+no fourth engine - `CrossDomainCorrelationEngine` deliberately does not
+implement `IntelligenceEngine` and is never registered into the registry,
+since it reads findings *across* domains rather than producing them for
+one; it reads the same shared `IntelligenceContext` every registered
+engine does, and calls none of Bible/Music/Sermon directly. See
+[`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md).
 
 ## Event architecture
 

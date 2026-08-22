@@ -123,6 +123,8 @@ pub enum IntelligenceError {
     DomainAlreadyRegistered(IntelligenceDomain),
     #[error("finding {0} not found")]
     FindingNotFound(Uuid),
+    #[error("correlation {0} not found")]
+    CorrelationNotFound(Uuid),
 }
 
 /// The shared contract every intelligence engine implements. Synchronous

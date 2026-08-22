@@ -23,6 +23,7 @@ import type {
   DomainCapabilityReport,
   ImportReport,
   IntegrityReport,
+  IntelligenceCorrelation,
   IntelligenceFinding,
   LiveStatus,
   MusicImportReport,
@@ -386,6 +387,48 @@ export function rejectSermonFinding(findingId: string): Promise<IntelligenceFind
 /** The current theme/state/structure snapshot - read-only, safe to poll. */
 export function getSermonState(): Promise<SermonStateSnapshot> {
   return invokeCommand("get_sermon_state");
+}
+
+// --- bible intelligence bridge (Phase 2.4) --------------------------------------
+//
+// Mirrors `analyzeSermonTranscript` exactly - the new bridge that makes a
+// Bible-domain `IntelligenceFinding` reachable for cross-domain correlation
+// (the live Scripture-detection workflow, unchanged, still runs through
+// `processTestTranscript`/the real audio pipeline).
+
+export function analyzeBibleTranscript(text: string): Promise<IntelligenceFinding[]> {
+  return invokeCommand("analyze_bible_transcript", { text });
+}
+
+// --- cross-domain intelligence (Phase 2.4) --------------------------------------
+//
+// Read-only from the operator's perspective: `analyzeCrossDomain` is an
+// explicit diagnostic/review action, never triggered automatically by a
+// transcript segment arriving. Never prepares or projects a presentation
+// item - see `docs/cross-domain-intelligence.md`.
+
+/** Run the correlation engine against this app's real, current findings
+ * and queue any new correlations - an explicit operator/diagnostic action. */
+export function analyzeCrossDomain(): Promise<IntelligenceCorrelation[]> {
+  return invokeCommand("analyze_cross_domain");
+}
+
+/** Cross-domain correlations still awaiting an operator decision, for the
+ * active service - the Cross-Domain Intelligence panel's data source. */
+export function listCrossDomainCorrelations(): Promise<IntelligenceCorrelation[]> {
+  return invokeCommand("list_cross_domain_correlations");
+}
+
+/** Informational-only operator review - never a required step before
+ * `dismissCrossDomainCorrelation`. */
+export function reviewCrossDomainCorrelation(correlationId: string): Promise<IntelligenceCorrelation> {
+  return invokeCommand("review_cross_domain_correlation", { correlationId });
+}
+
+/** Explicit operator dismissal - never automatic, and has no way to alter
+ * the source findings, the transcript, or the active Scripture context. */
+export function dismissCrossDomainCorrelation(correlationId: string): Promise<IntelligenceCorrelation> {
+  return invokeCommand("dismiss_cross_domain_correlation", { correlationId });
 }
 
 // --- live status --------------------------------------------------------------

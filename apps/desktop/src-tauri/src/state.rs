@@ -19,7 +19,8 @@ use cip_core_ai::SpeechEngine;
 use cip_core_bible::{BibleProvider, DefaultScriptureContextManager};
 use cip_core_content::ContentRegistry;
 use cip_core_intelligence::{
-    FindingQueue, IntelligenceEngineRegistry, MusicIntelligenceEngine, SermonIntelligenceEngine,
+    CorrelationQueue, FindingQueue, IntelligenceEngineRegistry, MusicIntelligenceEngine,
+    SermonIntelligenceEngine,
 };
 use cip_core_music::{AcousticMusicRecognizer, CurrentSong, MusicProvider};
 use cip_core_service::{AudioEngine, ServiceSession};
@@ -109,6 +110,15 @@ pub struct AppState {
     /// deliberately not the same instance (mirrors `acoustic_music_engine`
     /// above).
     pub sermon_engine: SermonIntelligenceEngine,
+    /// In-memory queue of cross-domain correlations awaiting operator
+    /// review (Phase 2.4's `CorrelationQueue`) - the correlation
+    /// counterpart to `intelligence_findings`, populated only by
+    /// `commands::analyze_cross_domain`. Deliberately not persisted, for
+    /// the same reason `intelligence_findings` isn't: a correlation is
+    /// derived from findings that themselves already carry provenance, so
+    /// nothing here needs to survive a restart (see
+    /// `docs/cross-domain-intelligence.md`'s persistence-decision section).
+    pub correlation_queue: Mutex<CorrelationQueue>,
 }
 
 impl AppState {
@@ -146,6 +156,7 @@ impl AppState {
             acoustic_recognizer: Mutex::new(acoustic_recognizer),
             current_song: Mutex::new(None),
             sermon_engine: SermonIntelligenceEngine::new(),
+            correlation_queue: Mutex::new(CorrelationQueue::new()),
         }
     }
 }

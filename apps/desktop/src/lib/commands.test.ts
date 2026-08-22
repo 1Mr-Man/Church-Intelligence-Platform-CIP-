@@ -10,24 +10,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acceptMusicFinding,
   acceptSermonFinding,
+  analyzeBibleTranscript,
+  analyzeCrossDomain,
   analyzeMusicAudio,
   analyzeMusicTranscript,
   analyzeSermonTranscript,
   checkBibleDatasetIntegrity,
   clearCurrentSong,
   createManualPresentation,
+  dismissCrossDomainCorrelation,
   getAppConfig,
   getIntelligenceCapabilities,
   getSermonState,
   importBibleDataset,
   importMusicDataset,
   listContentRegistry,
+  listCrossDomainCorrelations,
   listMusicFindings,
   listSermonFindings,
   previewPresentation,
   previewScripture,
   rejectMusicFinding,
   rejectSermonFinding,
+  reviewCrossDomainCorrelation,
   searchBible,
   searchMusic,
   setContentEnabled,
@@ -341,6 +346,76 @@ describe("commands.ts Tauri IPC guard", () => {
     await expect(acceptSermonFinding("id")).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(rejectSermonFinding("id")).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(getSermonState()).rejects.toBeInstanceOf(TauriUnavailableError);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  // --- cross-domain intelligence (Phase 2.4) --------------------------------
+
+  it("analyzeBibleTranscript calls analyze_bible_transcript with the raw text", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await analyzeBibleTranscript("Romans chapter eight verse twenty eight");
+
+    expect(invokeMock).toHaveBeenCalledWith("analyze_bible_transcript", {
+      text: "Romans chapter eight verse twenty eight",
+    });
+  });
+
+  /** Proves the explicit, never-automatic nature of the correlation engine:
+   * `analyzeCrossDomain` is its own distinct command, never bundled into a
+   * transcript-analysis call. */
+  it("analyzeCrossDomain calls only analyze_cross_domain with no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await analyzeCrossDomain();
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("analyze_cross_domain", undefined);
+  });
+
+  it("listCrossDomainCorrelations calls list_cross_domain_correlations with no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await listCrossDomainCorrelations();
+
+    expect(invokeMock).toHaveBeenCalledWith("list_cross_domain_correlations", undefined);
+  });
+
+  it("reviewCrossDomainCorrelation calls only review_cross_domain_correlation, never a presentation command", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await reviewCrossDomainCorrelation("correlation-1");
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("review_cross_domain_correlation", {
+      correlationId: "correlation-1",
+    });
+  });
+
+  it("dismissCrossDomainCorrelation calls only dismiss_cross_domain_correlation, never a presentation command", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await dismissCrossDomainCorrelation("correlation-1");
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("dismiss_cross_domain_correlation", {
+      correlationId: "correlation-1",
+    });
+  });
+
+  it("rejects every cross-domain command outside the Tauri runtime, without calling invoke()", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    await expect(analyzeBibleTranscript("text")).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(analyzeCrossDomain()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(listCrossDomainCorrelations()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(reviewCrossDomainCorrelation("id")).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(dismissCrossDomainCorrelation("id")).rejects.toBeInstanceOf(TauriUnavailableError);
     expect(invokeMock).not.toHaveBeenCalled();
   });
 });

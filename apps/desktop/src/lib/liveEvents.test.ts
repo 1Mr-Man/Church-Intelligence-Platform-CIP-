@@ -7,6 +7,9 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  onCrossDomainCorrelationDetected,
+  onCrossDomainCorrelationDismissed,
+  onCrossDomainCorrelationReviewed,
   onCurrentSongChanged,
   onMusicFindingAccepted,
   onMusicFindingDetected,
@@ -131,6 +134,30 @@ describe("liveEvents.ts Tauri event-subscription guard", () => {
     isTauriMock.mockReturnValue(false);
 
     const unlisten = await onSermonFindingDetected(() => {});
+
+    expect(listenMock).not.toHaveBeenCalled();
+    expect(() => unlisten()).not.toThrow();
+  });
+
+  // --- cross-domain intelligence (Phase 2.4) --------------------------------
+
+  it("subscribes to the three distinct cross-domain correlation events", async () => {
+    isTauriMock.mockReturnValue(true);
+    listenMock.mockResolvedValue(() => {});
+
+    await onCrossDomainCorrelationDetected(() => {});
+    await onCrossDomainCorrelationReviewed(() => {});
+    await onCrossDomainCorrelationDismissed(() => {});
+
+    expect(listenMock).toHaveBeenCalledWith("CROSS_DOMAIN_CORRELATION_DETECTED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("CROSS_DOMAIN_CORRELATION_REVIEWED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("CROSS_DOMAIN_CORRELATION_DISMISSED", expect.any(Function));
+  });
+
+  it("resolves to a no-op unlisten for every cross-domain event outside the Tauri runtime", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    const unlisten = await onCrossDomainCorrelationDetected(() => {});
 
     expect(listenMock).not.toHaveBeenCalled();
     expect(() => unlisten()).not.toThrow();

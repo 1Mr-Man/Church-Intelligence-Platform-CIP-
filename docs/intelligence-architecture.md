@@ -41,7 +41,11 @@ engines.
 *which* intelligence domain produced a finding. `Bible` (section 24), as
 of Phase 2.1 `Music` (section 25), and as of Phase 2.3 `Sermon` (section
 26) have real engines registered; `Service`/`Content`/`CrossDomain`
-remain reserved shape only.
+remain reserved shape only. Phase 2.4's `CrossDomainCorrelationEngine`
+(section 19) does not change this: it produces `IntelligenceCorrelation`s,
+not findings, so `IntelligenceDomain::CrossDomain` still tags nothing -
+a correlation's `domains` field instead lists whichever *source* domains
+(Bible/Music/Sermon/Service) its underlying findings actually came from.
 
 ## 3. `IntelligenceFinding`
 
@@ -261,11 +265,25 @@ service. Proven directly:
 ## 19. Correlation
 
 `IntelligenceCorrelation { id, source_finding_ids, kind, confidence,
-evidence, created_at }` is the foundation for cross-domain correlation -
-deliberately minimal, no graph algorithms. `CorrelationKind` has
-`TemporalProximity`/`SharedContext`/`Other(String)`. Nothing in this
-codebase constructs a real correlation yet; this is the shape a future
-`CrossDomainEngine` will use.
+evidence, created_at }` was the Phase 2.0 foundation for cross-domain
+correlation - deliberately minimal, no graph algorithms.
+
+As of **Phase 2.4**, this foundation has a real, deterministic consumer:
+`core/intelligence::cross_domain::CrossDomainCorrelationEngine`, which
+reads `IntelligenceContext.recent_findings` and derives correlations
+between Bible/Music/Sermon findings. It is not registered into the
+`IntelligenceEngineRegistry` below (its output type doesn't fit
+`IntelligenceEngine::analyze`'s `Vec<IntelligenceFinding>` shape) and calls
+no other engine directly - the only channel between domains remains
+`IntelligenceContext`, exactly as this section always required.
+`IntelligenceCorrelation` was extended additively (`service_id`, `domains`,
+`assertion_level`, `status`, `summary`, `rule_id`, `rule_version` added;
+every Phase 2.0 field kept), and `CorrelationKind` gained new domain-pair
+variants (`ScriptureSermon`, `ScriptureMusic`, `SermonMusic`,
+`ThemeScripture`, `ThemeMusic`, `ServiceTransition`) alongside the
+original `TemporalProximity`/`SharedContext`/`Other(String)`. See
+[`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md) for
+the full rule catalogue, confidence hierarchy, and design rationale.
 
 ## 20. Finding queue
 

@@ -84,17 +84,54 @@ export interface IntelligenceFinding {
   createdAt: string; // ISO-8601
 }
 
+/**
+ * Closed, deterministic taxonomy (Phase 2.4 spec section 5) - `other` keeps
+ * this extensible without a schema change. `temporal_proximity` (Phase 2.0)
+ * is the same concept the Phase 2.4 spec calls "TemporalAssociation" -
+ * reused under its original name rather than adding a duplicate variant.
+ */
 export type CorrelationKind =
   | { kind: "temporal_proximity" }
   | { kind: "shared_context" }
+  | { kind: "scripture_sermon" }
+  | { kind: "scripture_music" }
+  | { kind: "sermon_music" }
+  | { kind: "theme_scripture" }
+  | { kind: "theme_music" }
+  | { kind: "service_transition" }
   | { kind: "other"; detail: string };
 
+/**
+ * A typed record that two or more findings are related (Phase 2.4),
+ * produced by `core/intelligence::cross_domain::CrossDomainCorrelationEngine`.
+ * Deliberately its own type, not folded into `IntelligenceFinding` - a
+ * correlation's meaning ("these findings are related, here is why") is
+ * structurally different from a finding's meaning ("this was detected").
+ * See `docs/cross-domain-intelligence.md`.
+ */
 export interface IntelligenceCorrelation {
   id: string;
+  serviceId: string;
   sourceFindingIds: string[];
+  /** Every `IntelligenceDomain` represented among `sourceFindingIds`. */
+  domains: IntelligenceDomain[];
   kind: CorrelationKind;
+  /** Always `inferred` in Phase 2.4 - a correlation is always CIP's own
+   * derived judgment that two findings relate, never a verbatim
+   * observation and never generated content. */
+  assertionLevel: AssertionLevel;
+  /** Operator-review lifecycle, reusing `FindingStatus` exactly. */
+  status: FindingStatus;
   confidence: ConfidenceResult;
+  /** Short human-readable description of the relationship - never a vague
+   * claim like "these things seem related." */
+  summary: string;
   evidence: EvidenceSource[];
+  /** Deterministic identity of the rule that produced this correlation
+   * (e.g. `"scripture_sermon_v1"`) - provenance/rule-versioning, not a
+   * plugin system. */
+  ruleId: string;
+  ruleVersion: string;
   createdAt: string;
 }
 

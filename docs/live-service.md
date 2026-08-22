@@ -506,6 +506,14 @@ cargo test -p cip-desktop
 cargo test -p cip-integration-tests --test bible_intelligence_acceptance
 ```
 
+## Cross-domain correlation (Phase 2.4)
+
+The Live Church Brain's "Cross-Domain Intelligence" panel is a separate,
+read-only-except-review/dismiss view layered on top of the workflows
+above - it never changes how Scripture detection, Music, or Sermon
+findings themselves are produced or reviewed. See
+[`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md).
+
 ## Limitations (stated honestly)
 
 - Ambiguity state is session-only, not persisted (see "Ambiguity" above).

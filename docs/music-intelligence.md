@@ -296,6 +296,14 @@ with two **real** engines (not synthetic test doubles):
 - `MusicIntelligenceEngine` is deterministic: identical input and
   context always produce identical findings (modulo id/timestamp).
 
+Phase 2.4 extends this same proof one layer up: a Music finding sharing a
+transcript segment with a Bible finding may produce a `ScriptureMusic`
+correlation, but only at that same-segment strength - mere proximity
+elsewhere in the service (e.g. a hymn's title alone matching no shared
+segment with a Scripture reference) never does. `CrossDomainCorrelationEngine`
+still calls neither `MusicIntelligenceEngine` nor any other engine
+directly. See [`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md).
+
 ## Performance
 
 Measured directly (`std::time::Instant`, release build, this machine,

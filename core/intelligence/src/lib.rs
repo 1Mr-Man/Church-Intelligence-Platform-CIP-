@@ -49,6 +49,7 @@ mod acceptance_tests;
 pub mod bible_adapter;
 mod context;
 mod correlation;
+pub mod cross_domain;
 mod domain;
 mod engine;
 mod evidence;
@@ -67,6 +68,9 @@ pub use context::{
     DEFAULT_MAX_RECENT_TRANSCRIPT_SEGMENTS,
 };
 pub use correlation::{CorrelationKind, IntelligenceCorrelation};
+pub use cross_domain::{
+    CorrelationQueue, CorrelationQueueAddOutcome, CrossDomainCorrelationEngine,
+};
 pub use domain::{
     baseline_priority, AssertionLevel, FindingKind, FindingStatus, IntelligenceDomain,
     IntelligencePriority,
