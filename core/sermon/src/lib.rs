@@ -31,7 +31,7 @@ pub mod taxonomy;
 pub mod theme;
 
 pub use detection::{detect_elements, SermonDetection};
-pub use state::{infer_state, SermonState};
+pub use state::{candidate_section_for_state, infer_state, SermonState};
 pub use structure::{SermonPoint, SermonStructure, SermonSubPoint};
 pub use taxonomy::SermonElementKind;
 pub use theme::{ThemeCandidate, ThemeTracker};

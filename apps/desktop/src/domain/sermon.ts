@@ -1,7 +1,9 @@
 /**
- * Sermon Intelligence domain contracts (Phase 2.3). Mirrors
- * `cip_core_sermon`/`cip_core_intelligence::sermon_adapter` (Rust). Sermon
- * findings themselves are ordinary `IntelligenceFinding`s (see
+ * Sermon Intelligence domain contracts (Phase 2.6, per the authoritative
+ * Phase 2 roadmap - built under this repository's earlier internal
+ * "Phase 2.3" label; see `docs/sermon-intelligence.md`'s "Roadmap note").
+ * Mirrors `cip_core_sermon`/`cip_core_intelligence::sermon_adapter` (Rust).
+ * Sermon findings themselves are ordinary `IntelligenceFinding`s (see
  * `domain/intelligence.ts`, `domain: "sermon"`, `kind: "sermon"`) - the
  * types here are the taxonomy label and the read-only theme/state/
  * structure snapshot `getSermonState` returns.
@@ -28,7 +30,9 @@ export type SermonElementKind =
   | "summary"
   | "reflection"
   | "transition"
-  | "conclusion";
+  | "conclusion"
+  | "takeaway"
+  | "food_for_thought";
 
 /** A lightweight classification of current message structure - never a
  * rigid state machine; the pastor may move freely between these. */

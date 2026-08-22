@@ -2406,31 +2406,14 @@ pub fn analyze_sermon_transcript(
     }
     let _ = emit(&app, AppEvent::TranscriptUpdated, segment.clone());
 
-    let context = {
-        let db = state.db.lock().expect("db connection poisoned");
-        let recent_timeline = timeline::list_timeline(&db, service_id, 20)
-            .map_err(AppError::from)
-            .map_err(log_and_return)?;
-        let active_service = state
-            .active_service
-            .lock()
-            .expect("active_service mutex poisoned");
-        let context_manager = state
-            .context_manager
-            .lock()
-            .expect("context_manager mutex poisoned");
-        crate::intelligence::build_intelligence_context(
-            &db,
-            state.content_registry.as_ref(),
-            active_service.as_ref(),
-            &*context_manager,
-            &recent_timeline,
-            Vec::new(),
-            ContextBounds::default(),
-        )
-        .map_err(AppError::from)
-        .map_err(log_and_return)?
-    };
+    // Phase 2.6 (per the authoritative Phase 2 roadmap): reuse the shared,
+    // generic context builder rather than a second hand-rolled one, so the
+    // Sermon engine now observes the Phase 2.5 Sermon Foundation's
+    // active_sermon/current_sermon_section/recent_sermon_segments exactly
+    // like every other domain already does (see `build_music_context`'s
+    // own docs on why its name is generic despite the domain it was first
+    // written for).
+    let context = build_music_context(&state, service_id).map_err(log_and_return)?;
 
     let before = state.sermon_engine.snapshot();
     let input = IntelligenceInput::new(service_id, segment);

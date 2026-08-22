@@ -77,6 +77,10 @@ export interface IntelligenceFinding {
   confidence: ConfidenceResult;
   summary: string;
   transcriptSegmentIds: string[];
+  /** The active Sermon Foundation `Sermon`'s id this finding was produced
+   * under (Phase 2.6) - `null` both when no sermon was active and for
+   * every non-Sermon domain, which never attaches one. Never guessed. */
+  sermonId: string | null;
   evidence: EvidenceSource[];
   provenance: IntelligenceProvenance;
   engineId: string;

@@ -523,11 +523,15 @@ Service Intelligence - see
 The "Sermon Foundation" panel is a separate structural layer: which
 sermon is active, who is speaking, and which section it's in - never a
 semantic claim about what was said (that remains the "Sermon
-Intelligence" panel's job, built under an earlier internal "Phase 2.3"
-label). It reuses this document's own transcript/timeline/event
+Intelligence" panel's job - the roadmap's actual Phase 2.6, built under an
+earlier internal "Phase 2.3" label and extended in place under Phase 2.6
+to read this foundation's context: every Sermon finding now carries this
+panel's active sermon's id, and a candidate section it's about to move
+into). It reuses this document's own transcript/timeline/event
 architecture unchanged - no new event bus, no new persistence mechanism
 beyond the additive `sermons`/`sermon_sections`/`sermon_segments` tables.
-See [`docs/sermon-foundation.md`](sermon-foundation.md).
+See [`docs/sermon-foundation.md`](sermon-foundation.md) and
+[`docs/sermon-intelligence.md`](sermon-intelligence.md).
 
 ## Limitations (stated honestly)
 

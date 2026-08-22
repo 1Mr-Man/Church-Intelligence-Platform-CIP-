@@ -64,6 +64,18 @@ pub enum SermonElementKind {
     /// A signal that the sermon may be concluding ("in conclusion...",
     /// "finally...") - never treated as certain; the pastor may continue.
     Conclusion,
+    /// An explicit candidate takeaway ("the takeaway is...", "if you
+    /// remember one thing today...") - distinct from [`Self::Summary`]
+    /// (a recap of what was said) and [`Self::KeyStatement`] (a quotable
+    /// assertion): a takeaway specifically frames *what to carry away*.
+    Takeaway,
+    /// A conservative "food for thought" prompt - a reflective question or
+    /// explicit invitation to personal examination distinct enough from
+    /// [`Self::Reflection`]'s narrower "what would.../how would you..."
+    /// pattern to warrant its own category (spec section 17). Always an
+    /// inference about the prompt's purpose, never a claim the pastor used
+    /// the words "food for thought" unless they did.
+    FoodForThought,
 }
 
 impl SermonElementKind {
@@ -89,6 +101,8 @@ impl SermonElementKind {
             SermonElementKind::Reflection => "SERMON_REFLECTION",
             SermonElementKind::Transition => "SERMON_TRANSITION",
             SermonElementKind::Conclusion => "SERMON_CONCLUSION",
+            SermonElementKind::Takeaway => "SERMON_TAKEAWAY",
+            SermonElementKind::FoodForThought => "SERMON_FOOD_FOR_THOUGHT",
         }
     }
 }
@@ -97,7 +111,7 @@ impl SermonElementKind {
 mod tests {
     use super::*;
 
-    const ALL: [SermonElementKind; 17] = [
+    const ALL: [SermonElementKind; 19] = [
         SermonElementKind::Theme,
         SermonElementKind::MainPoint,
         SermonElementKind::SubPoint,
@@ -115,6 +129,8 @@ mod tests {
         SermonElementKind::Summary,
         SermonElementKind::Reflection,
         SermonElementKind::Transition,
+        SermonElementKind::Takeaway,
+        SermonElementKind::FoodForThought,
     ];
 
     #[test]

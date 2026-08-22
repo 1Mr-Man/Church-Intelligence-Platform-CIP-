@@ -59,7 +59,7 @@ macro_rules! shape {
 // multiple simultaneous element kinds, e.g. a main point that is also a
 // key statement).
 #[rustfmt::skip]
-static SHAPES: [Shape; 44] = [
+static SHAPES: [Shape; 49] = [
     // --- Main points (section 12) ------------------------------------
     shape!(r"(?i)\bmy\s+(first|second|third|fourth|fifth)\s+point\b", SermonElementKind::MainPoint),
     shape!(r"(?i)\bpoint\s+number\s+(one|two|three|four|five|\d+)\b", SermonElementKind::MainPoint),
@@ -124,7 +124,46 @@ static SHAPES: [Shape; 44] = [
     shape!(r"(?i)\blet\s+me\s+close\b", SermonElementKind::Conclusion),
     shape!(r"(?i)\bas\s+i\s+finish\b", SermonElementKind::Conclusion),
     shape!(r"(?i)\bone\s+last\s+thing\b", SermonElementKind::Conclusion),
+
+    // --- Takeaways (Phase 2.6 spec section 16) - distinct wording from
+    // Summary/KeyStatement so the three never collide on the same trigger.
+    shape!(r"(?i)\bthe\s+takeaway\s+is\b", SermonElementKind::Takeaway),
+    shape!(r"(?i)\bif\s+you\s+remember\s+one\s+thing\b", SermonElementKind::Takeaway),
+    shape!(r"(?i)\bwhat\s+i\s+want\s+you\s+to\s+remember\b", SermonElementKind::Takeaway),
+    shape!(r"(?i)\bthe\s+bottom\s+line\s+is\b", SermonElementKind::Takeaway),
+
+    // --- Food for thought (Phase 2.6 spec section 17) - one explicit,
+    // phrase-anchored prompt; the broader question-shaped prompts are
+    // handled by `FOOD_FOR_THOUGHT_QUESTION_PATTERN` below, mirroring how
+    // `REFLECTION_PATTERN` supplements this array for `Reflection`.
+    shape!(r"(?i)\bwhat\s+are\s+you\s+trusting\b", SermonElementKind::FoodForThought),
 ];
+
+/// Short, logistical/procedural questions ("Can everyone hear me?", "Are
+/// you ready?", "What page are we on?") - these must never become a
+/// `Question`/`Reflection`/`FoodForThought` finding (Phase 2.6 spec section
+/// 11/30-B: "logistical... must be ignored"). Checked before the plain
+/// question-mark detector fires at all, so a logistics question produces
+/// no sermon-content finding whatsoever, not merely a suppressed
+/// classification.
+static LOGISTICS_QUESTION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)\bcan\s+(everyone|you\s+all|you)\s+(hear|see)\b|\bare\s+you\s+ready\b|\bwhat\s+page\s+are\s+we\s+on\b|\bcan\s+everyone\s+hear\s+me\b",
+    )
+    .unwrap()
+});
+
+/// A broader reflective/food-for-thought question shape, distinct from
+/// [`REFLECTION_PATTERN`]'s narrower "what would.../how would you..."
+/// wording - conservative by construction (spec section 17: "do not
+/// generate inspirational filler"), fires only in addition to the plain
+/// [`SermonElementKind::Question`] detection, never as a replacement.
+static FOOD_FOR_THOUGHT_QUESTION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)\bask\s+yourself\b|\bare\s+you\s+willing\b|\bwhat\s+would\s+it\s+look\s+like\s+if\b",
+    )
+    .unwrap()
+});
 
 /// A reflective/food-for-thought question shape (section 25) - fires only
 /// in addition to, never instead of, the plain [`SermonElementKind::Question`]
@@ -158,8 +197,11 @@ pub fn detect_elements(text: &str) -> Vec<SermonDetection> {
     }
 
     // Questions: unambiguous, punctuation-anchored - the most reliable
-    // detector in this module by construction.
-    if text.contains('?') {
+    // detector in this module by construction. A purely logistical/
+    // procedural question ("Can everyone hear me?") is filtered out before
+    // it ever becomes a `Question` finding, rather than merely suppressed
+    // downstream - see `LOGISTICS_QUESTION_PATTERN`'s own docs.
+    if text.contains('?') && LOGISTICS_QUESTION_PATTERN.find(text).is_none() {
         detections.push(SermonDetection {
             kind: SermonElementKind::Question,
             matched_phrase: "?".to_string(),
@@ -169,6 +211,14 @@ pub fn detect_elements(text: &str) -> Vec<SermonDetection> {
         if let Some(m) = REFLECTION_PATTERN.find(text) {
             detections.push(SermonDetection {
                 kind: SermonElementKind::Reflection,
+                matched_phrase: m.as_str().to_string(),
+                raw_text: text.to_string(),
+                extracted_text: None,
+            });
+        }
+        if let Some(m) = FOOD_FOR_THOUGHT_QUESTION_PATTERN.find(text) {
+            detections.push(SermonDetection {
+                kind: SermonElementKind::FoodForThought,
                 matched_phrase: m.as_str().to_string(),
                 raw_text: text.to_string(),
                 extracted_text: None,
@@ -337,5 +387,60 @@ mod tests {
     fn identical_input_produces_identical_detections() {
         let text = "My first point is faith comes by hearing. Let me tell you a story.";
         assert_eq!(detect_elements(text), detect_elements(text));
+    }
+
+    // --- Phase 2.6: Takeaway / Food for Thought -----------------------------
+
+    #[test]
+    fn detects_a_takeaway() {
+        assert!(
+            kinds("If you remember one thing today, remember that God is faithful.")
+                .contains(&SermonElementKind::Takeaway)
+        );
+        assert!(kinds("The takeaway is that faith requires action.")
+            .contains(&SermonElementKind::Takeaway));
+    }
+
+    #[test]
+    fn takeaway_is_distinct_from_summary_and_key_statement() {
+        let d = kinds("The bottom line is that faith requires action.");
+        assert!(d.contains(&SermonElementKind::Takeaway));
+        assert!(!d.contains(&SermonElementKind::Summary));
+        assert!(!d.contains(&SermonElementKind::KeyStatement));
+    }
+
+    #[test]
+    fn detects_a_food_for_thought_prompt_from_the_explicit_trusting_phrase() {
+        let d = kinds("What are you trusting when everything around you is uncertain?");
+        assert!(d.contains(&SermonElementKind::FoodForThought));
+        assert!(
+            d.contains(&SermonElementKind::Question),
+            "a food-for-thought prompt is still, factually, a question"
+        );
+    }
+
+    #[test]
+    fn detects_a_food_for_thought_prompt_from_the_broader_question_pattern() {
+        assert!(kinds("Ask yourself: where is your faith really placed?")
+            .contains(&SermonElementKind::FoodForThought));
+    }
+
+    #[test]
+    fn ordinary_questions_are_never_food_for_thought() {
+        assert!(!kinds("Do you believe this today?").contains(&SermonElementKind::FoodForThought));
+    }
+
+    #[test]
+    fn logistics_questions_are_never_a_sermon_finding() {
+        // Phase 2.6 spec section 30-B: a purely procedural question must
+        // never become a sermon Question/Reflection/FoodForThought finding.
+        assert!(detect_elements("Can everyone hear me?").is_empty());
+        assert!(detect_elements("Are you ready?").is_empty());
+        assert!(detect_elements("What page are we on?").is_empty());
+    }
+
+    #[test]
+    fn a_genuine_teaching_question_still_fires_alongside_a_similar_logistics_question() {
+        assert!(kinds("Do you believe this today?").contains(&SermonElementKind::Question));
     }
 }

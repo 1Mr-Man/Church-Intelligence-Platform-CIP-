@@ -401,13 +401,16 @@ format, O(1) by construction with nothing to benchmark meaningfully.
 
 ## 24. Phase 2.6 handoff
 
-Phase 2.6's real Sermon Intelligence work can build directly on this foundation without
-redesigning the domain model (invariant 15): `IntelligenceContext.active_sermon`/
-`current_sermon_section`/`recent_sermon_segments` are already populated and bounded;
-`Sermon`/`SermonSection`/`SermonSegment` already have stable identities and full persistence;
-the historical semantic engine (`core/sermon`'s detection/state/structure/theme modules,
-`SermonIntelligenceEngine`) already exists and is untouched, ready to be the concrete
-`IntelligenceEngine` Phase 2.6 formally validates against this foundation's structural context -
-for example, associating a detected main point or theme with the `SermonSection` it was said
-in, or scoping theme-tracking to the currently active `Sermon` rather than the whole service.
-None of that association logic is built here; the data it would need already is.
+**Completed.** Phase 2.6's real Sermon Intelligence work built directly on this
+foundation without redesigning the domain model (invariant 15), confirming the
+prediction this section originally made:
+`IntelligenceContext.active_sermon`/`current_sermon_section`/`recent_sermon_segments`
+were already populated and bounded; `Sermon`/`SermonSection`/`SermonSegment` already had
+stable identities and full persistence; the historical semantic engine (`core/sermon`'s
+detection/state/structure/theme modules, `SermonIntelligenceEngine`) was extended in
+place rather than replaced. Concretely, Phase 2.6 added: an `IntelligenceFinding.sermon_id`
+field set from `context.active_sermon`; per-finding section evidence and an explicit-only
+speaker-attribution provenance note, both sourced from this foundation's context; and a
+read-only candidate-section suggestion (`cip_core_sermon::candidate_section_for_state`)
+compared against `current_sermon_section` - never writing back to persisted section state.
+See [`docs/sermon-intelligence.md`](sermon-intelligence.md) for the full account.

@@ -32,9 +32,10 @@
 use std::sync::Mutex;
 
 use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
+use cip_core_sermon::foundation::SermonSectionKind;
 use cip_core_sermon::{
-    detect_elements, infer_state, SermonDetection, SermonElementKind, SermonPoint, SermonState,
-    SermonStructure, ThemeCandidate, ThemeTracker,
+    candidate_section_for_state, detect_elements, infer_state, SermonDetection, SermonElementKind,
+    SermonPoint, SermonState, SermonStructure, ThemeCandidate, ThemeTracker,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -194,10 +195,67 @@ impl IntelligenceEngine for SermonIntelligenceEngine {
                 new_state,
             ));
             engine_state.last_state = new_state;
+
+            // Phase 2.6 (spec section 14, "STRUCTURAL TRANSITION
+            // DETECTION"): additionally propose a candidate Phase 2.5
+            // Sermon Foundation section for the new internal state, when
+            // the foundation's own current section (read-only, from
+            // context) differs from - or is altogether absent while a
+            // candidate exists for - that state. This never mutates
+            // persisted section state; the foundation/operator remains the
+            // sole authority for that (invariant: no engine ever writes
+            // through `IntelligenceContext`).
+            if let Some(candidate) = candidate_section_for_state(new_state) {
+                let current_kind = context.current_sermon_section.as_ref().map(|s| s.kind);
+                if current_kind != Some(candidate) {
+                    findings.push(finding_for_section_transition_candidate(
+                        service_id,
+                        segment_id,
+                        candidate,
+                        current_kind,
+                    ));
+                }
+            }
         }
+
+        let findings = findings
+            .into_iter()
+            .map(|finding| attach_sermon_foundation_context(finding, context))
+            .collect();
 
         Ok(IntelligenceResult::new(findings))
     }
+}
+
+/// Phase 2.6 section/speaker awareness (spec sections 24-25): additively
+/// attaches the active [`crate::context::IntelligenceContext::active_sermon`]'s
+/// id, the current [`crate::context::IntelligenceContext::current_sermon_section`]
+/// as supplementary evidence, and (only when explicitly assigned) the
+/// active sermon's speaker as a provenance note. Never changes which
+/// findings are produced or their assertion level/confidence - section and
+/// speaker context here are purely associative, never a reason to force,
+/// suppress, or reclassify a detection (spec section 24: "Section context
+/// must never force a finding").
+fn attach_sermon_foundation_context(
+    mut finding: IntelligenceFinding,
+    context: &IntelligenceContext,
+) -> IntelligenceFinding {
+    if let Some(sermon) = context.active_sermon.as_ref() {
+        finding = finding.with_sermon_id(sermon.id);
+        if let Some(speaker) = sermon.speaker.as_ref() {
+            finding.provenance.note = Some(format!(
+                "speaker: {} ({})",
+                speaker.name,
+                speaker.role.label()
+            ));
+        }
+    }
+    if let Some(section) = context.current_sermon_section.as_ref() {
+        finding.evidence.push(EvidenceSource::Context {
+            description: format!("sermon_section:{}", section.kind.label()),
+        });
+    }
+    finding
 }
 
 fn observed(score: f32, reason: &str) -> (AssertionLevel, ConfidenceResult) {
@@ -292,6 +350,17 @@ fn finding_for_detection(
         SermonElementKind::Conclusion => {
             let (a, c) = inferred(0.65, "possible conclusion signal - sermon may continue");
             (a, c, format!("Possible Conclusion: {raw}"))
+        }
+        SermonElementKind::Takeaway => {
+            let (a, c) = observed(0.85, "explicit takeaway trigger phrase matched");
+            (a, c, format!("Takeaway: {raw}"))
+        }
+        SermonElementKind::FoodForThought => {
+            let (a, c) = inferred(
+                0.6,
+                "reflective prompt classification, not a claim of the pastor's own words",
+            );
+            (a, c, format!("Food for Thought: {raw}"))
         }
         SermonElementKind::Theme => {
             // Themes are never produced per-detection - see
@@ -415,6 +484,43 @@ fn finding_for_transition(
     .with_transcript_segments(vec![segment_id])
     .with_evidence(vec![EvidenceSource::Context {
         description: format!("sermon_state:{} -> {}", from.label(), to.label()),
+    }])
+    .with_provenance(IntelligenceProvenance::unknown())
+}
+
+/// A candidate Sermon Foundation section suggestion (Phase 2.6 spec
+/// section 14) - read-only, never mutates `SermonSection` state. `from` is
+/// `None` when the foundation has no current section at all (e.g. no
+/// sermon started through the foundation commands, or a section that has
+/// never been assigned).
+fn finding_for_section_transition_candidate(
+    service_id: Uuid,
+    segment_id: Uuid,
+    candidate: SermonSectionKind,
+    from: Option<SermonSectionKind>,
+) -> IntelligenceFinding {
+    let description = match from {
+        Some(from) => format!("{} -> {}", from.label(), candidate.label()),
+        None => format!("(none) -> {}", candidate.label()),
+    };
+    let confidence = ConfidenceResult::new(
+        0.55,
+        ConfidenceSource::Heuristic,
+        Some("candidate section inferred from an internal sermon-state transition".to_string()),
+    );
+    IntelligenceFinding::new(
+        service_id,
+        IntelligenceDomain::Sermon,
+        FindingKind::Sermon,
+        AssertionLevel::Inferred,
+        confidence,
+        format!("Structural Transition (section): {description}"),
+        SERMON_ENGINE_ID,
+        SERMON_ENGINE_VERSION,
+    )
+    .with_transcript_segments(vec![segment_id])
+    .with_evidence(vec![EvidenceSource::Context {
+        description: format!("candidate_section:{description}"),
     }])
     .with_provenance(IntelligenceProvenance::unknown())
 }
@@ -1052,5 +1158,489 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(run(), run());
+    }
+
+    // --- Phase 2.6: sermon_id / section / speaker awareness -----------------
+
+    fn context_with_sermon(
+        service_id: Uuid,
+        sermon: Option<cip_core_sermon::foundation::Sermon>,
+        section: Option<cip_core_sermon::foundation::SermonSection>,
+    ) -> IntelligenceContext {
+        empty_context(service_id).with_sermon_context(sermon, section, Vec::new())
+    }
+
+    #[test]
+    fn findings_carry_the_active_sermons_id_when_one_is_present() {
+        use cip_core_sermon::foundation::Sermon;
+        let engine = engine();
+        let service_id = Uuid::new_v4();
+        let sermon = Sermon::start(service_id, Some("Faith".to_string()));
+        let context = context_with_sermon(service_id, Some(sermon.clone()), None);
+
+        let result = engine
+            .analyze(
+                &IntelligenceInput::new(
+                    service_id,
+                    segment("My first point is that faith comes by hearing.", 0),
+                ),
+                &context,
+            )
+            .unwrap();
+
+        assert!(!result.findings.is_empty());
+        assert!(result
+            .findings
+            .iter()
+            .all(|f| f.sermon_id == Some(sermon.id)));
+    }
+
+    #[test]
+    fn findings_carry_no_sermon_id_when_no_sermon_is_active() {
+        let engine = engine();
+        let service_id = Uuid::new_v4();
+        let result = engine
+            .analyze(
+                &IntelligenceInput::new(
+                    service_id,
+                    segment("My first point is that faith comes by hearing.", 0),
+                ),
+                &empty_context(service_id),
+            )
+            .unwrap();
+        assert!(!result.findings.is_empty());
+        assert!(result.findings.iter().all(|f| f.sermon_id.is_none()));
+    }
+
+    #[test]
+    fn speaker_attribution_appears_in_provenance_only_when_explicitly_assigned() {
+        use cip_core_sermon::foundation::{Sermon, Speaker, SpeakerRole};
+        let engine = engine();
+        let service_id = Uuid::new_v4();
+        let mut sermon = Sermon::start(service_id, None);
+        sermon.assign_speaker(Speaker::new("Pastor Jane Doe", SpeakerRole::Primary));
+        let context = context_with_sermon(service_id, Some(sermon), None);
+
+        let result = engine
+            .analyze(
+                &IntelligenceInput::new(
+                    service_id,
+                    segment("My first point is that faith comes by hearing.", 0),
+                ),
+                &context,
+            )
+            .unwrap();
+
+        let point = result
+            .findings
+            .iter()
+            .find(|f| f.summary.starts_with("Main Point:"))
+            .unwrap();
+        assert_eq!(
+            point.provenance.note.as_deref(),
+            Some("speaker: Pastor Jane Doe (PRIMARY)")
+        );
+    }
+
+    #[test]
+    fn no_speaker_note_when_no_speaker_is_explicitly_assigned() {
+        use cip_core_sermon::foundation::Sermon;
+        let engine = engine();
+        let service_id = Uuid::new_v4();
+        let sermon = Sermon::start(service_id, None);
+        let context = context_with_sermon(service_id, Some(sermon), None);
+        let result = engine
+            .analyze(
+                &IntelligenceInput::new(
+                    service_id,
+                    segment("My first point is that faith comes by hearing.", 0),
+                ),
+                &context,
+            )
+            .unwrap();
+        let point = result
+            .findings
+            .iter()
+            .find(|f| f.summary.starts_with("Main Point:"))
+            .unwrap();
+        assert_eq!(point.provenance.note, None);
+    }
+
+    #[test]
+    fn section_context_never_changes_which_findings_are_detected_only_their_evidence() {
+        use cip_core_sermon::foundation::{
+            SectionOrigin, Sermon, SermonSection, SermonSectionKind,
+        };
+
+        let run = |kind: SermonSectionKind| {
+            let engine = engine();
+            let service_id = Uuid::new_v4();
+            let sermon = Sermon::start(service_id, None);
+            let section =
+                SermonSection::open(sermon.id, kind, SectionOrigin::OperatorAssigned, None);
+            let context = context_with_sermon(service_id, Some(sermon), Some(section));
+            engine
+                .analyze(
+                    &IntelligenceInput::new(
+                        service_id,
+                        segment("My first point is that faith comes by hearing.", 0),
+                    ),
+                    &context,
+                )
+                .unwrap()
+                .findings
+        };
+
+        let intro = run(SermonSectionKind::Introduction);
+        let illustration = run(SermonSectionKind::Illustration);
+
+        // Every finding *except* the section-transition candidate (whose
+        // whole purpose is to report what the currently-active foundation
+        // section is) must be identical regardless of section context -
+        // section awareness must never change *which* structural/semantic
+        // detections fire.
+        let summaries = |findings: &[IntelligenceFinding]| {
+            findings
+                .iter()
+                .filter(|f| !f.summary.starts_with("Structural Transition (section):"))
+                .map(|f| (f.domain, f.kind, f.assertion_level, f.summary.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            summaries(&intro),
+            summaries(&illustration),
+            "which findings are produced must remain deterministic and section-independent"
+        );
+
+        let point_evidence = |findings: &[IntelligenceFinding]| {
+            findings
+                .iter()
+                .find(|f| f.summary.starts_with("Main Point:"))
+                .unwrap()
+                .evidence
+                .clone()
+        };
+        assert!(point_evidence(&intro)
+            .iter()
+            .any(|e| matches!(e, EvidenceSource::Context { description } if description.contains("INTRODUCTION"))));
+        assert!(point_evidence(&illustration)
+            .iter()
+            .any(|e| matches!(e, EvidenceSource::Context { description } if description.contains("ILLUSTRATION"))));
+    }
+
+    #[test]
+    fn a_story_detection_proposes_a_candidate_illustration_section_when_the_foundation_disagrees() {
+        use cip_core_sermon::foundation::{
+            SectionOrigin, Sermon, SermonSection, SermonSectionKind,
+        };
+
+        let engine = engine();
+        let service_id = Uuid::new_v4();
+        let sermon = Sermon::start(service_id, None);
+        let intro_section = SermonSection::open(
+            sermon.id,
+            SermonSectionKind::Introduction,
+            SectionOrigin::SystemBoundary,
+            None,
+        );
+        let context = context_with_sermon(service_id, Some(sermon), Some(intro_section));
+
+        let result = engine
+            .analyze(
+                &IntelligenceInput::new(
+                    service_id,
+                    segment(
+                        "There was a man who planted a seed and waited patiently.",
+                        0,
+                    ),
+                ),
+                &context,
+            )
+            .unwrap();
+
+        let candidate = result
+            .findings
+            .iter()
+            .find(|f| f.summary.starts_with("Structural Transition (section):"))
+            .expect("expected a candidate-section finding when the foundation section disagrees");
+        assert!(candidate.summary.contains("ILLUSTRATION"));
+        assert_eq!(candidate.assertion_level, AssertionLevel::Inferred);
+    }
+
+    #[test]
+    fn no_candidate_section_finding_when_the_foundation_already_agrees() {
+        use cip_core_sermon::foundation::{
+            SectionOrigin, Sermon, SermonSection, SermonSectionKind,
+        };
+
+        let engine = engine();
+        let service_id = Uuid::new_v4();
+        let sermon = Sermon::start(service_id, None);
+        let illustration_section = SermonSection::open(
+            sermon.id,
+            SermonSectionKind::Illustration,
+            SectionOrigin::OperatorAssigned,
+            None,
+        );
+        let context = context_with_sermon(service_id, Some(sermon), Some(illustration_section));
+
+        let result = engine
+            .analyze(
+                &IntelligenceInput::new(
+                    service_id,
+                    segment(
+                        "There was a man who planted a seed and waited patiently.",
+                        0,
+                    ),
+                ),
+                &context,
+            )
+            .unwrap();
+
+        assert!(result
+            .findings
+            .iter()
+            .all(|f| !f.summary.starts_with("Structural Transition (section):")));
+    }
+
+    #[test]
+    fn takeaway_and_food_for_thought_are_detected_with_correct_assertion_levels() {
+        let engine = engine();
+        let service_id = Uuid::new_v4();
+
+        let result = engine
+            .analyze(
+                &IntelligenceInput::new(
+                    service_id,
+                    segment(
+                        "If you remember one thing today, remember that God is faithful.",
+                        0,
+                    ),
+                ),
+                &empty_context(service_id),
+            )
+            .unwrap();
+        let takeaway = result
+            .findings
+            .iter()
+            .find(|f| f.summary.starts_with("Takeaway:"))
+            .expect("expected a takeaway finding");
+        assert_eq!(takeaway.assertion_level, AssertionLevel::Observed);
+
+        let result2 = engine
+            .analyze(
+                &IntelligenceInput::new(
+                    service_id,
+                    segment(
+                        "What are you trusting when everything around you is uncertain?",
+                        1,
+                    ),
+                ),
+                &empty_context(service_id),
+            )
+            .unwrap();
+        let food_for_thought = result2
+            .findings
+            .iter()
+            .find(|f| f.summary.starts_with("Food for Thought:"))
+            .expect("expected a food-for-thought finding");
+        assert_eq!(food_for_thought.assertion_level, AssertionLevel::Inferred);
+    }
+
+    #[test]
+    fn logistics_questions_never_produce_a_sermon_finding_through_the_full_engine() {
+        let engine = engine();
+        let service_id = Uuid::new_v4();
+        let result = engine
+            .analyze(
+                &IntelligenceInput::new(service_id, segment("Can everyone hear me?", 0)),
+                &empty_context(service_id),
+            )
+            .unwrap();
+        assert!(result.findings.is_empty());
+    }
+
+    #[test]
+    fn a_repeated_identical_segment_stays_a_single_pending_finding_across_one_hundred_repeats() {
+        // Dedup/stability at scale (Phase 2.6 spec section 20): the engine
+        // itself is stateless-per-call regarding duplication (that is
+        // `FindingQueue::add`'s job - see `sermon.rs`'s own
+        // `analyze_and_queue` test), but this proves the *engine's* output
+        // stays equivalent-stable across many repeats, which is the
+        // precondition dedup relies on.
+        let engine = engine();
+        let service_id = Uuid::new_v4();
+        let mut first: Option<IntelligenceFinding> = None;
+        for i in 0..100u64 {
+            let result = engine
+                .analyze(
+                    &IntelligenceInput::new(
+                        service_id,
+                        segment("My first point is that faith comes by hearing.", i),
+                    ),
+                    &empty_context(service_id),
+                )
+                .unwrap();
+            let point = result
+                .findings
+                .iter()
+                .find(|f| f.summary.starts_with("Main Point:"))
+                .unwrap()
+                .clone();
+            match &first {
+                None => first = Some(point),
+                Some(f) => assert!(
+                    f.is_equivalent_to(&point),
+                    "every repeat must remain equivalent to the first (iteration {i})"
+                ),
+            }
+        }
+    }
+
+    /// The canonical Phase 2.6 acceptance scenario (spec section 50) - a
+    /// short, project-authored synthetic transcript (never copyrighted
+    /// sermon content) walking through Theme, MainPoint, Illustration,
+    /// Scripture (via `active_scripture_context`), Question, Application,
+    /// KeyStatement, FoodForThought, and Takeaway, with a real `Sermon` and
+    /// `SermonSection` attached throughout - proving sermon association,
+    /// transcript-id linkage, correct assertion levels, deterministic
+    /// ordering/confidence, no fabricated evidence, and that nothing is
+    /// ever `Generated`.
+    #[test]
+    fn phase_2_6_canonical_sermon_acceptance_scenario() {
+        use cip_core_sermon::foundation::{
+            SectionOrigin, Sermon, SermonSection, SermonSectionKind,
+        };
+
+        let engine = engine();
+        let service_id = Uuid::new_v4();
+        let sermon = Sermon::start(service_id, Some("Trusting God in Uncertainty".to_string()));
+        let section = SermonSection::open(
+            sermon.id,
+            SermonSectionKind::MainMessage,
+            SectionOrigin::OperatorAssigned,
+            None,
+        );
+        // An active Scripture context (as the Bible Intelligence Engine
+        // would establish it, unchanged by this crate) - proves the
+        // scripture cross-link path alongside Sermon Foundation context.
+        let scripture_context = cip_core_bible::ScriptureContext {
+            translation_id: "KJV".to_string(),
+            book: "ROM".to_string(),
+            chapter: 8,
+            last_verse: Some(28),
+            confidence: CR::new(0.9, CS::Heuristic, None),
+            established_at: chrono::Utc::now(),
+            valid: true,
+        };
+        let context_for = || {
+            IntelligenceContext::build(
+                service_id,
+                None,
+                None,
+                Vec::new(),
+                Some(scripture_context.clone()),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                ContextBounds::default(),
+            )
+            .with_sermon_context(
+                Some(sermon.clone()),
+                Some(section.clone()),
+                Vec::new(),
+            )
+        };
+
+        let segments = [
+            "Today I want to talk about trusting God when life becomes uncertain.",
+            "My first point is that faith grows when it is tested.",
+            "I remember when I faced total uncertainty myself.",
+            "Romans chapter eight verse twenty eight reminds us that all things work together for good.",
+            "What does this mean for us?",
+            "We must trust God even when we cannot see the outcome.",
+            "Never forget: faith is not the absence of uncertainty.",
+            "What are you trusting when everything around you is uncertain?",
+            "If you remember one thing today, remember that God is faithful.",
+        ];
+
+        let mut all_findings = Vec::new();
+        for (i, text) in segments.iter().enumerate() {
+            let result = engine
+                .analyze(
+                    &IntelligenceInput::new(service_id, segment(text, i as u64)),
+                    &context_for(),
+                )
+                .unwrap();
+            all_findings.extend(result.findings);
+        }
+
+        let has = |prefix: &str| all_findings.iter().any(|f| f.summary.starts_with(prefix));
+        assert!(has("Main Point:"), "expected the main point to be detected");
+        assert!(
+            has("Story:"),
+            "expected the illustration/story to be detected"
+        );
+        assert!(has("Question:"), "expected the question to be detected");
+        assert!(
+            has("Application:"),
+            "expected the application to be detected"
+        );
+        assert!(
+            has("Key Statement:"),
+            "expected the key statement to be detected"
+        );
+        assert!(
+            has("Food for Thought:"),
+            "expected the food-for-thought prompt to be detected"
+        );
+        assert!(has("Takeaway:"), "expected the takeaway to be detected");
+        assert!(
+            has("Supporting Scripture:"),
+            "expected the main point to cross-link to the active Scripture context"
+        );
+
+        // Every finding traces back to this sermon (invariant: sermon
+        // association is never fabricated, always taken from context).
+        assert!(all_findings.iter().all(|f| f.sermon_id == Some(sermon.id)));
+
+        // Never Generated (Phase 2.6 spec's own non-negotiable rule).
+        assert!(all_findings
+            .iter()
+            .all(|f| f.assertion_level != AssertionLevel::Generated));
+
+        // No fabricated evidence: every Transcript excerpt is verbatim.
+        for finding in &all_findings {
+            for evidence in &finding.evidence {
+                if let EvidenceSource::Transcript { excerpt, .. } = evidence {
+                    assert!(
+                        segments.iter().any(|s| s.contains(excerpt.as_str())),
+                        "evidence excerpt {excerpt:?} was not verbatim transcript text"
+                    );
+                }
+            }
+        }
+
+        // Deterministic: re-running the identical scenario produces an
+        // equivalent finding sequence.
+        let run_again = || {
+            let fresh_engine = SermonIntelligenceEngine::new();
+            let mut findings = Vec::new();
+            for (i, text) in segments.iter().enumerate() {
+                findings.extend(
+                    fresh_engine
+                        .analyze(
+                            &IntelligenceInput::new(service_id, segment(text, i as u64)),
+                            &context_for(),
+                        )
+                        .unwrap()
+                        .findings
+                        .into_iter()
+                        .map(|f| (f.domain, f.kind, f.assertion_level, f.summary)),
+                );
+            }
+            findings
+        };
+        assert_eq!(run_again(), run_again());
     }
 }

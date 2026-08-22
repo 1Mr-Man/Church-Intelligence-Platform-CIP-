@@ -82,6 +82,7 @@ pub fn finding_for_lifecycle_event(
         format!("{FOUNDATION_SUMMARY_PREFIX} sermon {verb} - \"{title}\""),
         format!("operator {verb} sermon {}", sermon.id),
     )
+    .with_sermon_id(sermon.id)
 }
 
 pub fn finding_for_section_changed(
@@ -101,6 +102,7 @@ pub fn finding_for_section_changed(
             section.origin
         ),
     )
+    .with_sermon_id(sermon_id)
 }
 
 pub fn finding_for_speaker_assigned(
@@ -120,6 +122,7 @@ pub fn finding_for_speaker_assigned(
             speaker.role.label()
         ),
     )
+    .with_sermon_id(sermon_id)
 }
 
 pub fn finding_for_metadata_updated(
@@ -133,6 +136,7 @@ pub fn finding_for_metadata_updated(
         format!("{FOUNDATION_SUMMARY_PREFIX} {field} updated - \"{value}\""),
         format!("sermon {sermon_id} {field} set to \"{value}\" by operator"),
     )
+    .with_sermon_id(sermon_id)
 }
 
 #[cfg(test)]
@@ -165,6 +169,13 @@ mod tests {
             finding.evidence[0],
             EvidenceSource::OperatorAction { .. }
         ));
+    }
+
+    #[test]
+    fn lifecycle_finding_carries_the_sermons_id() {
+        let sermon = Sermon::start(Uuid::new_v4(), Some("Grace".to_string()));
+        let finding = finding_for_lifecycle_event(sermon.service_id, &sermon, "started");
+        assert_eq!(finding.sermon_id, Some(sermon.id));
     }
 
     #[test]

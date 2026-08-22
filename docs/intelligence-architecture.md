@@ -25,8 +25,11 @@ engine was already built under an internal label that also read
 and is reserved for that future Phase 2.8 validation - that historical
 label is not rewritten. `core/sermon`'s own semantic detection modules
 (section 26 above) were similarly built under an internal label that
-read "Phase 2.3" and are understood as Phase 2.6-equivalent under this
-roadmap - also not rewritten.
+read "Phase 2.3"; that historical label is not rewritten, but the modules
+themselves were subsequently extended in place as this roadmap's actual
+Phase 2.6 (Takeaway/FoodForThought detection, a logistics-question fix,
+and Phase 2.5 Sermon Foundation awareness) rather than duplicated into a
+second engine - see [`docs/sermon-intelligence.md`](sermon-intelligence.md).
 
 ## 1. Phase 2 vision
 

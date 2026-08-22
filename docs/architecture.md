@@ -41,32 +41,32 @@ not replace the operator's judgment.
 | ------------------------ | ------------------------------------------------------------------ |
 | `core/bible`            | `BibleProvider`, `ScriptureReference`, text normalization, reference detection, verse-range retrieval, local search, the dataset integrity checker, the Scripture Context Manager (see below) |
 | `core/content`          | `ContentRegistry` - what local content exists, and its provenance/licensing (Phase 1.5) |
-| `core/intelligence`     | The shared intelligence architecture (Phase 2.0) - `IntelligenceContext`, `IntelligenceEngine`, `IntelligenceFinding`, the engine registry, the Bible compatibility adapter, the Music adapter (Phase 2.1, extended with acoustic fusion in Phase 2.2), the Sermon adapter (Phase 2.3), the cross-domain correlation rule engine (built under an earlier internal "Phase 2.4" label - see the roadmap note below) - see [`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md), and the Service Intelligence adapter, this repository's authoritative Phase 2.4 - see [`docs/service-intelligence.md`](service-intelligence.md) |
+| `core/intelligence`     | The shared intelligence architecture (Phase 2.0) - `IntelligenceContext`, `IntelligenceEngine`, `IntelligenceFinding`, the engine registry, the Bible compatibility adapter, the Music adapter (Phase 2.1, extended with acoustic fusion in Phase 2.2), the Sermon adapter (built under an earlier internal "Phase 2.3" label, extended in place as this repository's authoritative Phase 2.6 - see [`docs/sermon-intelligence.md`](sermon-intelligence.md)), the cross-domain correlation rule engine (built under an earlier internal "Phase 2.4" label - see the roadmap note below) - see [`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md), and the Service Intelligence adapter, this repository's authoritative Phase 2.4 - see [`docs/service-intelligence.md`](service-intelligence.md) |
 | `core/music`            | Song/lyric domain model (`Song`, `SongSection`, `LyricLine`), `MusicProvider`, deterministic title/alias/number/lyric matching (Phase 2.1); `AcousticMusicRecognizer` trait, audio segmentation, signal-quality gate, evidence fusion (Phase 2.2) |
 | `core/service`          | `ServiceSession` lifecycle, `AudioEngine` capture contract        |
 | `core/ai`               | `SpeechEngine` transcription contract, `Suggestion`                |
 | `core/presentation`     | `PresentationItem` - *what* is shown, not how it's rendered       |
 | `core/search`           | `SearchEngine` - a single source-agnostic query contract          |
 | `core/confidence`       | `ConfidenceResult` - shared by every domain that produces an uncertain, AI-derived result |
-| `core/sermon`           | Sermon taxonomy, deterministic phrase-anchored structural/theme detection, sermon-state inference (built under an earlier internal "Phase 2.3" label - see the roadmap note below); its `foundation` submodule: the Sermon entity/lifecycle/section/speaker/segment model, this repository's authoritative Phase 2.5 - see [`docs/sermon-foundation.md`](sermon-foundation.md) |
+| `core/sermon`           | Sermon taxonomy, deterministic phrase-anchored structural/theme detection, sermon-state inference (built under an earlier internal "Phase 2.3" label, extended in place under this repository's authoritative Phase 2.6 with Takeaway/FoodForThought detection, a logistics-question filter, and a state->Phase-2.5-section candidate mapping); its `foundation` submodule: the Sermon entity/lifecycle/section/speaker/segment model, this repository's authoritative Phase 2.5 - see [`docs/sermon-foundation.md`](sermon-foundation.md) and [`docs/sermon-intelligence.md`](sermon-intelligence.md) |
 
 > **Roadmap note.** This repository's authoritative Phase 2 roadmap is:
 > 2.0 Intelligence Architecture -> 2.1 Unified Intelligence Event/Context
 > Layer -> 2.2 Music Content Foundation -> 2.3 Music Intelligence -> **2.4
-> Service Intelligence** -> **2.5 Sermon Intelligence Foundation** -> 2.6
-> Sermon Intelligence -> 2.7 Content Intelligence -> **2.8 Cross-Domain
-> Intelligence** -> 2.9 Unified Operator Intelligence Workspace -> 2.10
-> Full Phase 2 Validation. The cross-domain correlation rule engine
-> referenced above, and `core/sermon`'s own semantic detection modules
-> (`detection`/`state`/`structure`/`taxonomy`/`theme`), were both built
-> under earlier, internal phase labels ("Phase 2.4" and "Phase 2.3"
+> Service Intelligence** -> **2.5 Sermon Intelligence Foundation** ->
+> **2.6 Sermon Intelligence** -> 2.7 Content Intelligence -> **2.8
+> Cross-Domain Intelligence** -> 2.9 Unified Operator Intelligence
+> Workspace -> 2.10 Full Phase 2 Validation. The cross-domain correlation
+> rule engine referenced above, and `core/sermon`'s own semantic detection
+> modules (`detection`/`state`/`structure`/`taxonomy`/`theme`), were both
+> built under earlier, internal phase labels ("Phase 2.4" and "Phase 2.3"
 > respectively) before this roadmap was adopted; those labels are
-> historical artifacts and are not rewritten, and the code/docs they
-> produced are unchanged. The cross-domain engine is reserved for formal
-> validation under the roadmap's actual Phase 2.8; the semantic sermon
-> detection is understood as Phase 2.6-equivalent, with the roadmap's
-> actual Phase 2.5 being the separate `foundation` submodule referenced
-> above.
+> historical artifacts and are not rewritten. The cross-domain engine is
+> reserved for formal validation under the roadmap's actual Phase 2.8; the
+> semantic sermon detection modules were subsequently extended in place as
+> the roadmap's actual Phase 2.6 (see [`docs/sermon-intelligence.md`](sermon-intelligence.md)),
+> with the roadmap's actual Phase 2.5 being the separate `foundation`
+> submodule referenced above.
 
 `core/confidence` is the one crate every other domain may depend on; the
 rest do not depend on each other except through two documented

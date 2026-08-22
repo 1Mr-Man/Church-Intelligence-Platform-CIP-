@@ -317,6 +317,7 @@ describe("domain contracts", () => {
       confidence,
       summary: "Active Scripture Context: ROM 8",
       transcriptSegmentIds: ["33333333-3333-3333-3333-333333333333"],
+      sermonId: null,
       evidence: [{ kind: "transcript", segmentIds: ["33333333-3333-3333-3333-333333333333"], excerpt: "Romans chapter eight" }],
       provenance: { contentId: "bible:KJV", note: null },
       engineId: "bible",
@@ -405,6 +406,7 @@ describe("domain contracts", () => {
       confidence: explicitTitle,
       summary: "Exact title match",
       transcriptSegmentIds: ["33333333-3333-3333-3333-333333333333"],
+      sermonId: null,
       evidence: [
         { kind: "transcript", segmentIds: ["33333333-3333-3333-3333-333333333333"], excerpt: "Amazing Grace" },
         { kind: "context", description: "song_id:h1" },
@@ -518,6 +520,7 @@ describe("domain contracts", () => {
       confidence: { score: 0.85, level: "high", source: "model", reason: null },
       summary: "Acoustic match (local_model)",
       transcriptSegmentIds: [],
+      sermonId: null,
       evidence: [
         {
           kind: "acoustic",
@@ -543,9 +546,10 @@ describe("domain contracts", () => {
     });
   });
 
-  // --- Phase 2.3: sermon intelligence ---------------------------------------
+  // --- Phase 2.6 (per the authoritative Phase 2 roadmap; built under this
+  // repository's earlier internal "Phase 2.3" label): sermon intelligence -
 
-  it("constructs a Sermon IntelligenceFinding distinguishing an Observed main point from an Inferred theme", () => {
+  it("constructs a Sermon IntelligenceFinding distinguishing an Observed main point from an Inferred theme, carrying its sermonId", () => {
     const point: IntelligenceFinding = {
       id: "99999999-9999-9999-9999-999999999999",
       serviceId: "22222222-2222-2222-2222-222222222222",
@@ -557,6 +561,7 @@ describe("domain contracts", () => {
       confidence: { score: 0.9, level: "high", source: "heuristic", reason: "explicit main-point trigger phrase matched" },
       summary: "Main Point: My first point is that faith comes by hearing.",
       transcriptSegmentIds: ["11111111-1111-1111-1111-111111111111"],
+      sermonId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
       evidence: [
         {
           kind: "transcript",
@@ -578,9 +583,10 @@ describe("domain contracts", () => {
 
     expect(point.assertionLevel).toBe("observed");
     expect(theme.assertionLevel).toBe("inferred");
-    // Never Generated - the core epistemic discipline Phase 2.3 must
+    // Never Generated - the core epistemic discipline this domain must
     // honor (spec section 7).
     expect([point, theme].every((f) => f.assertionLevel !== "generated")).toBe(true);
+    expect(point.sermonId).toBe("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
   });
 
   it("constructs a SermonPoint that never carries a rewritten earlier point (Phase 2.3)", () => {
@@ -674,6 +680,7 @@ describe("domain contracts", () => {
       confidence,
       summary: "Service phase changed #1: UNKNOWN -> PRAYER",
       transcriptSegmentIds: ["33333333-3333-3333-3333-333333333333"],
+      sermonId: null,
       evidence: [
         {
           kind: "transcript",

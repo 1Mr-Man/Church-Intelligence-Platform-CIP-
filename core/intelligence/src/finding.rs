@@ -41,6 +41,14 @@ pub struct IntelligenceFinding {
     /// support for multiple, since a finding can depend on more than one
     /// segment (Phase 2.0 spec section 17).
     pub transcript_segment_ids: Vec<Uuid>,
+    /// The `Sermon` (Phase 2.5 foundation) this finding was produced while
+    /// active, if any - `None` both when no sermon is active and for every
+    /// domain besides Sermon, which never has one to attach (Phase 2.6
+    /// spec section 58, "Phase 2.8 handoff": correlation needs a stable
+    /// sermon id on every sermon-domain finding). Never guessed - set only
+    /// from `IntelligenceContext::active_sermon`, exactly the same
+    /// "unknown stays unknown" discipline `provenance` already follows.
+    pub sermon_id: Option<Uuid>,
     pub evidence: Vec<EvidenceSource>,
     pub provenance: IntelligenceProvenance,
     pub engine_id: String,
@@ -72,6 +80,7 @@ impl IntelligenceFinding {
             confidence,
             summary: summary.into(),
             transcript_segment_ids: Vec::new(),
+            sermon_id: None,
             evidence: Vec::new(),
             provenance: IntelligenceProvenance::unknown(),
             engine_id: engine_id.into(),
@@ -82,6 +91,16 @@ impl IntelligenceFinding {
 
     pub fn with_transcript_segments(mut self, ids: Vec<Uuid>) -> Self {
         self.transcript_segment_ids = ids;
+        self
+    }
+
+    /// Attach the active `Sermon`'s id (Phase 2.5 foundation) this finding
+    /// was produced under - additive, exactly like `with_evidence`/
+    /// `with_provenance`; never a required constructor argument, so every
+    /// non-Sermon engine's existing `IntelligenceFinding::new(...)` call
+    /// remains valid, unmodified source.
+    pub fn with_sermon_id(mut self, sermon_id: Uuid) -> Self {
+        self.sermon_id = Some(sermon_id);
         self
     }
 
@@ -279,6 +298,25 @@ mod tests {
     }
 
     #[test]
+    fn sermon_id_is_none_until_explicitly_attached() {
+        let finding = IntelligenceFinding::new(
+            Uuid::new_v4(),
+            IntelligenceDomain::Sermon,
+            FindingKind::Sermon,
+            AssertionLevel::Observed,
+            confidence(),
+            "Main Point: faith comes by hearing",
+            "sermon-core",
+            "0.1.0",
+        );
+        assert_eq!(finding.sermon_id, None);
+
+        let sermon_id = Uuid::new_v4();
+        let with_sermon = finding.with_sermon_id(sermon_id);
+        assert_eq!(with_sermon.sermon_id, Some(sermon_id));
+    }
+
+    #[test]
     fn finding_serializes_with_camel_case_fields() {
         let finding = IntelligenceFinding::new(
             Uuid::new_v4(),
@@ -294,5 +332,10 @@ mod tests {
         assert!(json.get("assertionLevel").is_some());
         assert!(json.get("engineVersion").is_some());
         assert!(json.get("serviceId").is_some());
+        assert!(
+            json.get("sermonId").is_some(),
+            "present as null, not omitted"
+        );
+        assert!(json["sermonId"].is_null());
     }
 }

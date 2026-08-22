@@ -43,6 +43,39 @@ function referenceDisplay(ref: ScriptureReference): string {
   return `${ref.book} ${ref.chapter}:${ref.verseStart}`;
 }
 
+/** Derives a short category label from a Sermon Intelligence finding's
+ * summary prefix (Phase 2.6) - purely a display convenience; the summary
+ * itself, not this label, remains the source of truth. Falls back to
+ * "Structural" for the Sermon Foundation's own operator-action findings
+ * and any prefix not explicitly listed here, rather than guessing. */
+function sermonFindingCategory(summary: string): string {
+  const prefixes: [string, string][] = [
+    ["Theme:", "Theme"],
+    ["Main Point:", "Main Point"],
+    ["Sub-Point:", "Supporting Point"],
+    ["Supporting Scripture:", "Scripture"],
+    ["Scripture Quotation:", "Scripture"],
+    ["Definition:", "Definition"],
+    ["Key Statement:", "Key Statement"],
+    ["Declaration:", "Declaration"],
+    ["Question:", "Question"],
+    ["Illustration:", "Illustration"],
+    ["Story:", "Illustration"],
+    ["Example:", "Illustration"],
+    ["Application:", "Application"],
+    ["Prayer Point:", "Prayer"],
+    ["Summary:", "Summary"],
+    ["Reflection:", "Reflection"],
+    ["Food for Thought:", "Food for Thought"],
+    ["Takeaway:", "Takeaway"],
+    ["Possible Conclusion:", "Conclusion"],
+    ["Transition:", "Structural"],
+    ["Structural Transition (section):", "Structural"],
+  ];
+  const match = prefixes.find(([prefix]) => summary.startsWith(prefix));
+  return match ? match[1] : "Structural";
+}
+
 /**
  * Live Church Brain - the operator workspace (Phase 1.3). Deliberately
  * keeps CURRENT (active context / most recent reference) distinct from
@@ -1517,7 +1550,7 @@ export function LiveChurchBrain() {
                   </span>
                 </div>
                 <p className="live-brain__hint">
-                  {finding.assertionLevel.toUpperCase()}
+                  {sermonFindingCategory(finding.summary)} &middot; {finding.assertionLevel.toUpperCase()}
                   {finding.transcriptSegmentIds.length > 0 && (
                     <> &middot; source segment(s): {finding.transcriptSegmentIds.length}</>
                   )}

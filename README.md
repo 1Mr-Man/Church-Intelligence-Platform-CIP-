@@ -15,25 +15,31 @@ Foundation & Song Recognition Architecture**, **Phase 2.2 - Acoustic
 Music Recognition & Live Song Detection**, **Phase 2.3 - Sermon
 Intelligence & Live Message Understanding**, **Phase 2.4 -
 Cross-Domain Intelligence & Correlation**, **Phase 2.4 - Service
-Intelligence**, and **Phase 2.5 - Sermon Intelligence Foundation**.
+Intelligence**, **Phase 2.5 - Sermon Intelligence Foundation**, and
+**Phase 2.6 - Sermon Intelligence**.
 
 > **Roadmap note.** This repository's authoritative Phase 2 roadmap is:
 > 2.0 Intelligence Architecture -> 2.1 Unified Intelligence Event/Context
 > Layer -> 2.2 Music Content Foundation -> 2.3 Music Intelligence -> **2.4
-> Service Intelligence** -> **2.5 Sermon Intelligence Foundation** -> 2.6
-> Sermon Intelligence -> 2.7 Content Intelligence -> **2.8 Cross-Domain
-> Intelligence** -> 2.9 Unified Operator Intelligence Workspace -> 2.10
-> Full Phase 2 Validation. The "Phase 2.4 - Cross-Domain Intelligence &
-> Correlation" work above, and the "Phase 2.3 - Sermon Intelligence & Live
-> Message Understanding" work (deterministic semantic detection - themes,
-> main points, illustrations - in `core/sermon`/`sermon_adapter.rs`/
-> `sermon.rs`), were both built and committed under earlier, internal
-> phase labels before this roadmap was adopted; those labels are
-> historical artifacts and are not rewritten - the code and docs they
-> produced are unchanged. The cross-domain work is reserved for formal
-> validation under the roadmap's actual Phase 2.8; the semantic sermon
-> work is understood as Phase 2.6-equivalent, with **Phase 2.5** under
-> this roadmap being the separate, prerequisite entity/lifecycle
+> Service Intelligence** -> **2.5 Sermon Intelligence Foundation** ->
+> **2.6 Sermon Intelligence** -> 2.7 Content Intelligence -> **2.8
+> Cross-Domain Intelligence** -> 2.9 Unified Operator Intelligence
+> Workspace -> 2.10 Full Phase 2 Validation. The "Phase 2.4 - Cross-Domain
+> Intelligence & Correlation" work above, and the "Phase 2.3 - Sermon
+> Intelligence & Live Message Understanding" work (deterministic semantic
+> detection - themes, main points, illustrations - in `core/sermon`/
+> `sermon_adapter.rs`/`sermon.rs`), were both built and committed under
+> earlier, internal phase labels before this roadmap was adopted; those
+> labels are historical artifacts and are not rewritten. The cross-domain
+> work is reserved for formal validation under the roadmap's actual Phase
+> 2.8. The semantic sermon work, understood as Phase 2.6-equivalent, was
+> subsequently extended *in place* under the real Phase 2.6 label - adding
+> Takeaway/FoodForThought detection, a logistics-question false-positive
+> fix, and Phase 2.5 Sermon Foundation awareness (`sermonId`, section
+> evidence, speaker attribution, a read-only candidate-section suggestion)
+> - rather than being duplicated into a second engine; see
+> [`docs/sermon-intelligence.md`](docs/sermon-intelligence.md). **Phase
+> 2.5** under this roadmap is the separate, prerequisite entity/lifecycle
 > foundation described in
 > [`docs/sermon-foundation.md`](docs/sermon-foundation.md). See also
 > [`docs/service-intelligence.md`](docs/service-intelligence.md) for the
@@ -299,7 +305,7 @@ core/                  Domain logic and contracts, one crate per domain
   content/              ContentRegistry - what local content exists, and its provenance/licensing
   intelligence/          Shared intelligence architecture (Phase 2.0) - IntelligenceContext/Engine/Finding, the Bible compatibility adapter, the Music adapter (Phase 2.1, extended with acoustic fusion in Phase 2.2), the Sermon adapter (Phase 2.3), the cross-domain correlation rule engine (Phase 2.4)
   music/                 Song/lyric domain model, MusicProvider trait, deterministic title/alias/number/lyric matcher (Phase 2.1); AcousticMusicRecognizer trait, segmentation, signal-quality gate, evidence fusion (Phase 2.2)
-  sermon/                Deterministic sermon taxonomy, structural/theme detection, sermon-state inference (Phase 2.3); `foundation/` submodule: Sermon entity/lifecycle/section/speaker/segment model (Phase 2.5, per the authoritative Phase 2 roadmap)
+  sermon/                Deterministic sermon taxonomy, structural/theme detection, sermon-state inference - extended under Phase 2.6 with Takeaway/FoodForThought and a state->section candidate mapping; `foundation/` submodule: Sermon entity/lifecycle/section/speaker/segment model (Phase 2.5, per the authoritative Phase 2 roadmap)
   service/              ServiceSession + AudioEngine
   presentation/         PresentationItem
   search/               SearchEngine

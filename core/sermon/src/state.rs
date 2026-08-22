@@ -6,6 +6,7 @@
 //! here, no illegal-transition guard, and nothing that could ever "lock"
 //! a service into a phase it has already moved past.
 
+use crate::foundation::section::SermonSectionKind;
 use crate::taxonomy::SermonElementKind;
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +47,7 @@ fn state_for_kind(kind: SermonElementKind) -> SermonState {
         SermonElementKind::Application => SermonState::Application,
         SermonElementKind::Conclusion | SermonElementKind::Summary => SermonState::Conclusion,
         SermonElementKind::PrayerPoint => SermonState::Prayer,
+        SermonElementKind::Takeaway => SermonState::Conclusion,
         SermonElementKind::Theme
         | SermonElementKind::ScriptureReference
         | SermonElementKind::ScriptureQuotation
@@ -54,7 +56,31 @@ fn state_for_kind(kind: SermonElementKind) -> SermonState {
         | SermonElementKind::Declaration
         | SermonElementKind::Question
         | SermonElementKind::Reflection
+        | SermonElementKind::FoodForThought
         | SermonElementKind::Transition => SermonState::Teaching,
+    }
+}
+
+/// A conservative, read-only candidate mapping from the internal
+/// [`SermonState`] classification onto the Phase 2.5 Sermon Foundation's
+/// own [`SermonSectionKind`] taxonomy (Phase 2.6 spec section 14,
+/// "STRUCTURAL TRANSITION DETECTION": "Reuse `SermonSectionKind` from
+/// Phase 2.5"). Deliberately partial - `SermonState::Application` and
+/// `SermonState::Unknown` have no honest single-section equivalent in the
+/// foundation's closed taxonomy, so they map to `None` rather than
+/// guessing one. This function only ever *suggests* a candidate section;
+/// nothing here mutates persisted `SermonSection` state (that remains the
+/// Sermon Foundation/operator's exclusive responsibility, per the same
+/// spec section: "The operator/foundation layer remains responsible for
+/// durable section state").
+pub fn candidate_section_for_state(state: SermonState) -> Option<SermonSectionKind> {
+    match state {
+        SermonState::Introduction => Some(SermonSectionKind::Introduction),
+        SermonState::Teaching | SermonState::MainPoint => Some(SermonSectionKind::MainMessage),
+        SermonState::Illustration => Some(SermonSectionKind::Illustration),
+        SermonState::Conclusion => Some(SermonSectionKind::Conclusion),
+        SermonState::Prayer => Some(SermonSectionKind::Prayer),
+        SermonState::Application | SermonState::Unknown => None,
     }
 }
 
@@ -114,6 +140,58 @@ mod tests {
             infer_state(&[SermonElementKind::PrayerPoint], true),
             SermonState::Prayer
         );
+    }
+
+    #[test]
+    fn a_takeaway_detection_moves_state_to_conclusion() {
+        assert_eq!(
+            infer_state(&[SermonElementKind::Takeaway], true),
+            SermonState::Conclusion
+        );
+    }
+
+    #[test]
+    fn a_food_for_thought_detection_moves_state_to_teaching() {
+        assert_eq!(
+            infer_state(&[SermonElementKind::FoodForThought], true),
+            SermonState::Teaching
+        );
+    }
+
+    // --- candidate_section_for_state (Phase 2.6) -----------------------
+
+    #[test]
+    fn every_mapped_state_has_a_plausible_foundation_section_candidate() {
+        assert_eq!(
+            candidate_section_for_state(SermonState::Introduction),
+            Some(SermonSectionKind::Introduction)
+        );
+        assert_eq!(
+            candidate_section_for_state(SermonState::Teaching),
+            Some(SermonSectionKind::MainMessage)
+        );
+        assert_eq!(
+            candidate_section_for_state(SermonState::MainPoint),
+            Some(SermonSectionKind::MainMessage)
+        );
+        assert_eq!(
+            candidate_section_for_state(SermonState::Illustration),
+            Some(SermonSectionKind::Illustration)
+        );
+        assert_eq!(
+            candidate_section_for_state(SermonState::Conclusion),
+            Some(SermonSectionKind::Conclusion)
+        );
+        assert_eq!(
+            candidate_section_for_state(SermonState::Prayer),
+            Some(SermonSectionKind::Prayer)
+        );
+    }
+
+    #[test]
+    fn states_with_no_honest_section_equivalent_map_to_none() {
+        assert_eq!(candidate_section_for_state(SermonState::Application), None);
+        assert_eq!(candidate_section_for_state(SermonState::Unknown), None);
     }
 
     #[test]

@@ -207,4 +207,74 @@ mod tests {
         let queued = analyze_and_queue(&engine, &input, &context, &mut findings).unwrap();
         assert!(queued.is_empty());
     }
+
+    // --- Phase 2.6: sermon foundation context + no-presentation-side-effect proof --
+
+    #[test]
+    fn analyze_and_queue_carries_sermon_context_and_never_creates_a_presentation_item() {
+        use cip_core_intelligence::ContextBounds;
+        use cip_core_sermon::foundation::{
+            SectionOrigin, Sermon, SermonSection, SermonSectionKind,
+        };
+        use cip_core_service::ServiceSession;
+        use cip_database::{open_in_memory, run_migrations};
+
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+
+        let service = ServiceSession::start("Sunday Morning");
+        crate::persistence::persist_service(&conn, &service).unwrap();
+        let sermon = Sermon::start(service.id, Some("Faith".to_string()));
+        crate::persistence::persist_sermon(&conn, &sermon).unwrap();
+        let section = SermonSection::open(
+            sermon.id,
+            SermonSectionKind::MainMessage,
+            SectionOrigin::OperatorAssigned,
+            None,
+        );
+        crate::persistence::persist_sermon_section(&conn, &section).unwrap();
+
+        let before = crate::persistence::list_presentation_items(&conn, service.id, None).unwrap();
+        assert!(before.is_empty());
+
+        let engine = SermonIntelligenceEngine::new();
+        let seg = segment("My first point is that faith comes by hearing.");
+        let context = IntelligenceContext::build(
+            service.id,
+            None,
+            Some(seg.clone()),
+            vec![seg.clone()],
+            None,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            ContextBounds::default(),
+        )
+        .with_sermon_context(Some(sermon.clone()), Some(section), Vec::new());
+        let input = IntelligenceInput::new(service.id, seg);
+        let mut findings = FindingQueue::new();
+        let queued = analyze_and_queue(&engine, &input, &context, &mut findings).unwrap();
+
+        let point = queued
+            .iter()
+            .find(|f| f.summary.starts_with("Main Point:"))
+            .expect("expected a main point finding");
+        assert_eq!(
+            point.sermon_id,
+            Some(sermon.id),
+            "the Phase 2.5 foundation context must attach the active sermon's id"
+        );
+
+        findings.accept(point.id).unwrap();
+        assert_eq!(
+            findings.get(point.id).unwrap().status,
+            cip_core_intelligence::FindingStatus::Accepted
+        );
+
+        let after = crate::persistence::list_presentation_items(&conn, service.id, None).unwrap();
+        assert!(
+            after.is_empty(),
+            "accepting a sermon finding must never create a PresentationItem"
+        );
+    }
 }
