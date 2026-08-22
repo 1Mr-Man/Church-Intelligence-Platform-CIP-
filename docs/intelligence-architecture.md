@@ -8,8 +8,16 @@ already built - see section 24. Phase 2.1 added the first real *second*
 engine, Music - see section 25 and
 [`docs/music-intelligence.md`](music-intelligence.md). Phase 2.3 added a
 third, Sermon - see section 26 and
-[`docs/sermon-intelligence.md`](sermon-intelligence.md). Content and
-Cross-Domain intelligence remain **PLANNED / NOT IMPLEMENTED**.
+[`docs/sermon-intelligence.md`](sermon-intelligence.md). A fourth engine,
+Service Intelligence, was added under this repository's authoritative
+Phase 2 roadmap's actual Phase 2.4 - see
+[`docs/service-intelligence.md`](service-intelligence.md). Content
+Intelligence and the formal, roadmap Phase 2.8 Cross-Domain Intelligence
+validation remain **PLANNED / NOT IMPLEMENTED**; an earlier cross-domain
+correlation rule engine was already built under an internal label that
+also read "Phase 2.4" (see [`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md))
+and is reserved for that future Phase 2.8 validation - that historical
+label is not rewritten.
 
 ## 1. Phase 2 vision
 

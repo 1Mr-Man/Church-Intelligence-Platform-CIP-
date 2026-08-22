@@ -172,6 +172,34 @@ export function onCrossDomainCorrelationDismissed(
   return listenSafe<IntelligenceCorrelation>(AppEvents.CrossDomainCorrelationDismissed, handler);
 }
 
+/** A phase transition was detected from transcript evidence (Phase 2.4,
+ * Service Intelligence per the authoritative Phase 2 roadmap). */
+export function onServicePhaseChanged(
+  handler: (finding: IntelligenceFinding) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<IntelligenceFinding>(AppEvents.ServicePhaseChanged, handler);
+}
+
+/** The operator explicitly marked or corrected the current phase. */
+export function onServicePhaseCorrected(
+  handler: (finding: IntelligenceFinding) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<IntelligenceFinding>(AppEvents.ServicePhaseCorrected, handler);
+}
+
+/** An unexpected (backward) phase transition was flagged for review. */
+export function onServiceAnomalyDetected(
+  handler: (finding: IntelligenceFinding) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<IntelligenceFinding>(AppEvents.ServiceAnomalyDetected, handler);
+}
+
+export function onServiceAnomalyAcknowledged(
+  handler: (finding: IntelligenceFinding) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<IntelligenceFinding>(AppEvents.ServiceAnomalyAcknowledged, handler);
+}
+
 /** Unused by `ProcessedSegment` directly but kept for reference/parity -
  * `ProcessedSegment` itself is only ever returned from
  * `process_test_transcript`'s command response, never emitted as an

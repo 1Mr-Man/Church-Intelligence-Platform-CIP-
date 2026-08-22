@@ -28,7 +28,7 @@ use cip_core_content::{ContentMetadata, ContentRegistryError, ContentStatus, Con
 use cip_core_intelligence::{
     ContextBounds, CrossDomainCorrelationEngine, EngineCapability, IntelligenceContext,
     IntelligenceCorrelation, IntelligenceDomain, IntelligenceFinding, IntelligenceInput,
-    QueueAddOutcome,
+    QueueAddOutcome, ServicePhase,
 };
 use cip_core_music::{search_songs, MatchThresholds, MusicQuery, SongRecognitionCandidate};
 use cip_core_presentation::{PresentationContent, PresentationItem, PresentationItemStatus};
@@ -806,6 +806,14 @@ fn handle_audio_chunk(app: &AppHandle, service_id: Uuid, chunk: AudioChunk) {
 
         match processed {
             Ok(processed) => {
+                // Phase 2.4: the one real signal `service::transcript_freshness`
+                // reads - a genuine final segment from the live audio/
+                // speech pipeline, never the manual/test-mode harnesses
+                // (see `AppState::last_transcript_at`'s own docs).
+                *state
+                    .last_transcript_at
+                    .lock()
+                    .expect("last_transcript_at mutex poisoned") = Some(chrono::Utc::now());
                 let _ = emit(app, AppEvent::TranscriptUpdated, segment_for_event);
                 let db = state.db.lock().expect("db connection poisoned");
                 emit_processed_segment_events(app, &db, service_id, &processed);
@@ -2678,6 +2686,326 @@ pub fn dismiss_cross_domain_correlation(
         AppEvent::CrossDomainCorrelationDismissed,
         updated.clone(),
     );
+    Ok(updated)
+}
+
+// --- service intelligence (Phase 2.4, per the authoritative Phase 2 roadmap) --
+//
+// Distinct from the cross-domain correlation work above (an earlier
+// prototype, developed under an internal label that also read "Phase
+// 2.4" - the authoritative roadmap this section follows reserves that
+// functionality for a future formal Phase 2.8 integration; nothing in
+// it was modified to make room for this section). Deliberately manual-
+// command-only for `analyze_service_transcript`, mirroring Music's/
+// Sermon's/the Bible bridge's own established pattern - nothing here is
+// wired into `pipeline.rs::handle_final_transcript`.
+
+/// The current service-phase state plus a read-only transcript-freshness
+/// signal - the shape `get_service_intelligence_state` returns. Never a
+/// second `LiveStatus`: audio/speech/database health still comes from
+/// `get_live_status` alone: this struct only adds what that one doesn't
+/// already have (the inferred service phase, and whether the transcript
+/// itself has gone quiet).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceIntelligenceSummary {
+    pub phase: ServicePhase,
+    pub phase_started_at: chrono::DateTime<chrono::Utc>,
+    pub previous_phase: Option<ServicePhase>,
+    pub transition_count: u32,
+    pub transcript_freshness: crate::service::TranscriptFreshness,
+}
+
+/// The deterministic service-phase-analysis harness, exposed over IPC -
+/// the Service Intelligence counterpart to `analyze_sermon_transcript`.
+/// Persists `text` as an ordinary transcript segment, builds a real
+/// `IntelligenceContext` (via `build_music_context`, generic despite its
+/// name - see that function's own docs), and calls `AppState.service_engine`
+/// directly - the same accumulating-state instance every call goes
+/// through, never the separate diagnostic-only copy in
+/// `intelligence_registry` (see `service.rs`'s module docs). Findings are
+/// queued in `AppState.intelligence_findings`; this command never
+/// prepares or projects a presentation item.
+#[tauri::command]
+pub fn analyze_service_transcript(
+    text: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<IntelligenceFinding>, AppError> {
+    let text = require_non_empty(&text, "text").map_err(log_and_return)?;
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let sequence = state.transcript_sequence.fetch_add(1, Ordering::SeqCst);
+
+    let segment = TranscriptSegment {
+        id: Uuid::new_v4(),
+        sequence,
+        text,
+        is_final: true,
+        confidence: ConfidenceResult::new(
+            1.0,
+            ConfidenceSource::Human,
+            Some("manually entered test transcript for service analysis".to_string()),
+        ),
+        start_ms: 0,
+        end_ms: 0,
+        language: Some("en".to_string()),
+        speaker_id: None,
+    };
+
+    {
+        let db = state.db.lock().expect("db connection poisoned");
+        persistence::persist_transcript_segment(&db, service_id, &segment)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+    }
+    let _ = emit(&app, AppEvent::TranscriptUpdated, segment.clone());
+
+    let context = build_music_context(&state, service_id).map_err(log_and_return)?;
+    let input = IntelligenceInput::new(service_id, segment);
+
+    let queued = {
+        let mut findings = state
+            .intelligence_findings
+            .lock()
+            .expect("intelligence_findings mutex poisoned");
+        crate::service::analyze_and_queue(&state.service_engine, &input, &context, &mut findings)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?
+    };
+
+    let db = state.db.lock().expect("db connection poisoned");
+    for finding in &queued {
+        let event = if crate::service::is_anomaly_finding(finding) {
+            AppEvent::ServiceAnomalyDetected
+        } else {
+            AppEvent::ServicePhaseChanged
+        };
+        record_timeline(
+            &db,
+            Some(service_id),
+            event,
+            LogCategory::App,
+            serde_json::json!({
+                "findingId": finding.id,
+                "summary": &finding.summary,
+                "confidence": finding.confidence.score,
+            }),
+        );
+    }
+    drop(db);
+    for finding in &queued {
+        let event = if crate::service::is_anomaly_finding(finding) {
+            AppEvent::ServiceAnomalyDetected
+        } else {
+            AppEvent::ServicePhaseChanged
+        };
+        let _ = emit(&app, event, finding.clone());
+    }
+
+    Ok(queued)
+}
+
+/// Read-only current phase/transition-count/transcript-freshness snapshot -
+/// safe to poll at any time, including before any service has started
+/// (freshness reports `unknown`, phase reports `unknown`).
+#[tauri::command]
+pub fn get_service_intelligence_state(state: State<'_, AppState>) -> ServiceIntelligenceSummary {
+    let snapshot = state.service_engine.snapshot();
+    let last_transcript_at = *state
+        .last_transcript_at
+        .lock()
+        .expect("last_transcript_at mutex poisoned");
+    let transcript_freshness =
+        crate::service::transcript_freshness(last_transcript_at, chrono::Utc::now());
+    ServiceIntelligenceSummary {
+        phase: snapshot.phase,
+        phase_started_at: snapshot.phase_started_at,
+        previous_phase: snapshot.previous_phase,
+        transition_count: snapshot.transition_count,
+        transcript_freshness,
+    }
+}
+
+/// Every recorded phase transition for the active service, oldest first -
+/// a history view (like `list_timeline`), not an operator-review queue:
+/// includes transitions an operator has already reviewed/accepted, not
+/// just pending ones.
+#[tauri::command]
+pub fn list_service_transitions(
+    state: State<'_, AppState>,
+) -> Result<Vec<IntelligenceFinding>, AppError> {
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let findings = state
+        .intelligence_findings
+        .lock()
+        .expect("intelligence_findings mutex poisoned");
+    Ok(findings
+        .all()
+        .into_iter()
+        .filter(|f| f.service_id == service_id && crate::service::is_transition_finding(f))
+        .cloned()
+        .collect())
+}
+
+/// Anomaly findings still awaiting an operator decision - mirrors
+/// `list_music_findings`/`list_sermon_findings`'s "operator review queue"
+/// shape, filtered to only the `"Anomaly:"`-prefixed subset of Service
+/// findings (transitions themselves are never anomalies - see
+/// `list_service_transitions`).
+#[tauri::command]
+pub fn list_service_anomalies(
+    state: State<'_, AppState>,
+) -> Result<Vec<IntelligenceFinding>, AppError> {
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let findings = state
+        .intelligence_findings
+        .lock()
+        .expect("intelligence_findings mutex poisoned");
+    Ok(findings
+        .pending()
+        .into_iter()
+        .filter(|f| f.service_id == service_id && crate::service::is_anomaly_finding(f))
+        .cloned()
+        .collect())
+}
+
+/// Explicit operator declaration of the current service phase (spec
+/// section 19) - for when nothing has been detected yet, or the operator
+/// wants to proactively state the phase. Transitions immediately, bypasses
+/// debounce entirely, and is always `Observed`. Never supersedes/rejects
+/// any other pending finding - see `correct_service_phase` for that.
+#[tauri::command]
+pub fn mark_service_phase(
+    phase: String,
+    note: Option<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<IntelligenceFinding, AppError> {
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let parsed_phase = crate::service::parse_service_phase(&phase).ok_or_else(|| {
+        log_and_return(AppError::InvalidInput(format!(
+            "unknown service phase: {phase}"
+        )))
+    })?;
+
+    let finding = {
+        let mut findings = state
+            .intelligence_findings
+            .lock()
+            .expect("intelligence_findings mutex poisoned");
+        crate::service::apply_operator_action(
+            &state.service_engine,
+            service_id,
+            parsed_phase,
+            note.as_deref(),
+            false,
+            &mut findings,
+        )
+    };
+    let db = state.db.lock().expect("db connection poisoned");
+    record_timeline(
+        &db,
+        Some(service_id),
+        AppEvent::ServicePhaseCorrected,
+        LogCategory::App,
+        serde_json::json!({ "findingId": finding.id, "summary": &finding.summary }),
+    );
+    drop(db);
+    let _ = emit(&app, AppEvent::ServicePhaseCorrected, finding.clone());
+    Ok(finding)
+}
+
+/// Explicit operator correction of an incorrect system-detected phase
+/// (spec section 20) - like `mark_service_phase`, but additionally
+/// rejects any other still-pending transition finding for this service:
+/// the operator's correction supersedes whatever the system last
+/// inferred. Never rewrites or deletes that earlier finding - `reject`
+/// only changes its own `status`, so it remains fully auditable via
+/// `list_service_transitions` (which includes rejected transitions too).
+#[tauri::command]
+pub fn correct_service_phase(
+    phase: String,
+    note: Option<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<IntelligenceFinding, AppError> {
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let parsed_phase = crate::service::parse_service_phase(&phase).ok_or_else(|| {
+        log_and_return(AppError::InvalidInput(format!(
+            "unknown service phase: {phase}"
+        )))
+    })?;
+
+    let finding = {
+        let mut findings = state
+            .intelligence_findings
+            .lock()
+            .expect("intelligence_findings mutex poisoned");
+        let superseded: Vec<Uuid> = findings
+            .pending()
+            .iter()
+            .filter(|f| f.service_id == service_id && crate::service::is_transition_finding(f))
+            .map(|f| f.id)
+            .collect();
+        for id in superseded {
+            let _ = findings.reject(id);
+        }
+        crate::service::apply_operator_action(
+            &state.service_engine,
+            service_id,
+            parsed_phase,
+            note.as_deref(),
+            true,
+            &mut findings,
+        )
+    };
+    let db = state.db.lock().expect("db connection poisoned");
+    record_timeline(
+        &db,
+        Some(service_id),
+        AppEvent::ServicePhaseCorrected,
+        LogCategory::App,
+        serde_json::json!({ "findingId": finding.id, "summary": &finding.summary }),
+    );
+    drop(db);
+    let _ = emit(&app, AppEvent::ServicePhaseCorrected, finding.clone());
+    Ok(finding)
+}
+
+/// Explicit operator acknowledgment of an anomaly finding - reuses the
+/// ordinary `FindingQueue::accept` lifecycle exactly (spec section 27's
+/// persistence-reuse preference: no bespoke anomaly-tracking system).
+#[tauri::command]
+pub fn acknowledge_service_anomaly(
+    finding_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<IntelligenceFinding, AppError> {
+    let id = parse_uuid(&finding_id).map_err(log_and_return)?;
+    let updated = {
+        let mut findings = state
+            .intelligence_findings
+            .lock()
+            .expect("intelligence_findings mutex poisoned");
+        findings
+            .accept(id)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        findings
+            .get(id)
+            .cloned()
+            .expect("just-accepted finding is still present")
+    };
+    let db = state.db.lock().expect("db connection poisoned");
+    record_timeline(
+        &db,
+        Some(updated.service_id),
+        AppEvent::ServiceAnomalyAcknowledged,
+        LogCategory::App,
+        serde_json::json!({ "findingId": updated.id, "summary": &updated.summary }),
+    );
+    drop(db);
+    let _ = emit(&app, AppEvent::ServiceAnomalyAcknowledged, updated.clone());
     Ok(updated)
 }
 

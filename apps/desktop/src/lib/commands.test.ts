@@ -10,24 +10,31 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acceptMusicFinding,
   acceptSermonFinding,
+  acknowledgeServiceAnomaly,
   analyzeBibleTranscript,
   analyzeCrossDomain,
   analyzeMusicAudio,
   analyzeMusicTranscript,
   analyzeSermonTranscript,
+  analyzeServiceTranscript,
   checkBibleDatasetIntegrity,
   clearCurrentSong,
+  correctServicePhase,
   createManualPresentation,
   dismissCrossDomainCorrelation,
   getAppConfig,
   getIntelligenceCapabilities,
+  getServiceIntelligenceState,
   getSermonState,
   importBibleDataset,
   importMusicDataset,
   listContentRegistry,
   listCrossDomainCorrelations,
   listMusicFindings,
+  listServiceAnomalies,
+  listServiceTransitions,
   listSermonFindings,
+  markServicePhase,
   previewPresentation,
   previewScripture,
   rejectMusicFinding,
@@ -416,6 +423,74 @@ describe("commands.ts Tauri IPC guard", () => {
     await expect(listCrossDomainCorrelations()).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(reviewCrossDomainCorrelation("id")).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(dismissCrossDomainCorrelation("id")).rejects.toBeInstanceOf(TauriUnavailableError);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  // --- service intelligence (Phase 2.4, per the authoritative Phase 2 roadmap) --
+
+  it("analyzeServiceTranscript calls analyze_service_transcript with the raw text", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await analyzeServiceTranscript("Let us pray.");
+
+    expect(invokeMock).toHaveBeenCalledWith("analyze_service_transcript", { text: "Let us pray." });
+  });
+
+  it("getServiceIntelligenceState calls get_service_intelligence_state with no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await getServiceIntelligenceState();
+
+    expect(invokeMock).toHaveBeenCalledWith("get_service_intelligence_state", undefined);
+  });
+
+  it("listServiceTransitions and listServiceAnomalies each call their own distinct command", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await listServiceTransitions();
+    await listServiceAnomalies();
+
+    expect(invokeMock).toHaveBeenCalledWith("list_service_transitions", undefined);
+    expect(invokeMock).toHaveBeenCalledWith("list_service_anomalies", undefined);
+  });
+
+  it("markServicePhase and correctServicePhase pass phase and an explicit null note by default", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await markServicePhase("worship");
+    await correctServicePhase("prayer", "actually still worship");
+
+    expect(invokeMock).toHaveBeenCalledWith("mark_service_phase", { phase: "worship", note: null });
+    expect(invokeMock).toHaveBeenCalledWith("correct_service_phase", {
+      phase: "prayer",
+      note: "actually still worship",
+    });
+  });
+
+  it("acknowledgeServiceAnomaly calls only acknowledge_service_anomaly, never a presentation command", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await acknowledgeServiceAnomaly("finding-1");
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("acknowledge_service_anomaly", { findingId: "finding-1" });
+  });
+
+  it("rejects every service intelligence command outside the Tauri runtime, without calling invoke()", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    await expect(analyzeServiceTranscript("text")).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(getServiceIntelligenceState()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(listServiceTransitions()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(listServiceAnomalies()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(markServicePhase("sermon")).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(correctServicePhase("sermon")).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(acknowledgeServiceAnomaly("id")).rejects.toBeInstanceOf(TauriUnavailableError);
     expect(invokeMock).not.toHaveBeenCalled();
   });
 });

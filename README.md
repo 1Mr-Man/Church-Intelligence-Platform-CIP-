@@ -13,8 +13,24 @@ Full-Service Validation**, **Phase 2.0 - Intelligence Architecture &
 Unified Intelligence Context**, **Phase 2.1 - Music Intelligence
 Foundation & Song Recognition Architecture**, **Phase 2.2 - Acoustic
 Music Recognition & Live Song Detection**, **Phase 2.3 - Sermon
-Intelligence & Live Message Understanding**, and **Phase 2.4 -
-Cross-Domain Intelligence & Correlation**.
+Intelligence & Live Message Understanding**, **Phase 2.4 -
+Cross-Domain Intelligence & Correlation**, and **Phase 2.4 - Service
+Intelligence**.
+
+> **Roadmap note.** This repository's authoritative Phase 2 roadmap is:
+> 2.0 Intelligence Architecture -> 2.1 Unified Intelligence Event/Context
+> Layer -> 2.2 Music Content Foundation -> 2.3 Music Intelligence -> **2.4
+> Service Intelligence** -> 2.5 Sermon Intelligence Foundation -> 2.6
+> Sermon Intelligence -> 2.7 Content Intelligence -> **2.8 Cross-Domain
+> Intelligence** -> 2.9 Unified Operator Intelligence Workspace -> 2.10
+> Full Phase 2 Validation. The "Phase 2.4 - Cross-Domain Intelligence &
+> Correlation" work above was built and committed under an earlier,
+> internal phase label before this roadmap was adopted; that label is a
+> historical artifact and is not rewritten - the code and docs it
+> produced are unchanged and are reserved for formal validation under the
+> roadmap's actual Phase 2.8. See
+> [`docs/service-intelligence.md`](docs/service-intelligence.md) for the
+> Service Intelligence work that is Phase 2.4 under this roadmap.
 
 ## Approved architecture
 

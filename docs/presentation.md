@@ -225,13 +225,27 @@ finding is structurally incapable of creating, activating, or otherwise
 touching a `PresentationItem` - see
 [`docs/music-intelligence.md`](music-intelligence.md#findings-and-the-operator-workflow).
 
-Phase 2.4's `IntelligenceCorrelation`s are held to the same standard:
-`apps/desktop/src-tauri/src/cross_domain.rs` and
-`cip_core_intelligence::CorrelationQueue` have no dependency on
+The cross-domain correlation engine's `IntelligenceCorrelation`s (built
+under an earlier internal "Phase 2.4" label - see the roadmap note below)
+are held to the same standard: `apps/desktop/src-tauri/src/cross_domain.rs`
+and `cip_core_intelligence::CorrelationQueue` have no dependency on
 `cip_core_presentation` at all, so running a cross-domain analysis, or
 reviewing/dismissing a correlation, is structurally incapable of creating,
 activating, or otherwise touching a `PresentationItem` - see
 [`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md).
+Service Intelligence's findings (this repository's authoritative Phase
+2.4 - see [`docs/service-intelligence.md`](service-intelligence.md)) are
+held to the identical standard: `apps/desktop/src-tauri/src/service.rs`
+and `FindingQueue` have no dependency on `cip_core_presentation` either,
+so mark/correct/acknowledge actions can never create or touch a
+`PresentationItem`.
+
+> **Roadmap note.** Under this repository's authoritative Phase 2 roadmap,
+> the cross-domain correlation engine referenced above is reserved for
+> formal validation as Phase 2.8; the roadmap's actual Phase 2.4 is
+> Service Intelligence. The "Phase 2.4" label on the correlation engine is
+> a historical artifact from before this roadmap was adopted and is not
+> rewritten.
 Phase 2.2's acoustic-sourced findings are the exact same
 `IntelligenceFinding`/`FindingQueue` types, so this guarantee extends to
 them automatically - accepting an acoustic finding only ever sets

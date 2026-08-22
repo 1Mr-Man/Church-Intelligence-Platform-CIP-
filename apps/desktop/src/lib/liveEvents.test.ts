@@ -22,6 +22,10 @@ import {
   onSermonStateChanged,
   onSermonStructureUpdated,
   onSermonThemeChanged,
+  onServiceAnomalyAcknowledged,
+  onServiceAnomalyDetected,
+  onServicePhaseChanged,
+  onServicePhaseCorrected,
   onSuggestionCreated,
 } from "./liveEvents";
 
@@ -158,6 +162,32 @@ describe("liveEvents.ts Tauri event-subscription guard", () => {
     isTauriMock.mockReturnValue(false);
 
     const unlisten = await onCrossDomainCorrelationDetected(() => {});
+
+    expect(listenMock).not.toHaveBeenCalled();
+    expect(() => unlisten()).not.toThrow();
+  });
+
+  // --- service intelligence (Phase 2.4, per the authoritative Phase 2 roadmap) --
+
+  it("subscribes to the four distinct service intelligence events", async () => {
+    isTauriMock.mockReturnValue(true);
+    listenMock.mockResolvedValue(() => {});
+
+    await onServicePhaseChanged(() => {});
+    await onServicePhaseCorrected(() => {});
+    await onServiceAnomalyDetected(() => {});
+    await onServiceAnomalyAcknowledged(() => {});
+
+    expect(listenMock).toHaveBeenCalledWith("SERVICE_PHASE_CHANGED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("SERVICE_PHASE_CORRECTED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("SERVICE_ANOMALY_DETECTED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("SERVICE_ANOMALY_ACKNOWLEDGED", expect.any(Function));
+  });
+
+  it("resolves to a no-op unlisten for every service intelligence event outside the Tauri runtime", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    const unlisten = await onServicePhaseChanged(() => {});
 
     expect(listenMock).not.toHaveBeenCalled();
     expect(() => unlisten()).not.toThrow();

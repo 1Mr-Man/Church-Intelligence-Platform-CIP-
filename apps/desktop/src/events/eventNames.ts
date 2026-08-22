@@ -66,6 +66,13 @@ export const AppEvents = {
   CrossDomainCorrelationDetected: "CROSS_DOMAIN_CORRELATION_DETECTED",
   CrossDomainCorrelationReviewed: "CROSS_DOMAIN_CORRELATION_REVIEWED",
   CrossDomainCorrelationDismissed: "CROSS_DOMAIN_CORRELATION_DISMISSED",
+
+  /** Payload is the updated `IntelligenceFinding` (Phase 2.4, Service
+   * Intelligence per the authoritative Phase 2 roadmap). */
+  ServicePhaseChanged: "SERVICE_PHASE_CHANGED",
+  ServicePhaseCorrected: "SERVICE_PHASE_CORRECTED",
+  ServiceAnomalyDetected: "SERVICE_ANOMALY_DETECTED",
+  ServiceAnomalyAcknowledged: "SERVICE_ANOMALY_ACKNOWLEDGED",
 } as const;
 
 export type AppEventName = (typeof AppEvents)[keyof typeof AppEvents];

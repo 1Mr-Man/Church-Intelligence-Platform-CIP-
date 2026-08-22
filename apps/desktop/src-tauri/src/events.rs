@@ -115,6 +115,20 @@ pub enum AppEvent {
     /// The operator explicitly dismissed a correlation (Phase 2.4) - never
     /// automatic, and never alters the source findings it was built from.
     CrossDomainCorrelationDismissed,
+
+    /// The Service Intelligence engine detected a phase transition from
+    /// transcript evidence (Phase 2.4, per the authoritative Phase 2
+    /// roadmap - distinct from the correlation work above) - never implies
+    /// anything was presented or auto-approved.
+    ServicePhaseChanged,
+    /// The operator explicitly marked or corrected the current phase -
+    /// distinct from an automatically detected `ServicePhaseChanged`.
+    ServicePhaseCorrected,
+    /// An unexpected (backward) phase transition was flagged for operator
+    /// review - never blocks the transition itself.
+    ServiceAnomalyDetected,
+    /// The operator acknowledged (accepted) an anomaly finding.
+    ServiceAnomalyAcknowledged,
 }
 
 impl AppEvent {
@@ -169,6 +183,11 @@ impl AppEvent {
             AppEvent::CrossDomainCorrelationDetected => "CROSS_DOMAIN_CORRELATION_DETECTED",
             AppEvent::CrossDomainCorrelationReviewed => "CROSS_DOMAIN_CORRELATION_REVIEWED",
             AppEvent::CrossDomainCorrelationDismissed => "CROSS_DOMAIN_CORRELATION_DISMISSED",
+
+            AppEvent::ServicePhaseChanged => "SERVICE_PHASE_CHANGED",
+            AppEvent::ServicePhaseCorrected => "SERVICE_PHASE_CORRECTED",
+            AppEvent::ServiceAnomalyDetected => "SERVICE_ANOMALY_DETECTED",
+            AppEvent::ServiceAnomalyAcknowledged => "SERVICE_ANOMALY_ACKNOWLEDGED",
         }
     }
 }
@@ -230,6 +249,10 @@ mod tests {
             AppEvent::CrossDomainCorrelationDetected,
             AppEvent::CrossDomainCorrelationReviewed,
             AppEvent::CrossDomainCorrelationDismissed,
+            AppEvent::ServicePhaseChanged,
+            AppEvent::ServicePhaseCorrected,
+            AppEvent::ServiceAnomalyDetected,
+            AppEvent::ServiceAnomalyAcknowledged,
         ];
         let mut names: Vec<&str> = events.iter().map(|e| e.name()).collect();
         let unique_before = names.len();

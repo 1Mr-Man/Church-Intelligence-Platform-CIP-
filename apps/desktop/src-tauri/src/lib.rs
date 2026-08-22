@@ -12,6 +12,7 @@ mod persistence;
 mod pipeline;
 mod presentation;
 mod sermon;
+mod service;
 mod state;
 mod timeline;
 
@@ -180,6 +181,19 @@ pub fn run() {
                 "sermon intelligence engine initialized (deterministic, offline)"
             );
 
+            // Phase 2.4 (Service Intelligence, per the authoritative Phase
+            // 2 roadmap): a Service engine registered for diagnostic/
+            // failure-isolation symmetry with Bible/Music/Sermon only -
+            // see `service.rs`'s module docs for why the app's actual,
+            // live-used instance is a separate one on
+            // `AppState.service_engine`. Needs no provider/database
+            // connection, unlike Bible/Music.
+            service::register_service_engine(&mut intelligence_registry)?;
+            log::info!(
+                target: LogCategory::App.target(),
+                "service intelligence engine initialized (deterministic, offline)"
+            );
+
             let audio_engine: Box<dyn cip_core_service::AudioEngine> =
                 Box::new(cip_integrations_audio::CpalAudioEngine::new());
             let speech_engine = create_speech_engine(&config);
@@ -268,6 +282,13 @@ pub fn run() {
             commands::list_cross_domain_correlations,
             commands::review_cross_domain_correlation,
             commands::dismiss_cross_domain_correlation,
+            commands::analyze_service_transcript,
+            commands::get_service_intelligence_state,
+            commands::list_service_transitions,
+            commands::list_service_anomalies,
+            commands::mark_service_phase,
+            commands::correct_service_phase,
+            commands::acknowledge_service_anomaly,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

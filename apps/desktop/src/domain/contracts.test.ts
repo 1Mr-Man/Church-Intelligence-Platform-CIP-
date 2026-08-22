@@ -23,7 +23,12 @@ import type {
   IntelligenceFinding,
 } from "./intelligence";
 import type { PresentationItem, PresentationPreview, RenderedSlide } from "./presentation";
-import type { ServiceSession } from "./service";
+import type {
+  ServiceIntelligenceSummary,
+  ServicePhase,
+  ServiceSession,
+  TranscriptFreshness,
+} from "./service";
 import type { LiveStatus, TimelineEntry } from "./live";
 import type {
   AcousticEngineStatus,
@@ -606,5 +611,72 @@ describe("domain contracts", () => {
       const snapshot: SermonStateSnapshot = { state, theme: null, points: [] };
       expect(snapshot.state).toBe(state);
     }
+  });
+
+  // --- Service Intelligence (Phase 2.4, per the authoritative Phase 2 roadmap) --
+
+  it("constructs a ServicePhaseSnapshot-shaped ServiceIntelligenceSummary for every ServicePhase value", () => {
+    const phases: ServicePhase[] = [
+      "unknown",
+      "opening",
+      "worship",
+      "prayer",
+      "scripture_reading",
+      "sermon",
+      "offering",
+      "announcement",
+      "closing",
+    ];
+    for (const phase of phases) {
+      const summary: ServiceIntelligenceSummary = {
+        phase,
+        phaseStartedAt: "2026-01-01T00:00:00Z",
+        previousPhase: null,
+        transitionCount: 0,
+        transcriptFreshness: { status: "unknown" },
+      };
+      expect(summary.phase).toBe(phase);
+    }
+  });
+
+  it("constructs every TranscriptFreshness variant, with secondsSince only on stale", () => {
+    const unknown: TranscriptFreshness = { status: "unknown" };
+    const fresh: TranscriptFreshness = { status: "fresh" };
+    const stale: TranscriptFreshness = { status: "stale", secondsSince: 42 };
+    expect(unknown.status).toBe("unknown");
+    expect(fresh.status).toBe("fresh");
+    expect(stale.status).toBe("stale");
+    expect(stale.secondsSince).toBe(42);
+  });
+
+  it("constructs a Service-domain IntelligenceFinding for a phase transition, always Observed/Inferred/Suggested - never Generated", () => {
+    const confidence: ConfidenceResult = { score: 0.85, level: "high", source: "heuristic", reason: "explicit trigger phrase matched" };
+    const transition: IntelligenceFinding = {
+      id: "88888888-8888-8888-8888-888888888888",
+      serviceId: "22222222-2222-2222-2222-222222222222",
+      domain: "service",
+      kind: "service_state",
+      assertionLevel: "inferred",
+      status: "detected",
+      priority: "high",
+      confidence,
+      summary: "Service phase changed #1: UNKNOWN -> PRAYER",
+      transcriptSegmentIds: ["33333333-3333-3333-3333-333333333333"],
+      evidence: [
+        {
+          kind: "transcript",
+          segmentIds: ["33333333-3333-3333-3333-333333333333"],
+          excerpt: "let us pray",
+        },
+      ],
+      provenance: { contentId: null, note: null },
+      engineId: "service-state",
+      engineVersion: "1.0.0",
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    expect(transition.domain).toBe("service");
+    expect(transition.kind).toBe("service_state");
+    expect(transition.priority).toBe("high");
+    expect(transition.assertionLevel).not.toBe("generated");
   });
 });

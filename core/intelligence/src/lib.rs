@@ -60,6 +60,7 @@ pub mod music_adapter;
 mod queue;
 mod registry;
 pub mod sermon_adapter;
+pub mod service_adapter;
 
 pub use bible_adapter::{BibleIntelligenceEngine, BIBLE_ENGINE_ID, BIBLE_ENGINE_VERSION};
 pub use context::{
@@ -88,4 +89,8 @@ pub use queue::{FindingQueue, QueueAddOutcome};
 pub use registry::{EngineOutcome, IntelligenceEngineRegistry};
 pub use sermon_adapter::{
     SermonIntelligenceEngine, SermonStateSnapshot, SERMON_ENGINE_ID, SERMON_ENGINE_VERSION,
+};
+pub use service_adapter::{
+    ServiceIntelligenceEngine, ServicePhase, ServicePhaseSnapshot, SERVICE_ENGINE_ID,
+    SERVICE_ENGINE_VERSION, WEAK_DEBOUNCE_STREAK,
 };

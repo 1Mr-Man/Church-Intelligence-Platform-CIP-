@@ -32,6 +32,7 @@ import type {
   PresentationPreview,
   ProcessedSegment,
   ScriptureContext,
+  ServiceIntelligenceSummary,
   ServiceSession,
   SermonStateSnapshot,
   SongRecognitionCandidate,
@@ -429,6 +430,53 @@ export function reviewCrossDomainCorrelation(correlationId: string): Promise<Int
  * the source findings, the transcript, or the active Scripture context. */
 export function dismissCrossDomainCorrelation(correlationId: string): Promise<IntelligenceCorrelation> {
   return invokeCommand("dismiss_cross_domain_correlation", { correlationId });
+}
+
+// --- service intelligence (Phase 2.4, per the authoritative Phase 2 roadmap) --
+//
+// Distinct from the cross-domain correlation commands above - see
+// `domain/service.ts`'s own docs. Deliberately manual-command-only for
+// `analyzeServiceTranscript`, mirroring `analyzeSermonTranscript`.
+
+export function analyzeServiceTranscript(text: string): Promise<IntelligenceFinding[]> {
+  return invokeCommand("analyze_service_transcript", { text });
+}
+
+/** Read-only current phase/transition-count/transcript-freshness snapshot -
+ * safe to poll at any time. */
+export function getServiceIntelligenceState(): Promise<ServiceIntelligenceSummary> {
+  return invokeCommand("get_service_intelligence_state");
+}
+
+/** Every recorded phase transition for the active service, oldest first -
+ * a history view, not an operator-review queue. */
+export function listServiceTransitions(): Promise<IntelligenceFinding[]> {
+  return invokeCommand("list_service_transitions");
+}
+
+/** Anomaly findings still awaiting an operator decision. */
+export function listServiceAnomalies(): Promise<IntelligenceFinding[]> {
+  return invokeCommand("list_service_anomalies");
+}
+
+/** Explicit operator declaration of the current service phase - for when
+ * nothing has been detected yet, or the operator wants to proactively
+ * state the phase. */
+export function markServicePhase(phase: string, note?: string): Promise<IntelligenceFinding> {
+  return invokeCommand("mark_service_phase", { phase, note: note ?? null });
+}
+
+/** Explicit operator correction of an incorrect system-detected phase -
+ * additionally supersedes (rejects, never deletes) any other still-
+ * pending transition finding for this service. */
+export function correctServicePhase(phase: string, note?: string): Promise<IntelligenceFinding> {
+  return invokeCommand("correct_service_phase", { phase, note: note ?? null });
+}
+
+/** Explicit operator acknowledgment of an anomaly finding - reuses the
+ * ordinary finding-accept lifecycle. */
+export function acknowledgeServiceAnomaly(findingId: string): Promise<IntelligenceFinding> {
+  return invokeCommand("acknowledge_service_anomaly", { findingId });
 }
 
 // --- live status --------------------------------------------------------------

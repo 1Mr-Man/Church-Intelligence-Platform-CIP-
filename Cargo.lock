@@ -492,6 +492,7 @@ dependencies = [
  "cip-core-music",
  "cip-core-sermon",
  "cip-core-service",
+ "regex",
  "serde",
  "serde_json",
  "thiserror 2.0.20",

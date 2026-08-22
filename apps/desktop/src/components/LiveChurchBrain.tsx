@@ -16,6 +16,7 @@ import type {
   ScriptureContext,
   ScriptureDetection,
   ScriptureReference,
+  ServiceIntelligenceSummary,
   ServiceSession,
   SermonStateSnapshot,
   SongRecognitionCandidate,
@@ -123,6 +124,15 @@ export function LiveChurchBrain() {
   // reachable for correlation at all (see `commands.ts`'s own docs).
   const [crossDomainCorrelations, setCrossDomainCorrelations] = useState<IntelligenceCorrelation[]>([]);
   const [bibleManualText, setBibleManualText] = useState("");
+  // Service Intelligence (Phase 2.4, per the authoritative Phase 2
+  // roadmap - distinct from the correlation work above) - `serviceIntel`
+  // is the read-only phase/freshness summary, polled alongside status;
+  // transitions/anomalies are ordinary findings awaiting operator review.
+  const [serviceIntel, setServiceIntel] = useState<ServiceIntelligenceSummary | null>(null);
+  const [serviceTransitions, setServiceTransitions] = useState<IntelligenceFinding[]>([]);
+  const [serviceAnomalies, setServiceAnomalies] = useState<IntelligenceFinding[]>([]);
+  const [serviceManualText, setServiceManualText] = useState("");
+  const [servicePhaseChoice, setServicePhaseChoice] = useState("sermon");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -137,6 +147,10 @@ export function LiveChurchBrain() {
 
   const refreshStatus = useCallback(() => {
     commands.getLiveStatus().then(setStatus).catch((e) => setError(String(e)));
+    // Service Intelligence's `transcriptFreshness` is wall-clock-dependent
+    // (spec section 41) - it needs to be re-fetched on the same poll
+    // cadence as status, not just re-derived from a stored event payload.
+    commands.getServiceIntelligenceState().then(setServiceIntel).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -182,6 +196,8 @@ export function LiveChurchBrain() {
       commands.listSermonFindings().then(setSermonFindings).catch(() => {});
       commands.getSermonState().then(setSermonState).catch(() => {});
       commands.listCrossDomainCorrelations().then(setCrossDomainCorrelations).catch(() => {});
+      commands.listServiceTransitions().then(setServiceTransitions).catch(() => {});
+      commands.listServiceAnomalies().then(setServiceAnomalies).catch(() => {});
     } else {
       setSuggestions([]);
       setApprovedSuggestions([]);
@@ -199,6 +215,8 @@ export function LiveChurchBrain() {
       setSermonFindings([]);
       setSermonState(null);
       setCrossDomainCorrelations([]);
+      setServiceTransitions([]);
+      setServiceAnomalies([]);
     }
   }, [activeServiceId]);
 
@@ -289,6 +307,18 @@ export function LiveChurchBrain() {
       ),
       liveEvents.onCrossDomainCorrelationDismissed((correlation) =>
         setCrossDomainCorrelations((prev) => prev.filter((c) => c.id !== correlation.id)),
+      ),
+      liveEvents.onServicePhaseChanged((finding) =>
+        setServiceTransitions((prev) => [finding, ...prev]),
+      ),
+      liveEvents.onServicePhaseCorrected((finding) =>
+        setServiceTransitions((prev) => [finding, ...prev]),
+      ),
+      liveEvents.onServiceAnomalyDetected((finding) =>
+        setServiceAnomalies((prev) => [finding, ...prev]),
+      ),
+      liveEvents.onServiceAnomalyAcknowledged((finding) =>
+        setServiceAnomalies((prev) => prev.filter((f) => f.id !== finding.id)),
       ),
     ];
     return () => {
@@ -1415,6 +1445,147 @@ export function LiveChurchBrain() {
               </li>
             ))}
           </ul>
+        )}
+      </section>
+
+      <section className="live-brain__panel">
+        <h2>Service Intelligence</h2>
+        <p className="live-brain__hint">
+          What part of the service is happening right now, derived deterministically from transcript evidence or
+          explicit operator action - never automatic presentation, never a rigid state machine that blocks an
+          unusual transition (spec section 31/48: engines produce findings, operators review, presentation stays
+          separate).
+        </p>
+
+        <div className="live-brain__row">
+          <span>
+            Current phase: <strong>{(serviceIntel?.phase ?? "unknown").toUpperCase()}</strong>
+            {serviceIntel?.phaseStartedAt && <> since {formatClockTime(serviceIntel.phaseStartedAt)}</>}
+          </span>
+        </div>
+        {serviceIntel?.previousPhase && (
+          <p className="live-brain__hint">Previous phase: {serviceIntel.previousPhase.toUpperCase()}</p>
+        )}
+        <p className="live-brain__hint">
+          Transcript:{" "}
+          {serviceIntel?.transcriptFreshness.status === "stale"
+            ? `stale (${serviceIntel.transcriptFreshness.secondsSince}s since the last segment)`
+            : (serviceIntel?.transcriptFreshness.status ?? "unknown")}
+          {" "}&middot; {serviceIntel?.transitionCount ?? 0} transition(s) recorded
+        </p>
+
+        <details className="live-brain__manual-entry">
+          <summary>Manual / test service transcript entry</summary>
+          <p className="live-brain__hint">
+            Feeds text through the same `ServiceIntelligenceEngine` real transcript would use - deterministic
+            testing without audio hardware.
+          </p>
+          <div className="live-brain__row">
+            <input
+              value={serviceManualText}
+              onChange={(e) => setServiceManualText(e.target.value)}
+              placeholder='e.g. "Let us pray." or "Turn with me to Romans chapter eight."'
+              aria-label="Manual service transcript text"
+            />
+            <button
+              type="button"
+              disabled={!status?.service || !serviceManualText.trim() || isBusy("service-transcript")}
+              onClick={() =>
+                withBusy("service-transcript", async () => {
+                  await commands.analyzeServiceTranscript(serviceManualText.trim());
+                  setServiceManualText("");
+                  commands.getServiceIntelligenceState().then(setServiceIntel).catch(() => {});
+                })
+              }
+            >
+              Submit
+            </button>
+          </div>
+        </details>
+
+        <div className="live-brain__row">
+          <select
+            value={servicePhaseChoice}
+            onChange={(e) => setServicePhaseChoice(e.target.value)}
+            aria-label="Service phase to mark or correct"
+          >
+            {["unknown", "opening", "worship", "prayer", "scripture_reading", "sermon", "offering", "announcement", "closing"].map(
+              (phase) => (
+                <option key={phase} value={phase}>
+                  {phase.toUpperCase()}
+                </option>
+              ),
+            )}
+          </select>
+          <button
+            type="button"
+            disabled={!status?.service || isBusy("service-mark")}
+            onClick={() =>
+              withBusy("service-mark", async () => {
+                await commands.markServicePhase(servicePhaseChoice);
+                commands.getServiceIntelligenceState().then(setServiceIntel).catch(() => {});
+              })
+            }
+          >
+            Mark phase
+          </button>
+          <button
+            type="button"
+            disabled={!status?.service || isBusy("service-correct")}
+            onClick={() =>
+              withBusy("service-correct", async () => {
+                await commands.correctServicePhase(servicePhaseChoice);
+                commands.getServiceIntelligenceState().then(setServiceIntel).catch(() => {});
+              })
+            }
+          >
+            Correct phase
+          </button>
+        </div>
+
+        {serviceAnomalies.length > 0 && (
+          <>
+            <h3>Anomalies</h3>
+            <ul className="live-brain__suggestions">
+              {serviceAnomalies.map((finding) => (
+                <li key={finding.id} className="live-brain__suggestion-card">
+                  <div className="live-brain__suggestion-header">
+                    <strong>{finding.summary}</strong>
+                    <span className="live-brain__confidence">
+                      Confidence: {Math.round(finding.confidence.score * 100)}%
+                    </span>
+                  </div>
+                  <div className="live-brain__row">
+                    <button
+                      type="button"
+                      disabled={isBusy(`service-ack-${finding.id}`)}
+                      onClick={() =>
+                        withBusy(`service-ack-${finding.id}`, async () => {
+                          await commands.acknowledgeServiceAnomaly(finding.id);
+                        })
+                      }
+                    >
+                      Acknowledge
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {serviceTransitions.length > 0 && (
+          <details className="live-brain__manual-entry">
+            <summary>Recent transitions ({serviceTransitions.length})</summary>
+            <ul className="live-brain__content-items">
+              {serviceTransitions.slice(0, 10).map((finding) => (
+                <li key={finding.id}>
+                  {finding.summary} &mdash; {finding.assertionLevel.toUpperCase()} (
+                  {Math.round(finding.confidence.score * 100)}%)
+                </li>
+              ))}
+            </ul>
+          </details>
         )}
       </section>
 

@@ -12,6 +12,14 @@ of everything below, fused with this text-matching path rather than
 replacing it - see [`docs/acoustic-music.md`](acoustic-music.md). This
 document still accurately describes the text-matching path unchanged.
 
+> **Roadmap note.** This repository's authoritative Phase 2 roadmap places
+> Music Intelligence at 2.3 (following the 2.2 Music Content Foundation),
+> with Service Intelligence at 2.4 - see
+> [`docs/service-intelligence.md`](service-intelligence.md). This
+> document's own "Phase 2.1" heading is a historical label from before
+> that roadmap was adopted and is not rewritten; nothing about the Music
+> Intelligence implementation described below has changed.
+
 **Not in this phase:** real audio fingerprinting, a large copyrighted
 song database, sermon intelligence, or automatic presentation of a
 recognized song. This subsystem recognizes song titles, aliases, hymn/

@@ -15,12 +15,13 @@
 //! `docs/live-speech.md`'s concurrency section).
 
 use crate::config::AppConfig;
+use chrono::{DateTime, Utc};
 use cip_core_ai::SpeechEngine;
 use cip_core_bible::{BibleProvider, DefaultScriptureContextManager};
 use cip_core_content::ContentRegistry;
 use cip_core_intelligence::{
     CorrelationQueue, FindingQueue, IntelligenceEngineRegistry, MusicIntelligenceEngine,
-    SermonIntelligenceEngine,
+    SermonIntelligenceEngine, ServiceIntelligenceEngine,
 };
 use cip_core_music::{AcousticMusicRecognizer, CurrentSong, MusicProvider};
 use cip_core_service::{AudioEngine, ServiceSession};
@@ -119,6 +120,23 @@ pub struct AppState {
     /// nothing here needs to survive a restart (see
     /// `docs/cross-domain-intelligence.md`'s persistence-decision section).
     pub correlation_queue: Mutex<CorrelationQueue>,
+    /// The real, stateful Service Intelligence engine (Phase 2.4, per the
+    /// authoritative Phase 2 roadmap) - every `analyze_service_transcript`/
+    /// `get_service_intelligence_state` call goes through this exact
+    /// instance, so its accumulated phase/transition history stays
+    /// consistent across calls. A *separate* instance is also registered
+    /// into `intelligence_registry` for diagnostics/failure-isolation
+    /// symmetry only - see `service.rs`'s module docs (mirrors
+    /// `sermon_engine` above).
+    pub service_engine: ServiceIntelligenceEngine,
+    /// Wall-clock time the last **final** transcript segment was received
+    /// from the real live audio/speech pipeline (Phase 2.4) - `None` until
+    /// the first one arrives this service. Deliberately not touched by the
+    /// manual/test-mode transcript commands (Music/Sermon/Bible/Service's
+    /// own `analyze_*_transcript` harnesses): this field answers "is real
+    /// live transcription actually still happening," which manual test
+    /// input would only make misleading. See `service.rs::transcript_freshness`.
+    pub last_transcript_at: Mutex<Option<DateTime<Utc>>>,
 }
 
 impl AppState {
@@ -157,6 +175,8 @@ impl AppState {
             current_song: Mutex::new(None),
             sermon_engine: SermonIntelligenceEngine::new(),
             correlation_queue: Mutex::new(CorrelationQueue::new()),
+            service_engine: ServiceIntelligenceEngine::new(),
+            last_transcript_at: Mutex::new(None),
         }
     }
 }

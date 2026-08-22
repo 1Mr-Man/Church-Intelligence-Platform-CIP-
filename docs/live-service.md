@@ -506,13 +506,17 @@ cargo test -p cip-desktop
 cargo test -p cip-integration-tests --test bible_intelligence_acceptance
 ```
 
-## Cross-domain correlation (Phase 2.4)
+## Cross-domain correlation (built under an earlier internal "Phase 2.4" label)
 
 The Live Church Brain's "Cross-Domain Intelligence" panel is a separate,
 read-only-except-review/dismiss view layered on top of the workflows
 above - it never changes how Scripture detection, Music, or Sermon
 findings themselves are produced or reviewed. See
-[`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md).
+[`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md). Under
+this repository's authoritative Phase 2 roadmap, this work is reserved
+for formal validation as Phase 2.8; the roadmap's actual Phase 2.4 is
+Service Intelligence - see
+[`docs/service-intelligence.md`](service-intelligence.md).
 
 ## Limitations (stated honestly)
 
