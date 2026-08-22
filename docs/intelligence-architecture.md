@@ -11,13 +11,22 @@ third, Sermon - see section 26 and
 [`docs/sermon-intelligence.md`](sermon-intelligence.md). A fourth engine,
 Service Intelligence, was added under this repository's authoritative
 Phase 2 roadmap's actual Phase 2.4 - see
-[`docs/service-intelligence.md`](service-intelligence.md). Content
-Intelligence and the formal, roadmap Phase 2.8 Cross-Domain Intelligence
-validation remain **PLANNED / NOT IMPLEMENTED**; an earlier cross-domain
-correlation rule engine was already built under an internal label that
-also read "Phase 2.4" (see [`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md))
+[`docs/service-intelligence.md`](service-intelligence.md). The roadmap's
+actual Phase 2.5, Sermon Intelligence Foundation, does not add a fifth
+engine - it extends `IntelligenceContext` additively instead (a new
+`with_sermon_context` builder method, never a required constructor
+argument, so every existing call site is unchanged) - see
+[`docs/sermon-foundation.md`](sermon-foundation.md)'s "Sermon context"
+and "Engine boundary" sections. Content Intelligence and the formal,
+roadmap Phase 2.8 Cross-Domain Intelligence validation remain
+**PLANNED / NOT IMPLEMENTED**; an earlier cross-domain correlation rule
+engine was already built under an internal label that also read
+"Phase 2.4" (see [`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md))
 and is reserved for that future Phase 2.8 validation - that historical
-label is not rewritten.
+label is not rewritten. `core/sermon`'s own semantic detection modules
+(section 26 above) were similarly built under an internal label that
+read "Phase 2.3" and are understood as Phase 2.6-equivalent under this
+roadmap - also not rewritten.
 
 ## 1. Phase 2 vision
 

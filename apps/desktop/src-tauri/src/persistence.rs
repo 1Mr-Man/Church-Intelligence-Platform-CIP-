@@ -32,7 +32,7 @@
 //! never writes `approved`/`edited`/`rejected`; only the operator-facing
 //! commands in `commands.rs` do.
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use cip_core_ai::{Suggestion, SuggestionKind, SuggestionStatus};
 use cip_core_bible::ReferenceKind;
 use cip_core_confidence::{ConfidenceLevel, ConfidenceResult, ConfidenceSource};
@@ -710,6 +710,439 @@ pub fn update_presentation_item_status(
     get_presentation_item(conn, item_id)
 }
 
+// --- sermon foundation (Phase 2.5, per the authoritative Phase 2 roadmap) --
+//
+// Mirrors `services`' own persist/update/get shape exactly - see
+// `docs/sermon-foundation.md`'s "Persistence decision" section for why a
+// `Sermon` is durably persisted (service restart recovery / history /
+// auditability) while a Sermon's own *finding* production is not
+// (findings stay in `AppState.intelligence_findings`, unchanged).
+
+fn sermon_status_str(status: cip_core_sermon::foundation::SermonStatus) -> &'static str {
+    use cip_core_sermon::foundation::SermonStatus;
+    match status {
+        SermonStatus::Planned => "planned",
+        SermonStatus::Active => "active",
+        SermonStatus::Paused => "paused",
+        SermonStatus::Ended => "ended",
+        SermonStatus::Cancelled => "cancelled",
+    }
+}
+
+fn parse_sermon_status(value: &str) -> cip_core_sermon::foundation::SermonStatus {
+    use cip_core_sermon::foundation::SermonStatus;
+    match value {
+        "planned" => SermonStatus::Planned,
+        "paused" => SermonStatus::Paused,
+        "ended" => SermonStatus::Ended,
+        "cancelled" => SermonStatus::Cancelled,
+        _ => SermonStatus::Active,
+    }
+}
+
+fn speaker_role_str(role: cip_core_sermon::foundation::SpeakerRole) -> &'static str {
+    use cip_core_sermon::foundation::SpeakerRole;
+    match role {
+        SpeakerRole::Primary => "primary",
+        SpeakerRole::Guest => "guest",
+    }
+}
+
+fn parse_speaker_role(value: &str) -> cip_core_sermon::foundation::SpeakerRole {
+    use cip_core_sermon::foundation::SpeakerRole;
+    match value {
+        "guest" => SpeakerRole::Guest,
+        _ => SpeakerRole::Primary,
+    }
+}
+
+fn parse_rfc3339(value: &str) -> DateTime<Utc> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now())
+}
+
+pub fn persist_sermon(
+    conn: &Connection,
+    sermon: &cip_core_sermon::foundation::Sermon,
+) -> Result<(), PersistError> {
+    conn.execute(
+        "INSERT INTO sermons
+            (id, service_id, title, speaker_id, speaker_name, speaker_role,
+             status, started_at, ended_at, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            sermon.id.to_string(),
+            sermon.service_id.to_string(),
+            sermon.title,
+            sermon.speaker.as_ref().map(|s| s.id.to_string()),
+            sermon.speaker.as_ref().map(|s| s.name.clone()),
+            sermon.speaker.as_ref().map(|s| speaker_role_str(s.role)),
+            sermon_status_str(sermon.status),
+            sermon.started_at.map(|t| t.to_rfc3339()),
+            sermon.ended_at.map(|t| t.to_rfc3339()),
+            sermon.created_at.to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
+/// Persists every field a mutating sermon-foundation operator action can
+/// change (status/title/speaker/timestamps) in one statement, since
+/// `Sermon` is small and every such action already has the full,
+/// up-to-date value in hand - avoids five near-identical single-column
+/// update functions for no real benefit.
+pub fn update_sermon(
+    conn: &Connection,
+    sermon: &cip_core_sermon::foundation::Sermon,
+) -> Result<(), PersistError> {
+    let rows = conn.execute(
+        "UPDATE sermons SET title = ?1, speaker_id = ?2, speaker_name = ?3, speaker_role = ?4,
+             status = ?5, started_at = ?6, ended_at = ?7 WHERE id = ?8",
+        params![
+            sermon.title,
+            sermon.speaker.as_ref().map(|s| s.id.to_string()),
+            sermon.speaker.as_ref().map(|s| s.name.clone()),
+            sermon.speaker.as_ref().map(|s| speaker_role_str(s.role)),
+            sermon_status_str(sermon.status),
+            sermon.started_at.map(|t| t.to_rfc3339()),
+            sermon.ended_at.map(|t| t.to_rfc3339()),
+            sermon.id.to_string(),
+        ],
+    )?;
+    if rows == 0 {
+        return Err(PersistError::NotFound(sermon.id.to_string()));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn row_to_sermon(
+    id: String,
+    service_id: String,
+    title: Option<String>,
+    speaker_id: Option<String>,
+    speaker_name: Option<String>,
+    speaker_role: Option<String>,
+    status: String,
+    started_at: Option<String>,
+    ended_at: Option<String>,
+    created_at: String,
+) -> Result<cip_core_sermon::foundation::Sermon, PersistError> {
+    let speaker = match (speaker_id, speaker_name) {
+        (Some(id), Some(name)) => Some(cip_core_sermon::foundation::Speaker {
+            id: Uuid::parse_str(&id).map_err(|_| PersistError::NotFound(id.clone()))?,
+            name,
+            role: parse_speaker_role(speaker_role.as_deref().unwrap_or("primary")),
+        }),
+        _ => None,
+    };
+    Ok(cip_core_sermon::foundation::Sermon {
+        id: Uuid::parse_str(&id).map_err(|_| PersistError::NotFound(id.clone()))?,
+        service_id: Uuid::parse_str(&service_id)
+            .map_err(|_| PersistError::NotFound(service_id.clone()))?,
+        title,
+        speaker,
+        status: parse_sermon_status(&status),
+        started_at: started_at.as_deref().map(parse_rfc3339),
+        ended_at: ended_at.as_deref().map(parse_rfc3339),
+        created_at: parse_rfc3339(&created_at),
+    })
+}
+
+pub fn get_sermon(
+    conn: &Connection,
+    sermon_id: Uuid,
+) -> Result<cip_core_sermon::foundation::Sermon, PersistError> {
+    conn.query_row(
+        "SELECT id, service_id, title, speaker_id, speaker_name, speaker_role,
+                status, started_at, ended_at, created_at
+         FROM sermons WHERE id = ?1",
+        params![sermon_id.to_string()],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, String>(9)?,
+            ))
+        },
+    )
+    .optional()?
+    .ok_or_else(|| PersistError::NotFound(sermon_id.to_string()))
+    .and_then(
+        |(id, sid, title, spid, spname, sprole, status, started, ended, created)| {
+            row_to_sermon(
+                id, sid, title, spid, spname, sprole, status, started, ended, created,
+            )
+        },
+    )
+}
+
+/// Sermons for a service, most recently created first, bounded by
+/// `limit` - the sermon-history counterpart to `list_services`.
+pub fn list_sermons_for_service(
+    conn: &Connection,
+    service_id: Uuid,
+    limit: u32,
+) -> Result<Vec<cip_core_sermon::foundation::Sermon>, PersistError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, service_id, title, speaker_id, speaker_name, speaker_role,
+                status, started_at, ended_at, created_at
+         FROM sermons WHERE service_id = ?1 ORDER BY created_at DESC LIMIT ?2",
+    )?;
+    let rows = stmt
+        .query_map(params![service_id.to_string(), limit], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, String>(9)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.into_iter()
+        .map(
+            |(id, sid, title, spid, spname, sprole, status, started, ended, created)| {
+                row_to_sermon(
+                    id, sid, title, spid, spname, sprole, status, started, ended, created,
+                )
+            },
+        )
+        .collect()
+}
+
+fn section_kind_str(kind: cip_core_sermon::foundation::SermonSectionKind) -> &'static str {
+    use cip_core_sermon::foundation::SermonSectionKind;
+    match kind {
+        SermonSectionKind::Introduction => "introduction",
+        SermonSectionKind::ScriptureReading => "scripture_reading",
+        SermonSectionKind::MainMessage => "main_message",
+        SermonSectionKind::Illustration => "illustration",
+        SermonSectionKind::Prayer => "prayer",
+        SermonSectionKind::AltarCall => "altar_call",
+        SermonSectionKind::Conclusion => "conclusion",
+    }
+}
+
+fn parse_section_kind(value: &str) -> cip_core_sermon::foundation::SermonSectionKind {
+    use cip_core_sermon::foundation::SermonSectionKind;
+    match value {
+        "scripture_reading" => SermonSectionKind::ScriptureReading,
+        "main_message" => SermonSectionKind::MainMessage,
+        "illustration" => SermonSectionKind::Illustration,
+        "prayer" => SermonSectionKind::Prayer,
+        "altar_call" => SermonSectionKind::AltarCall,
+        "conclusion" => SermonSectionKind::Conclusion,
+        _ => SermonSectionKind::Introduction,
+    }
+}
+
+fn section_origin_str(origin: cip_core_sermon::foundation::SectionOrigin) -> &'static str {
+    use cip_core_sermon::foundation::SectionOrigin;
+    match origin {
+        SectionOrigin::OperatorAssigned => "operator_assigned",
+        SectionOrigin::SystemBoundary => "system_boundary",
+        SectionOrigin::Inferred => "inferred",
+    }
+}
+
+fn parse_section_origin(value: &str) -> cip_core_sermon::foundation::SectionOrigin {
+    use cip_core_sermon::foundation::SectionOrigin;
+    match value {
+        "system_boundary" => SectionOrigin::SystemBoundary,
+        "inferred" => SectionOrigin::Inferred,
+        _ => SectionOrigin::OperatorAssigned,
+    }
+}
+
+pub fn persist_sermon_section(
+    conn: &Connection,
+    section: &cip_core_sermon::foundation::SermonSection,
+) -> Result<(), PersistError> {
+    conn.execute(
+        "INSERT INTO sermon_sections (id, sermon_id, kind, origin, started_at, ended_at, note)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            section.id.to_string(),
+            section.sermon_id.to_string(),
+            section_kind_str(section.kind),
+            section_origin_str(section.origin),
+            section.started_at.to_rfc3339(),
+            section.ended_at.map(|t| t.to_rfc3339()),
+            section.note,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Closes the still-open section (`ended_at IS NULL`) for a sermon, if
+/// any - the persistence half of "a new active section closes the
+/// previous one" (spec's message-section-state rule). A no-op (not an
+/// error) when no section is currently open.
+pub fn close_open_sermon_section(
+    conn: &Connection,
+    sermon_id: Uuid,
+    ended_at: DateTime<Utc>,
+) -> Result<(), PersistError> {
+    conn.execute(
+        "UPDATE sermon_sections SET ended_at = ?1 WHERE sermon_id = ?2 AND ended_at IS NULL",
+        params![ended_at.to_rfc3339(), sermon_id.to_string()],
+    )?;
+    Ok(())
+}
+
+fn row_to_section(
+    id: String,
+    sermon_id: String,
+    kind: String,
+    origin: String,
+    started_at: String,
+    ended_at: Option<String>,
+    note: Option<String>,
+) -> Result<cip_core_sermon::foundation::SermonSection, PersistError> {
+    Ok(cip_core_sermon::foundation::SermonSection {
+        id: Uuid::parse_str(&id).map_err(|_| PersistError::NotFound(id.clone()))?,
+        sermon_id: Uuid::parse_str(&sermon_id)
+            .map_err(|_| PersistError::NotFound(sermon_id.clone()))?,
+        kind: parse_section_kind(&kind),
+        origin: parse_section_origin(&origin),
+        started_at: parse_rfc3339(&started_at),
+        ended_at: ended_at.as_deref().map(parse_rfc3339),
+        note,
+    })
+}
+
+/// All sections for a sermon, in the order they were opened - never
+/// deletes or overwrites an earlier section (spec's "do not delete
+/// previous section history").
+pub fn list_sermon_sections(
+    conn: &Connection,
+    sermon_id: Uuid,
+) -> Result<Vec<cip_core_sermon::foundation::SermonSection>, PersistError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, sermon_id, kind, origin, started_at, ended_at, note
+         FROM sermon_sections WHERE sermon_id = ?1 ORDER BY started_at ASC",
+    )?;
+    let rows = stmt
+        .query_map(params![sermon_id.to_string()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.into_iter()
+        .map(|(id, sid, kind, origin, started, ended, note)| {
+            row_to_section(id, sid, kind, origin, started, ended, note)
+        })
+        .collect()
+}
+
+pub fn persist_sermon_segment(
+    conn: &Connection,
+    segment: &cip_core_sermon::foundation::SermonSegment,
+) -> Result<(), PersistError> {
+    conn.execute(
+        "INSERT INTO sermon_segments (id, sermon_id, transcript_segment_id, sequence, section_id, linked_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            segment.id.to_string(),
+            segment.sermon_id.to_string(),
+            segment.transcript_segment_id.to_string(),
+            segment.sequence,
+            segment.section_id.map(|id| id.to_string()),
+            segment.linked_at.to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
+/// How many transcript segments are already linked to this sermon - the
+/// source of truth for a newly linked segment's next `sequence` number
+/// (gapless, starting at 0 for a given sermon).
+pub fn count_sermon_segments(conn: &Connection, sermon_id: Uuid) -> Result<u32, PersistError> {
+    conn.query_row(
+        "SELECT count(*) FROM sermon_segments WHERE sermon_id = ?1",
+        params![sermon_id.to_string()],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|n| n as u32)
+    .map_err(PersistError::from)
+}
+
+pub fn list_sermon_segments(
+    conn: &Connection,
+    sermon_id: Uuid,
+) -> Result<Vec<cip_core_sermon::foundation::SermonSegment>, PersistError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, sermon_id, transcript_segment_id, sequence, section_id, linked_at
+         FROM sermon_segments WHERE sermon_id = ?1 ORDER BY sequence ASC",
+    )?;
+    let rows = stmt
+        .query_map(params![sermon_id.to_string()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.into_iter()
+        .map(|(id, sid, tid, sequence, section_id, linked_at)| {
+            Ok(cip_core_sermon::foundation::SermonSegment {
+                id: Uuid::parse_str(&id).map_err(|_| PersistError::NotFound(id.clone()))?,
+                sermon_id: Uuid::parse_str(&sid)
+                    .map_err(|_| PersistError::NotFound(sid.clone()))?,
+                transcript_segment_id: Uuid::parse_str(&tid)
+                    .map_err(|_| PersistError::NotFound(tid.clone()))?,
+                sequence: sequence as u32,
+                section_id: section_id
+                    .map(|s| Uuid::parse_str(&s).map_err(|_| PersistError::NotFound(s.clone())))
+                    .transpose()?,
+                linked_at: parse_rfc3339(&linked_at),
+            })
+        })
+        .collect()
+}
+
+/// The service a transcript segment belongs to, if it exists at all -
+/// `link_transcript_segment_to_sermon`'s ownership guard (spec's
+/// "transcript segment attached to a different service" boundary).
+pub fn get_transcript_segment_service_id(
+    conn: &Connection,
+    transcript_segment_id: Uuid,
+) -> Result<Option<Uuid>, PersistError> {
+    conn.query_row(
+        "SELECT service_id FROM transcript_segments WHERE id = ?1",
+        params![transcript_segment_id.to_string()],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()?
+    .map(|s| Uuid::parse_str(&s).map_err(|_| PersistError::NotFound(s.clone())))
+    .transpose()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1178,5 +1611,222 @@ mod tests {
         // A window of 0 seconds excludes even a suggestion from "now" once
         // any time at all has elapsed since `created_at` was recorded.
         assert!(!has_recent_suggestion_for_reference(&conn, session.id, "ROM 8:28", -1).unwrap());
+    }
+
+    // --- sermon foundation (Phase 2.5, per the authoritative Phase 2 roadmap) --
+
+    fn seeded_sermon(conn: &Connection, service_id: Uuid) -> cip_core_sermon::foundation::Sermon {
+        let sermon = cip_core_sermon::foundation::Sermon::start(
+            service_id,
+            Some("Grace Abounding".to_string()),
+        );
+        persist_sermon(conn, &sermon).unwrap();
+        sermon
+    }
+
+    #[test]
+    fn persists_and_retrieves_a_sermon_across_a_simulated_restart() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let sermon = seeded_sermon(&conn, session.id);
+
+        // "Restart" = drop everything but the connection's own on-disk (or
+        // here, in-memory-but-independent) row data and re-fetch by id -
+        // proves the row alone (not any in-process cache) carries every
+        // field forward.
+        let reloaded = get_sermon(&conn, sermon.id).unwrap();
+        assert_eq!(
+            reloaded, sermon,
+            "every field survives a reload identically"
+        );
+    }
+
+    #[test]
+    fn update_sermon_persists_status_and_speaker_changes() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let mut sermon = seeded_sermon(&conn, session.id);
+
+        sermon.assign_speaker(cip_core_sermon::foundation::Speaker::new(
+            "Pastor Jane Doe",
+            cip_core_sermon::foundation::SpeakerRole::Primary,
+        ));
+        sermon.pause();
+        update_sermon(&conn, &sermon).unwrap();
+
+        let reloaded = get_sermon(&conn, sermon.id).unwrap();
+        assert_eq!(
+            reloaded.status,
+            cip_core_sermon::foundation::SermonStatus::Paused
+        );
+        assert_eq!(reloaded.speaker.unwrap().name, "Pastor Jane Doe");
+    }
+
+    #[test]
+    fn update_sermon_reports_not_found_for_an_unknown_id() {
+        let conn = migrated_conn();
+        let ghost = cip_core_sermon::foundation::Sermon::start(Uuid::new_v4(), None);
+        let result = update_sermon(&conn, &ghost);
+        assert!(matches!(result, Err(PersistError::NotFound(_))));
+    }
+
+    #[test]
+    fn get_sermon_reports_not_found_for_an_unknown_id() {
+        let conn = migrated_conn();
+        assert!(matches!(
+            get_sermon(&conn, Uuid::new_v4()),
+            Err(PersistError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn list_sermons_for_service_orders_most_recent_first_and_scopes_by_service() {
+        let conn = migrated_conn();
+        let session_a = seeded_service(&conn);
+        let session_b = ServiceSession::start("Another Service");
+        persist_service(&conn, &session_b).unwrap();
+
+        let first = seeded_sermon(&conn, session_a.id);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let second = cip_core_sermon::foundation::Sermon::start(
+            session_a.id,
+            Some("Second Message".to_string()),
+        );
+        persist_sermon(&conn, &second).unwrap();
+        let _unrelated = seeded_sermon(&conn, session_b.id);
+
+        let sermons = list_sermons_for_service(&conn, session_a.id, 10).unwrap();
+        assert_eq!(sermons.len(), 2, "only session_a's sermons are returned");
+        assert_eq!(sermons[0].id, second.id, "most recently created first");
+        assert_eq!(sermons[1].id, first.id);
+    }
+
+    #[test]
+    fn a_sermon_referencing_a_nonexistent_service_is_rejected() {
+        let conn = migrated_conn();
+        let sermon = cip_core_sermon::foundation::Sermon::start(Uuid::new_v4(), None);
+        let result = persist_sermon(&conn, &sermon);
+        assert!(
+            result.is_err(),
+            "the schema's foreign key must reject an orphan sermon"
+        );
+    }
+
+    #[test]
+    fn opening_a_new_section_closes_the_previously_open_one() {
+        use cip_core_sermon::foundation::{SectionOrigin, SermonSection, SermonSectionKind};
+
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let sermon = seeded_sermon(&conn, session.id);
+
+        let intro = SermonSection::open(
+            sermon.id,
+            SermonSectionKind::Introduction,
+            SectionOrigin::SystemBoundary,
+            None,
+        );
+        persist_sermon_section(&conn, &intro).unwrap();
+        let open_count = list_sermon_sections(&conn, sermon.id)
+            .unwrap()
+            .iter()
+            .filter(|s| s.ended_at.is_none())
+            .count();
+        assert_eq!(open_count, 1);
+
+        let main = SermonSection::open(
+            sermon.id,
+            SermonSectionKind::MainMessage,
+            SectionOrigin::OperatorAssigned,
+            None,
+        );
+        close_open_sermon_section(&conn, sermon.id, main.started_at).unwrap();
+        persist_sermon_section(&conn, &main).unwrap();
+
+        let all = list_sermon_sections(&conn, sermon.id).unwrap();
+        assert_eq!(
+            all.len(),
+            2,
+            "the closed introduction section is never deleted"
+        );
+        let open_sections: Vec<_> = all.iter().filter(|s| s.ended_at.is_none()).collect();
+        assert_eq!(
+            open_sections.len(),
+            1,
+            "only one section may be open at a time"
+        );
+        assert_eq!(
+            open_sections[0].id, main.id,
+            "the new section is now the only open one"
+        );
+        let closed_intro = all.iter().find(|s| s.id == intro.id).unwrap();
+        assert!(
+            closed_intro.ended_at.is_some(),
+            "history is preserved, not overwritten"
+        );
+    }
+
+    #[test]
+    fn closing_when_nothing_is_open_is_a_harmless_no_op() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let sermon = seeded_sermon(&conn, session.id);
+        // No section has ever been opened for this sermon - must not error.
+        close_open_sermon_section(&conn, sermon.id, Utc::now()).unwrap();
+        assert!(list_sermon_sections(&conn, sermon.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn sermon_segments_persist_with_gapless_sequence_and_survive_reload() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let sermon = seeded_sermon(&conn, session.id);
+        let t1 = sample_transcript_segment("In the beginning.", 0);
+        let t2 = sample_transcript_segment("God created the heavens.", 1);
+        persist_transcript_segment(&conn, session.id, &t1).unwrap();
+        persist_transcript_segment(&conn, session.id, &t2).unwrap();
+
+        let seq0 = count_sermon_segments(&conn, sermon.id).unwrap();
+        assert_eq!(seq0, 0);
+        let seg1 = cip_core_sermon::foundation::SermonSegment::new(sermon.id, t1.id, seq0, None);
+        persist_sermon_segment(&conn, &seg1).unwrap();
+
+        let seq1 = count_sermon_segments(&conn, sermon.id).unwrap();
+        assert_eq!(seq1, 1);
+        let seg2 = cip_core_sermon::foundation::SermonSegment::new(sermon.id, t2.id, seq1, None);
+        persist_sermon_segment(&conn, &seg2).unwrap();
+
+        let reloaded = list_sermon_segments(&conn, sermon.id).unwrap();
+        assert_eq!(reloaded.len(), 2);
+        assert_eq!(reloaded[0].sequence, 0);
+        assert_eq!(reloaded[1].sequence, 1);
+        assert_eq!(reloaded[0].transcript_segment_id, t1.id);
+    }
+
+    #[test]
+    fn a_sermon_segment_referencing_an_unknown_transcript_segment_is_rejected() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let sermon = seeded_sermon(&conn, session.id);
+        let orphan =
+            cip_core_sermon::foundation::SermonSegment::new(sermon.id, Uuid::new_v4(), 0, None);
+        assert!(persist_sermon_segment(&conn, &orphan).is_err());
+    }
+
+    #[test]
+    fn get_transcript_segment_service_id_distinguishes_known_from_unknown() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let segment = sample_transcript_segment("Let us pray.", 0);
+        persist_transcript_segment(&conn, session.id, &segment).unwrap();
+
+        assert_eq!(
+            get_transcript_segment_service_id(&conn, segment.id).unwrap(),
+            Some(session.id)
+        );
+        assert_eq!(
+            get_transcript_segment_service_id(&conn, Uuid::new_v4()).unwrap(),
+            None
+        );
     }
 }

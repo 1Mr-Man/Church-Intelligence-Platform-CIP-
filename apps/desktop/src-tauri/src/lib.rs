@@ -12,6 +12,7 @@ mod persistence;
 mod pipeline;
 mod presentation;
 mod sermon;
+mod sermon_foundation;
 mod service;
 mod state;
 mod timeline;
@@ -194,6 +195,16 @@ pub fn run() {
                 "service intelligence engine initialized (deterministic, offline)"
             );
 
+            // Phase 2.5 (Sermon Foundation, per the authoritative Phase 2
+            // roadmap): deliberately has no `IntelligenceEngine` to
+            // register - see `sermon_foundation.rs`'s module docs. State
+            // lives on `AppState.active_sermon`/`active_sermon_section`,
+            // initialized empty in `AppState::new` below.
+            log::info!(
+                target: LogCategory::App.target(),
+                "sermon foundation initialized (deterministic, offline, no engine registration)"
+            );
+
             let audio_engine: Box<dyn cip_core_service::AudioEngine> =
                 Box::new(cip_integrations_audio::CpalAudioEngine::new());
             let speech_engine = create_speech_engine(&config);
@@ -277,6 +288,19 @@ pub fn run() {
             commands::accept_sermon_finding,
             commands::reject_sermon_finding,
             commands::get_sermon_state,
+            commands::get_sermon_foundation_state,
+            commands::start_sermon,
+            commands::pause_sermon,
+            commands::resume_sermon,
+            commands::end_sermon,
+            commands::set_sermon_title,
+            commands::assign_sermon_speaker,
+            commands::change_sermon_section,
+            commands::link_transcript_segment_to_sermon,
+            commands::list_sermon_segments,
+            commands::list_sermon_sections,
+            commands::list_sermon_history,
+            commands::get_sermon,
             commands::analyze_bible_transcript,
             commands::analyze_cross_domain,
             commands::list_cross_domain_correlations,

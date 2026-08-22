@@ -36,6 +36,7 @@ cip-core-service.workspace = true
 cip-core-confidence.workspace = true
 cip-core-intelligence.workspace = true
 cip-core-presentation.workspace = true
+cip-core-sermon.workspace = true
 cip-presentation-renderer.workspace = true
 cip-integrations-bible.workspace = true
 cip-integrations-audio.workspace = true

@@ -73,6 +73,22 @@ export const AppEvents = {
   ServicePhaseCorrected: "SERVICE_PHASE_CORRECTED",
   ServiceAnomalyDetected: "SERVICE_ANOMALY_DETECTED",
   ServiceAnomalyAcknowledged: "SERVICE_ANOMALY_ACKNOWLEDGED",
+
+  /** Payload is a `Sermon` (Phase 2.5, per the authoritative Phase 2
+   * roadmap) - distinct from the `SermonFinding*`/`SermonStructureUpdated`/
+   * `SermonThemeChanged`/`SermonStateChanged` events above, which belong
+   * to the earlier "Phase 2.3"-labeled semantic engine. */
+  SermonStarted: "SERMON_STARTED",
+  SermonPaused: "SERMON_PAUSED",
+  SermonResumed: "SERMON_RESUMED",
+  SermonEnded: "SERMON_ENDED",
+  /** Payload is a `SermonSection` (Phase 2.5). */
+  SermonSectionChanged: "SERMON_SECTION_CHANGED",
+  /** Payload is a `Sermon` (Phase 2.5). */
+  SermonSpeakerChanged: "SERMON_SPEAKER_CHANGED",
+  SermonMetadataChanged: "SERMON_METADATA_CHANGED",
+  /** Payload is a `SermonSegment` (Phase 2.5). */
+  SermonSegmentLinked: "SERMON_SEGMENT_LINKED",
 } as const;
 
 export type AppEventName = (typeof AppEvents)[keyof typeof AppEvents];

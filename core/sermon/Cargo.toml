@@ -10,3 +10,8 @@ repository.workspace = true
 [dependencies]
 serde.workspace = true
 regex.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

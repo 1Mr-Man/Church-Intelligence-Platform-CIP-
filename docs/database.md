@@ -76,6 +76,17 @@ Registry management, which `timeline.rs` deliberately maps onto the
 existing `'app'` bucket instead of extending the schema for a category
 with no real caller.
 
+`0008_sermon_foundation.sql` (Phase 2.5, per the authoritative Phase 2 roadmap) added three new
+tables - `sermons`, `sermon_sections`, `sermon_segments` - mirroring `services`' own persistence
+precedent (restart recovery / history / auditability). `sermons.service_id` references
+`services(id) ON DELETE CASCADE`; `sermon_segments` carries both a `sermon_id` and a
+`transcript_segment_id` foreign key (`ON DELETE CASCADE`, `UNIQUE(sermon_id,
+transcript_segment_id)` so a transcript segment is never linked twice to the same sermon) plus
+an optional `section_id` (`ON DELETE SET NULL`). No `audit_events.category` change was made -
+Sermon Foundation timeline entries use the existing `'app'` category, the same conservative
+choice `0007` already established for Content Registry management. See
+[`docs/sermon-foundation.md`](sermon-foundation.md#17-persistence-decision).
+
 ## Schema
 
 See [`database/schema/README.md`](../database/schema/README.md) for the

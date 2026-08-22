@@ -44,6 +44,8 @@ pub enum AppError {
     ContextBuild(#[from] crate::intelligence::ContextBuildError),
     #[error("no service is currently active - start one first")]
     NoActiveService,
+    #[error("no sermon is currently active - start one first")]
+    NoActiveSermon,
     #[error("invalid input: {0}")]
     InvalidInput(String),
 }
@@ -66,6 +68,7 @@ impl AppError {
             AppError::Intelligence(_) => LogCategory::Music,
             AppError::ContextBuild(_) => LogCategory::Music,
             AppError::NoActiveService => LogCategory::App,
+            AppError::NoActiveSermon => LogCategory::App,
             AppError::InvalidInput(_) => LogCategory::App,
         }
     }

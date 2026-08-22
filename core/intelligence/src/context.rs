@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use cip_core_ai::TranscriptSegment;
 use cip_core_bible::ScriptureContext;
 use cip_core_content::ContentMetadata;
+use cip_core_sermon::foundation::{Sermon, SermonSection, SermonSegment};
 use cip_core_service::ServiceStatus;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -33,6 +34,12 @@ use crate::finding::IntelligenceFinding;
 pub const DEFAULT_MAX_RECENT_TRANSCRIPT_SEGMENTS: usize = 20;
 pub const DEFAULT_MAX_RECENT_FINDINGS: usize = 20;
 pub const DEFAULT_MAX_RECENT_SERVICE_EVENTS: usize = 20;
+/// Bound for `IntelligenceContext.recent_sermon_segments` (Phase 2.5, per
+/// the authoritative Phase 2 roadmap) - same order of magnitude as the
+/// other "recent" bounds above, for the same reason: enough for an engine
+/// to see what recently belonged to the active sermon without holding a
+/// whole sermon's segment history.
+pub const DEFAULT_MAX_RECENT_SERMON_SEGMENTS: usize = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +47,7 @@ pub struct ContextBounds {
     pub max_recent_transcript_segments: usize,
     pub max_recent_findings: usize,
     pub max_recent_service_events: usize,
+    pub max_recent_sermon_segments: usize,
 }
 
 impl Default for ContextBounds {
@@ -48,6 +56,7 @@ impl Default for ContextBounds {
             max_recent_transcript_segments: DEFAULT_MAX_RECENT_TRANSCRIPT_SEGMENTS,
             max_recent_findings: DEFAULT_MAX_RECENT_FINDINGS,
             max_recent_service_events: DEFAULT_MAX_RECENT_SERVICE_EVENTS,
+            max_recent_sermon_segments: DEFAULT_MAX_RECENT_SERMON_SEGMENTS,
         }
     }
 }
@@ -100,6 +109,22 @@ pub struct IntelligenceContext {
     pub recent_findings: Vec<IntelligenceFinding>,
     pub recent_service_events: Vec<ServiceEventSummary>,
     pub content_metadata: Vec<ContentMetadata>,
+    /// The currently active Sermon Foundation entity (Phase 2.5, per the
+    /// authoritative Phase 2 roadmap), if any - `None` both when no
+    /// sermon is active and when the caller never attached sermon context
+    /// at all (see [`Self::with_sermon_context`]). Never set directly by
+    /// [`Self::build`], so every one of this crate's existing call sites
+    /// (Bible/Music/Sermon/CrossDomain/Service adapters and their tests)
+    /// remains valid, unmodified source - the same additive-extension
+    /// discipline `IntelligenceFinding`'s own `with_*` builder methods
+    /// already establish.
+    pub active_sermon: Option<Sermon>,
+    /// The sermon section open at the moment this context was built, if
+    /// any.
+    pub current_sermon_section: Option<SermonSection>,
+    /// Bounded by `bounds.max_recent_sermon_segments` - see
+    /// [`Self::with_sermon_context`].
+    pub recent_sermon_segments: Vec<SermonSegment>,
     pub bounds: ContextBounds,
 }
 
@@ -136,8 +161,33 @@ impl IntelligenceContext {
                 bounds.max_recent_service_events,
             ),
             content_metadata,
+            active_sermon: None,
+            current_sermon_section: None,
+            recent_sermon_segments: Vec::new(),
             bounds,
         }
+    }
+
+    /// Attach Sermon Foundation context (Phase 2.5, per the authoritative
+    /// Phase 2 roadmap) additively, after [`Self::build`] - never a
+    /// required constructor argument, so no existing caller of `build`
+    /// needs to change. `recent_sermon_segments` is truncated to this
+    /// context's own `bounds.max_recent_sermon_segments`, the same
+    /// most-recent-first truncation every other bounded collection here
+    /// already uses.
+    pub fn with_sermon_context(
+        mut self,
+        active_sermon: Option<Sermon>,
+        current_sermon_section: Option<SermonSection>,
+        recent_sermon_segments: Vec<SermonSegment>,
+    ) -> Self {
+        self.active_sermon = active_sermon;
+        self.current_sermon_section = current_sermon_section;
+        self.recent_sermon_segments = truncate_to_most_recent(
+            recent_sermon_segments,
+            self.bounds.max_recent_sermon_segments,
+        );
+        self
     }
 
     /// Retrieve the slice of context named by `window` - a documentation-
@@ -311,6 +361,91 @@ mod tests {
         ));
     }
 
+    // --- Sermon Foundation context extension (Phase 2.5) --------------------
+
+    #[test]
+    fn a_plain_build_never_carries_sermon_context() {
+        let context = IntelligenceContext::build(
+            Uuid::new_v4(),
+            None,
+            None,
+            Vec::new(),
+            None,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            ContextBounds::default(),
+        );
+        assert!(context.active_sermon.is_none());
+        assert!(context.current_sermon_section.is_none());
+        assert!(context.recent_sermon_segments.is_empty());
+    }
+
+    #[test]
+    fn with_sermon_context_truncates_recent_segments_to_bounds() {
+        use cip_core_sermon::foundation::SermonSegment;
+
+        let sermon_id = Uuid::new_v4();
+        let segments: Vec<SermonSegment> = (0..50)
+            .map(|i| SermonSegment::new(sermon_id, Uuid::new_v4(), i, None))
+            .collect();
+        let bounds = ContextBounds {
+            max_recent_sermon_segments: 5,
+            ..ContextBounds::default()
+        };
+        let context = IntelligenceContext::build(
+            Uuid::new_v4(),
+            None,
+            None,
+            Vec::new(),
+            None,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            bounds,
+        )
+        .with_sermon_context(None, None, segments);
+
+        assert_eq!(context.recent_sermon_segments.len(), 5);
+        let kept: Vec<u32> = context
+            .recent_sermon_segments
+            .iter()
+            .map(|s| s.sequence)
+            .collect();
+        assert_eq!(
+            kept,
+            vec![45, 46, 47, 48, 49],
+            "keeps the most recent, not the first"
+        );
+    }
+
+    #[test]
+    fn ten_thousand_sermon_segments_never_produce_an_unbounded_context() {
+        use cip_core_sermon::foundation::SermonSegment;
+
+        let sermon_id = Uuid::new_v4();
+        let segments: Vec<SermonSegment> = (0..10_000)
+            .map(|i| SermonSegment::new(sermon_id, Uuid::new_v4(), i, None))
+            .collect();
+        let context = IntelligenceContext::build(
+            Uuid::new_v4(),
+            None,
+            None,
+            Vec::new(),
+            None,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            ContextBounds::default(),
+        )
+        .with_sermon_context(None, None, segments);
+
+        assert_eq!(
+            context.recent_sermon_segments.len(),
+            DEFAULT_MAX_RECENT_SERMON_SEGMENTS
+        );
+    }
+
     #[test]
     fn context_serializes_with_camel_case_fields() {
         let context = IntelligenceContext::build(
@@ -328,5 +463,8 @@ mod tests {
         assert!(json.get("recentTranscriptSegments").is_some());
         assert!(json.get("activeScriptureContext").is_some());
         assert!(json.get("contentMetadata").is_some());
+        assert!(json.get("activeSermon").is_some());
+        assert!(json.get("currentSermonSection").is_some());
+        assert!(json.get("recentSermonSegments").is_some());
     }
 }

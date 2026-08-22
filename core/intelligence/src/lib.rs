@@ -65,8 +65,8 @@ pub mod service_adapter;
 pub use bible_adapter::{BibleIntelligenceEngine, BIBLE_ENGINE_ID, BIBLE_ENGINE_VERSION};
 pub use context::{
     ContextBounds, ContextWindow, ContextWindowView, IntelligenceContext, ServiceEventSummary,
-    DEFAULT_MAX_RECENT_FINDINGS, DEFAULT_MAX_RECENT_SERVICE_EVENTS,
-    DEFAULT_MAX_RECENT_TRANSCRIPT_SEGMENTS,
+    DEFAULT_MAX_RECENT_FINDINGS, DEFAULT_MAX_RECENT_SERMON_SEGMENTS,
+    DEFAULT_MAX_RECENT_SERVICE_EVENTS, DEFAULT_MAX_RECENT_TRANSCRIPT_SEGMENTS,
 };
 pub use correlation::{CorrelationKind, IntelligenceCorrelation};
 pub use cross_domain::{

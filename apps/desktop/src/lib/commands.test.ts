@@ -17,32 +17,45 @@ import {
   analyzeMusicTranscript,
   analyzeSermonTranscript,
   analyzeServiceTranscript,
+  assignSermonSpeaker,
+  changeSermonSection,
   checkBibleDatasetIntegrity,
   clearCurrentSong,
   correctServicePhase,
   createManualPresentation,
   dismissCrossDomainCorrelation,
+  endSermon,
   getAppConfig,
   getIntelligenceCapabilities,
   getServiceIntelligenceState,
+  getSermon,
+  getSermonFoundationState,
   getSermonState,
   importBibleDataset,
   importMusicDataset,
+  linkTranscriptSegmentToSermon,
   listContentRegistry,
   listCrossDomainCorrelations,
   listMusicFindings,
   listServiceAnomalies,
   listServiceTransitions,
   listSermonFindings,
+  listSermonHistory,
+  listSermonSections,
+  listSermonSegments,
   markServicePhase,
+  pauseSermon,
   previewPresentation,
   previewScripture,
   rejectMusicFinding,
   rejectSermonFinding,
+  resumeSermon,
   reviewCrossDomainCorrelation,
   searchBible,
   searchMusic,
   setContentEnabled,
+  setSermonTitle,
+  startSermon,
   TauriUnavailableError,
 } from "./commands";
 
@@ -491,6 +504,115 @@ describe("commands.ts Tauri IPC guard", () => {
     await expect(markServicePhase("sermon")).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(correctServicePhase("sermon")).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(acknowledgeServiceAnomaly("id")).rejects.toBeInstanceOf(TauriUnavailableError);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  // --- sermon foundation (Phase 2.5, per the authoritative Phase 2 roadmap) --
+
+  it("getSermonFoundationState calls get_sermon_foundation_state with no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({ activeSermon: null, currentSection: null });
+
+    await getSermonFoundationState();
+
+    expect(invokeMock).toHaveBeenCalledWith("get_sermon_foundation_state", undefined);
+  });
+
+  it("startSermon passes title as null when omitted, and the given string otherwise", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await startSermon();
+    await startSermon("Grace Abounding");
+
+    expect(invokeMock).toHaveBeenCalledWith("start_sermon", { title: null });
+    expect(invokeMock).toHaveBeenCalledWith("start_sermon", { title: "Grace Abounding" });
+  });
+
+  it("pauseSermon, resumeSermon, and endSermon each call their own distinct command with no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await pauseSermon();
+    await resumeSermon();
+    await endSermon();
+
+    expect(invokeMock).toHaveBeenCalledWith("pause_sermon", undefined);
+    expect(invokeMock).toHaveBeenCalledWith("resume_sermon", undefined);
+    expect(invokeMock).toHaveBeenCalledWith("end_sermon", undefined);
+  });
+
+  it("setSermonTitle and assignSermonSpeaker pass exactly the supplied values", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await setSermonTitle("Faith That Moves");
+    await assignSermonSpeaker("Pastor Jane Doe", "primary");
+
+    expect(invokeMock).toHaveBeenCalledWith("set_sermon_title", { title: "Faith That Moves" });
+    expect(invokeMock).toHaveBeenCalledWith("assign_sermon_speaker", {
+      name: "Pastor Jane Doe",
+      role: "primary",
+    });
+  });
+
+  it("changeSermonSection passes kind and an explicit null note by default", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await changeSermonSection("main_message");
+    await changeSermonSection("illustration", "moved early");
+
+    expect(invokeMock).toHaveBeenCalledWith("change_sermon_section", { kind: "main_message", note: null });
+    expect(invokeMock).toHaveBeenCalledWith("change_sermon_section", {
+      kind: "illustration",
+      note: "moved early",
+    });
+  });
+
+  it("linkTranscriptSegmentToSermon calls only link_transcript_segment_to_sermon, never a presentation command", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await linkTranscriptSegmentToSermon("segment-1");
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("link_transcript_segment_to_sermon", {
+      transcriptSegmentId: "segment-1",
+    });
+  });
+
+  it("listSermonSegments, listSermonSections, listSermonHistory, and getSermon each call their own distinct command", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await listSermonSegments();
+    await listSermonSections();
+    await listSermonHistory(10);
+    await getSermon("sermon-1");
+
+    expect(invokeMock).toHaveBeenCalledWith("list_sermon_segments", undefined);
+    expect(invokeMock).toHaveBeenCalledWith("list_sermon_sections", undefined);
+    expect(invokeMock).toHaveBeenCalledWith("list_sermon_history", { limit: 10 });
+    expect(invokeMock).toHaveBeenCalledWith("get_sermon", { sermonId: "sermon-1" });
+  });
+
+  it("rejects every sermon foundation command outside the Tauri runtime, without calling invoke()", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    await expect(getSermonFoundationState()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(startSermon()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(pauseSermon()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(resumeSermon()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(endSermon()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(setSermonTitle("x")).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(assignSermonSpeaker("x", "primary")).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(changeSermonSection("prayer")).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(linkTranscriptSegmentToSermon("id")).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(listSermonSegments()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(listSermonSections()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(listSermonHistory(10)).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(getSermon("id")).rejects.toBeInstanceOf(TauriUnavailableError);
     expect(invokeMock).not.toHaveBeenCalled();
   });
 });

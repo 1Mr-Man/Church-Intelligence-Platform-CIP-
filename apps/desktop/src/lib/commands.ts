@@ -32,6 +32,10 @@ import type {
   PresentationPreview,
   ProcessedSegment,
   ScriptureContext,
+  Sermon,
+  SermonFoundationSummary,
+  SermonSection,
+  SermonSegment,
   ServiceIntelligenceSummary,
   ServiceSession,
   SermonStateSnapshot,
@@ -388,6 +392,88 @@ export function rejectSermonFinding(findingId: string): Promise<IntelligenceFind
 /** The current theme/state/structure snapshot - read-only, safe to poll. */
 export function getSermonState(): Promise<SermonStateSnapshot> {
   return invokeCommand("get_sermon_state");
+}
+
+// --- sermon foundation (Phase 2.5, per the authoritative Phase 2 roadmap) --
+//
+// The durable entity/lifecycle layer beneath the semantic Sermon
+// Intelligence commands above (built under this repository's earlier
+// internal "Phase 2.3" label) - see `docs/sermon-foundation.md`. Every
+// function here is an explicit operator action.
+
+/** The current structural summary - active sermon and current section,
+ * independent of any pending finding review state. Read-only, safe to poll. */
+export function getSermonFoundationState(): Promise<SermonFoundationSummary> {
+  return invokeCommand("get_sermon_foundation_state");
+}
+
+/** Starts a new sermon within the active service - begins delivering
+ * immediately (no separate "planned" step in this phase's workflow),
+ * automatically opening an `introduction` section. */
+export function startSermon(title?: string): Promise<Sermon> {
+  return invokeCommand("start_sermon", { title: title ?? null });
+}
+
+export function pauseSermon(): Promise<Sermon> {
+  return invokeCommand("pause_sermon");
+}
+
+export function resumeSermon(): Promise<Sermon> {
+  return invokeCommand("resume_sermon");
+}
+
+export function endSermon(): Promise<Sermon> {
+  return invokeCommand("end_sermon");
+}
+
+/** Explicit operator correction/assignment of the active sermon's title -
+ * calling this again later is how a title is corrected, not a separate
+ * "correct" action. */
+export function setSermonTitle(title: string): Promise<Sermon> {
+  return invokeCommand("set_sermon_title", { title });
+}
+
+/** Explicit operator speaker assignment - never automatic/biometric
+ * speaker recognition. */
+export function assignSermonSpeaker(name: string, role: "primary" | "guest"): Promise<Sermon> {
+  return invokeCommand("assign_sermon_speaker", { name, role });
+}
+
+/** Explicit operator section assignment - closes whatever section was
+ * previously open and opens the new one; never inferred from transcript
+ * content in this phase. */
+export function changeSermonSection(kind: string, note?: string): Promise<SermonSection> {
+  return invokeCommand("change_sermon_section", { kind, note: note ?? null });
+}
+
+/** Explicitly links an already-persisted transcript segment (from any
+ * existing ingestion path) to the active sermon - never a second
+ * transcript-creation path. */
+export function linkTranscriptSegmentToSermon(transcriptSegmentId: string): Promise<SermonSegment> {
+  return invokeCommand("link_transcript_segment_to_sermon", { transcriptSegmentId });
+}
+
+/** Every transcript segment linked to the active sermon, in link order. */
+export function listSermonSegments(): Promise<SermonSegment[]> {
+  return invokeCommand("list_sermon_segments");
+}
+
+/** Every section (open or closed) recorded for the active sermon, in the
+ * order they were opened. */
+export function listSermonSections(): Promise<SermonSection[]> {
+  return invokeCommand("list_sermon_sections");
+}
+
+/** Sermons previously delivered in the active service, most recently
+ * created first - the sermon-history counterpart to `listServiceHistory`. */
+export function listSermonHistory(limit: number): Promise<Sermon[]> {
+  return invokeCommand("list_sermon_history", { limit });
+}
+
+/** A single sermon by id, independent of whichever one (if any) is
+ * currently active - the sermon archive's detail view. */
+export function getSermon(sermonId: string): Promise<Sermon> {
+  return invokeCommand("get_sermon", { sermonId });
 }
 
 // --- bible intelligence bridge (Phase 2.4) --------------------------------------

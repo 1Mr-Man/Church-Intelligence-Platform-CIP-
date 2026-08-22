@@ -343,3 +343,11 @@ Service Intelligence's `ServiceState` findings are ordinary findings in that sam
 Intelligence to eventually correlate a service phase with, e.g., a sermon point or a Bible
 reference detected in the same window - that correlation logic itself belongs to the future,
 formal Phase 2.8 validation and is intentionally not built here.
+
+## Note: Phase 2.5, Sermon Intelligence Foundation
+
+The next roadmap phase after this one, Sermon Intelligence Foundation, extends
+`IntelligenceContext` additively - a new `with_sermon_context` builder method attaching
+`active_sermon`/`current_sermon_section`/`recent_sermon_segments`, called after `build()` so no
+existing call site (including this phase's own) needs to change - rather than adding a fifth
+engine. See [`docs/sermon-foundation.md`](sermon-foundation.md).

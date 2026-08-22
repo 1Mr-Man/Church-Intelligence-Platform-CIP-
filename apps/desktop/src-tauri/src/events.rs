@@ -129,6 +129,29 @@ pub enum AppEvent {
     ServiceAnomalyDetected,
     /// The operator acknowledged (accepted) an anomaly finding.
     ServiceAnomalyAcknowledged,
+
+    /// A sermon became active (Phase 2.5, per the authoritative Phase 2
+    /// roadmap) - distinct from the historical `SermonFindingDetected`
+    /// etc. above, which belong to the earlier "Phase 2.3"-labeled
+    /// semantic engine (`sermon.rs`). See `docs/sermon-foundation.md`.
+    SermonStarted,
+    SermonPaused,
+    SermonResumed,
+    SermonEnded,
+    /// The operator explicitly assigned or changed the active sermon's
+    /// current structural section - never inferred from transcript
+    /// content in this phase.
+    SermonSectionChanged,
+    SermonSpeakerChanged,
+    /// The operator supplied or corrected sermon metadata (currently:
+    /// title) - `SermonSpeakerChanged` is emitted separately for speaker
+    /// assignment, which carries its own richer payload shape.
+    SermonMetadataChanged,
+    /// An existing transcript segment was explicitly linked to the active
+    /// sermon (`link_transcript_segment_to_sermon`) - never implies the
+    /// transcript segment itself was created, modified, or reassigned
+    /// silently.
+    SermonSegmentLinked,
 }
 
 impl AppEvent {
@@ -188,6 +211,15 @@ impl AppEvent {
             AppEvent::ServicePhaseCorrected => "SERVICE_PHASE_CORRECTED",
             AppEvent::ServiceAnomalyDetected => "SERVICE_ANOMALY_DETECTED",
             AppEvent::ServiceAnomalyAcknowledged => "SERVICE_ANOMALY_ACKNOWLEDGED",
+
+            AppEvent::SermonStarted => "SERMON_STARTED",
+            AppEvent::SermonPaused => "SERMON_PAUSED",
+            AppEvent::SermonResumed => "SERMON_RESUMED",
+            AppEvent::SermonEnded => "SERMON_ENDED",
+            AppEvent::SermonSectionChanged => "SERMON_SECTION_CHANGED",
+            AppEvent::SermonSpeakerChanged => "SERMON_SPEAKER_CHANGED",
+            AppEvent::SermonMetadataChanged => "SERMON_METADATA_CHANGED",
+            AppEvent::SermonSegmentLinked => "SERMON_SEGMENT_LINKED",
         }
     }
 }
@@ -253,6 +285,14 @@ mod tests {
             AppEvent::ServicePhaseCorrected,
             AppEvent::ServiceAnomalyDetected,
             AppEvent::ServiceAnomalyAcknowledged,
+            AppEvent::SermonStarted,
+            AppEvent::SermonPaused,
+            AppEvent::SermonResumed,
+            AppEvent::SermonEnded,
+            AppEvent::SermonSectionChanged,
+            AppEvent::SermonSpeakerChanged,
+            AppEvent::SermonMetadataChanged,
+            AppEvent::SermonSegmentLinked,
         ];
         let mut names: Vec<&str> = events.iter().map(|e| e.name()).collect();
         let unique_before = names.len();

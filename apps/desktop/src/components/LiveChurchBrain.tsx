@@ -16,6 +16,8 @@ import type {
   ScriptureContext,
   ScriptureDetection,
   ScriptureReference,
+  SermonFoundationSummary,
+  SermonSegment,
   ServiceIntelligenceSummary,
   ServiceSession,
   SermonStateSnapshot,
@@ -117,6 +119,17 @@ export function LiveChurchBrain() {
   const [sermonFindings, setSermonFindings] = useState<IntelligenceFinding[]>([]);
   const [sermonState, setSermonState] = useState<SermonStateSnapshot | null>(null);
   const [sermonManualText, setSermonManualText] = useState("");
+  // Sermon Foundation (Phase 2.5, per the authoritative Phase 2 roadmap) -
+  // the structural entity/lifecycle layer, distinct from the semantic
+  // Sermon Intelligence state above. `sermonFoundation` is the read-only
+  // active-sermon/current-section summary; segments are the transcript-
+  // linkage history (see docs/sermon-foundation.md).
+  const [sermonFoundation, setSermonFoundation] = useState<SermonFoundationSummary | null>(null);
+  const [sermonSegments, setSermonSegments] = useState<SermonSegment[]>([]);
+  const [sermonTitleInput, setSermonTitleInput] = useState("");
+  const [sermonSpeakerNameInput, setSermonSpeakerNameInput] = useState("");
+  const [sermonSpeakerRoleInput, setSermonSpeakerRoleInput] = useState<"primary" | "guest">("primary");
+  const [sermonSectionChoice, setSermonSectionChoice] = useState("main_message");
   // Cross-Domain Intelligence (Phase 2.4) - read-only: correlations only
   // ever appear from an explicit "Run analysis" action or the
   // review/dismiss operator actions below, never automatically. `bibleManualText`
@@ -198,6 +211,8 @@ export function LiveChurchBrain() {
       commands.listCrossDomainCorrelations().then(setCrossDomainCorrelations).catch(() => {});
       commands.listServiceTransitions().then(setServiceTransitions).catch(() => {});
       commands.listServiceAnomalies().then(setServiceAnomalies).catch(() => {});
+      commands.getSermonFoundationState().then(setSermonFoundation).catch(() => {});
+      commands.listSermonSegments().then(setSermonSegments).catch(() => {});
     } else {
       setSuggestions([]);
       setApprovedSuggestions([]);
@@ -217,6 +232,8 @@ export function LiveChurchBrain() {
       setCrossDomainCorrelations([]);
       setServiceTransitions([]);
       setServiceAnomalies([]);
+      setSermonFoundation(null);
+      setSermonSegments([]);
     }
   }, [activeServiceId]);
 
@@ -320,6 +337,28 @@ export function LiveChurchBrain() {
       liveEvents.onServiceAnomalyAcknowledged((finding) =>
         setServiceAnomalies((prev) => prev.filter((f) => f.id !== finding.id)),
       ),
+      liveEvents.onSermonStarted((sermon) =>
+        setSermonFoundation((prev) => ({ activeSermon: sermon, currentSection: prev?.currentSection ?? null })),
+      ),
+      liveEvents.onSermonPaused((sermon) =>
+        setSermonFoundation((prev) => (prev ? { ...prev, activeSermon: sermon } : prev)),
+      ),
+      liveEvents.onSermonResumed((sermon) =>
+        setSermonFoundation((prev) => (prev ? { ...prev, activeSermon: sermon } : prev)),
+      ),
+      liveEvents.onSermonEnded((sermon) =>
+        setSermonFoundation((prev) => (prev ? { ...prev, activeSermon: sermon, currentSection: null } : prev)),
+      ),
+      liveEvents.onSermonSectionChanged((section) =>
+        setSermonFoundation((prev) => (prev ? { ...prev, currentSection: section } : prev)),
+      ),
+      liveEvents.onSermonSpeakerChanged((sermon) =>
+        setSermonFoundation((prev) => (prev ? { ...prev, activeSermon: sermon } : prev)),
+      ),
+      liveEvents.onSermonMetadataChanged((sermon) =>
+        setSermonFoundation((prev) => (prev ? { ...prev, activeSermon: sermon } : prev)),
+      ),
+      liveEvents.onSermonSegmentLinked((segment) => setSermonSegments((prev) => [...prev, segment])),
     ];
     return () => {
       subscriptions.forEach((p) => p.then((unlisten) => unlisten()));
@@ -1217,6 +1256,172 @@ export function LiveChurchBrain() {
             </ul>
           )}
         </details>
+      </section>
+
+      <section className="live-brain__panel">
+        <h2>Sermon Foundation</h2>
+        <p className="live-brain__hint">
+          Structural message context (Phase 2.5, per the authoritative Phase 2 roadmap): what sermon is active, who
+          is speaking, and which section it's in - deterministic facts and explicit operator actions only. This is
+          not "AI understands your sermon" - semantic understanding (themes, main points) is the separate Sermon
+          Intelligence panel below.
+        </p>
+
+        <div className="live-brain__row">
+          <span>
+            {sermonFoundation?.activeSermon ? (
+              <>
+                <strong>{sermonFoundation.activeSermon.title ?? "(untitled sermon)"}</strong>
+                {" - "}
+                {sermonFoundation.activeSermon.status.toUpperCase()}
+                {sermonFoundation.activeSermon.speaker && <> &middot; {sermonFoundation.activeSermon.speaker.name}</>}
+                {sermonFoundation.activeSermon.startedAt && (
+                  <> &middot; since {formatClockTime(sermonFoundation.activeSermon.startedAt)}</>
+                )}
+              </>
+            ) : (
+              "No active sermon."
+            )}
+          </span>
+        </div>
+        <p className="live-brain__hint">
+          Current section:{" "}
+          {sermonFoundation?.currentSection ? (
+            <>
+              <strong>{sermonFoundation.currentSection.kind.toUpperCase()}</strong> (
+              {sermonFoundation.currentSection.origin.replace("_", " ")})
+            </>
+          ) : (
+            "none"
+          )}
+          {" "}&middot; {sermonSegments.length} transcript segment(s) linked
+        </p>
+
+        <div className="live-brain__row">
+          <button
+            type="button"
+            disabled={!status?.service || !!sermonFoundation?.activeSermon || isBusy("sermon-start")}
+            onClick={() =>
+              withBusy("sermon-start", async () => {
+                await commands.startSermon(sermonTitleInput.trim() || undefined);
+                setSermonTitleInput("");
+                commands.getSermonFoundationState().then(setSermonFoundation).catch(() => {});
+              })
+            }
+          >
+            Start sermon
+          </button>
+          <button
+            type="button"
+            disabled={sermonFoundation?.activeSermon?.status !== "active" || isBusy("sermon-pause")}
+            onClick={() => withBusy("sermon-pause", async () => { await commands.pauseSermon(); })}
+          >
+            Pause
+          </button>
+          <button
+            type="button"
+            disabled={sermonFoundation?.activeSermon?.status !== "paused" || isBusy("sermon-resume")}
+            onClick={() => withBusy("sermon-resume", async () => { await commands.resumeSermon(); })}
+          >
+            Resume
+          </button>
+          <button
+            type="button"
+            disabled={!sermonFoundation?.activeSermon || isBusy("sermon-end")}
+            onClick={() => withBusy("sermon-end", async () => { await commands.endSermon(); })}
+          >
+            End
+          </button>
+        </div>
+
+        <div className="live-brain__row">
+          <input
+            value={sermonTitleInput}
+            onChange={(e) => setSermonTitleInput(e.target.value)}
+            placeholder="Sermon title (used on start, or set below)"
+            aria-label="Sermon title"
+          />
+          <button
+            type="button"
+            disabled={!sermonFoundation?.activeSermon || !sermonTitleInput.trim() || isBusy("sermon-title")}
+            onClick={() =>
+              withBusy("sermon-title", async () => {
+                await commands.setSermonTitle(sermonTitleInput.trim());
+                setSermonTitleInput("");
+              })
+            }
+          >
+            Set title
+          </button>
+        </div>
+
+        <div className="live-brain__row">
+          <input
+            value={sermonSpeakerNameInput}
+            onChange={(e) => setSermonSpeakerNameInput(e.target.value)}
+            placeholder="Speaker name"
+            aria-label="Sermon speaker name"
+          />
+          <select
+            value={sermonSpeakerRoleInput}
+            onChange={(e) => setSermonSpeakerRoleInput(e.target.value as "primary" | "guest")}
+            aria-label="Sermon speaker role"
+          >
+            <option value="primary">PRIMARY</option>
+            <option value="guest">GUEST</option>
+          </select>
+          <button
+            type="button"
+            disabled={!sermonFoundation?.activeSermon || !sermonSpeakerNameInput.trim() || isBusy("sermon-speaker")}
+            onClick={() =>
+              withBusy("sermon-speaker", async () => {
+                await commands.assignSermonSpeaker(sermonSpeakerNameInput.trim(), sermonSpeakerRoleInput);
+                setSermonSpeakerNameInput("");
+              })
+            }
+          >
+            Assign speaker
+          </button>
+        </div>
+
+        <div className="live-brain__row">
+          <select
+            value={sermonSectionChoice}
+            onChange={(e) => setSermonSectionChoice(e.target.value)}
+            aria-label="Sermon section"
+          >
+            {["introduction", "scripture_reading", "main_message", "illustration", "prayer", "altar_call", "conclusion"].map(
+              (kind) => (
+                <option key={kind} value={kind}>
+                  {kind.toUpperCase()}
+                </option>
+              ),
+            )}
+          </select>
+          <button
+            type="button"
+            disabled={!sermonFoundation?.activeSermon || isBusy("sermon-section")}
+            onClick={() =>
+              withBusy("sermon-section", async () => {
+                await commands.changeSermonSection(sermonSectionChoice);
+              })
+            }
+          >
+            Change section
+          </button>
+          <button
+            type="button"
+            disabled={!sermonFoundation?.activeSermon || transcript.length === 0 || isBusy("sermon-link")}
+            onClick={() =>
+              withBusy("sermon-link", async () => {
+                const latest = transcript[transcript.length - 1];
+                if (latest) await commands.linkTranscriptSegmentToSermon(latest.id);
+              })
+            }
+          >
+            Link latest transcript segment
+          </button>
+        </div>
       </section>
 
       <section className="live-brain__panel">

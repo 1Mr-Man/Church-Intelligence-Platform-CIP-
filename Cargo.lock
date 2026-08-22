@@ -532,8 +532,11 @@ dependencies = [
 name = "cip-core-sermon"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "regex",
  "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -571,6 +574,7 @@ dependencies = [
  "cip-core-intelligence",
  "cip-core-music",
  "cip-core-presentation",
+ "cip-core-sermon",
  "cip-core-service",
  "cip-database",
  "cip-integrations-audio",

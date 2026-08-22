@@ -48,19 +48,25 @@ not replace the operator's judgment.
 | `core/presentation`     | `PresentationItem` - *what* is shown, not how it's rendered       |
 | `core/search`           | `SearchEngine` - a single source-agnostic query contract          |
 | `core/confidence`       | `ConfidenceResult` - shared by every domain that produces an uncertain, AI-derived result |
-| `core/sermon`           | Sermon taxonomy, deterministic phrase-anchored structural/theme detection, sermon-state inference (Phase 2.3) |
+| `core/sermon`           | Sermon taxonomy, deterministic phrase-anchored structural/theme detection, sermon-state inference (built under an earlier internal "Phase 2.3" label - see the roadmap note below); its `foundation` submodule: the Sermon entity/lifecycle/section/speaker/segment model, this repository's authoritative Phase 2.5 - see [`docs/sermon-foundation.md`](sermon-foundation.md) |
 
 > **Roadmap note.** This repository's authoritative Phase 2 roadmap is:
 > 2.0 Intelligence Architecture -> 2.1 Unified Intelligence Event/Context
 > Layer -> 2.2 Music Content Foundation -> 2.3 Music Intelligence -> **2.4
-> Service Intelligence** -> 2.5 Sermon Intelligence Foundation -> 2.6
+> Service Intelligence** -> **2.5 Sermon Intelligence Foundation** -> 2.6
 > Sermon Intelligence -> 2.7 Content Intelligence -> **2.8 Cross-Domain
 > Intelligence** -> 2.9 Unified Operator Intelligence Workspace -> 2.10
 > Full Phase 2 Validation. The cross-domain correlation rule engine
-> referenced above was built under an earlier, internal "Phase 2.4" label
-> before this roadmap was adopted; that label is a historical artifact
-> and is not rewritten, and the code/docs it produced are unchanged - it
-> is reserved for formal validation under the roadmap's actual Phase 2.8.
+> referenced above, and `core/sermon`'s own semantic detection modules
+> (`detection`/`state`/`structure`/`taxonomy`/`theme`), were both built
+> under earlier, internal phase labels ("Phase 2.4" and "Phase 2.3"
+> respectively) before this roadmap was adopted; those labels are
+> historical artifacts and are not rewritten, and the code/docs they
+> produced are unchanged. The cross-domain engine is reserved for formal
+> validation under the roadmap's actual Phase 2.8; the semantic sermon
+> detection is understood as Phase 2.6-equivalent, with the roadmap's
+> actual Phase 2.5 being the separate `foundation` submodule referenced
+> above.
 
 `core/confidence` is the one crate every other domain may depend on; the
 rest do not depend on each other except through two documented

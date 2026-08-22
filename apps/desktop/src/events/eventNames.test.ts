@@ -5,7 +5,7 @@ describe("AppEvents", () => {
   const names = Object.values(AppEvents);
 
   it("defines exactly the 42 events from the Phase 1/1.2/1.3/1.4/2.0-2.4 event architecture", () => {
-    expect(names).toHaveLength(42);
+    expect(names).toHaveLength(50);
   });
 
   it("has no duplicate event names", () => {

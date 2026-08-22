@@ -21,6 +21,14 @@ import {
   onSermonFindingRejected,
   onSermonStateChanged,
   onSermonStructureUpdated,
+  onSermonEnded,
+  onSermonMetadataChanged,
+  onSermonPaused,
+  onSermonResumed,
+  onSermonSectionChanged,
+  onSermonSegmentLinked,
+  onSermonSpeakerChanged,
+  onSermonStarted,
   onSermonThemeChanged,
   onServiceAnomalyAcknowledged,
   onServiceAnomalyDetected,
@@ -188,6 +196,51 @@ describe("liveEvents.ts Tauri event-subscription guard", () => {
     isTauriMock.mockReturnValue(false);
 
     const unlisten = await onServicePhaseChanged(() => {});
+
+    expect(listenMock).not.toHaveBeenCalled();
+    expect(() => unlisten()).not.toThrow();
+  });
+
+  // --- sermon foundation (Phase 2.5, per the authoritative Phase 2 roadmap) --
+
+  it("subscribes to the eight distinct sermon foundation events", async () => {
+    isTauriMock.mockReturnValue(true);
+    listenMock.mockResolvedValue(() => {});
+
+    await onSermonStarted(() => {});
+    await onSermonPaused(() => {});
+    await onSermonResumed(() => {});
+    await onSermonEnded(() => {});
+    await onSermonSectionChanged(() => {});
+    await onSermonSpeakerChanged(() => {});
+    await onSermonMetadataChanged(() => {});
+    await onSermonSegmentLinked(() => {});
+
+    expect(listenMock).toHaveBeenCalledWith("SERMON_STARTED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("SERMON_PAUSED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("SERMON_RESUMED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("SERMON_ENDED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("SERMON_SECTION_CHANGED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("SERMON_SPEAKER_CHANGED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("SERMON_METADATA_CHANGED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("SERMON_SEGMENT_LINKED", expect.any(Function));
+  });
+
+  it("subscribes to sermon foundation events distinct from the semantic Sermon Intelligence events", async () => {
+    isTauriMock.mockReturnValue(true);
+    listenMock.mockResolvedValue(() => {});
+
+    await onSermonStarted(() => {});
+    await onSermonStateChanged(() => {});
+
+    const calledNames = listenMock.mock.calls.map((call) => call[0]);
+    expect(new Set(calledNames).size).toBe(calledNames.length);
+  });
+
+  it("resolves to a no-op unlisten for every sermon foundation event outside the Tauri runtime", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    const unlisten = await onSermonStarted(() => {});
 
     expect(listenMock).not.toHaveBeenCalled();
     expect(() => unlisten()).not.toThrow();

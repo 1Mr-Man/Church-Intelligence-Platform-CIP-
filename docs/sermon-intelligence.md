@@ -7,6 +7,16 @@ stories/examples, applications, prayer points, reflections, transitions,
 and conclusion signals - continuously updated as the sermon progresses,
 never fabricated.
 
+> **Roadmap note.** This repository's authoritative Phase 2 roadmap places
+> Sermon Intelligence Foundation at 2.5 and formal Sermon Intelligence at
+> 2.6 - see [`docs/sermon-foundation.md`](sermon-foundation.md). This
+> document's own "Phase 2.3" heading is a historical label from before
+> that roadmap was adopted and is not rewritten; the semantic detection
+> work described below is understood as Phase 2.6-equivalent and remains
+> unchanged. Sermon Foundation adds a separate, prerequisite entity/
+> lifecycle layer (`Sermon`/`SermonSection`/`Speaker`/`SermonSegment`) that
+> this document's `SermonIntelligenceEngine` does not use or depend on.
+
 ## The core discipline: OBSERVED ≠ INFERRED ≠ SUGGESTED ≠ GENERATED
 
 Phase 2.3 reuses Phase 2.0's `AssertionLevel` exactly (see

@@ -20,7 +20,10 @@ import type {
   PresentationItem,
   ProcessedSegment,
   ScriptureDetection,
+  Sermon,
   SermonPoint,
+  SermonSection,
+  SermonSegment,
   SermonState,
   Suggestion,
   ThemeCandidate,
@@ -198,6 +201,52 @@ export function onServiceAnomalyAcknowledged(
   handler: (finding: IntelligenceFinding) => void,
 ): Promise<UnlistenFn> {
   return listenSafe<IntelligenceFinding>(AppEvents.ServiceAnomalyAcknowledged, handler);
+}
+
+/** A sermon became active, paused, resumed, or ended (Phase 2.5, per the
+ * authoritative Phase 2 roadmap) - distinct from the `onSermonFinding*`/
+ * `onSermonStructureUpdated`/`onSermonThemeChanged`/`onSermonStateChanged`
+ * events above, which belong to the earlier "Phase 2.3"-labeled semantic
+ * engine. */
+export function onSermonStarted(handler: (sermon: Sermon) => void): Promise<UnlistenFn> {
+  return listenSafe<Sermon>(AppEvents.SermonStarted, handler);
+}
+
+export function onSermonPaused(handler: (sermon: Sermon) => void): Promise<UnlistenFn> {
+  return listenSafe<Sermon>(AppEvents.SermonPaused, handler);
+}
+
+export function onSermonResumed(handler: (sermon: Sermon) => void): Promise<UnlistenFn> {
+  return listenSafe<Sermon>(AppEvents.SermonResumed, handler);
+}
+
+export function onSermonEnded(handler: (sermon: Sermon) => void): Promise<UnlistenFn> {
+  return listenSafe<Sermon>(AppEvents.SermonEnded, handler);
+}
+
+/** The operator explicitly assigned or changed the active sermon's
+ * current structural section - never inferred from transcript content. */
+export function onSermonSectionChanged(
+  handler: (section: SermonSection) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<SermonSection>(AppEvents.SermonSectionChanged, handler);
+}
+
+export function onSermonSpeakerChanged(handler: (sermon: Sermon) => void): Promise<UnlistenFn> {
+  return listenSafe<Sermon>(AppEvents.SermonSpeakerChanged, handler);
+}
+
+export function onSermonMetadataChanged(handler: (sermon: Sermon) => void): Promise<UnlistenFn> {
+  return listenSafe<Sermon>(AppEvents.SermonMetadataChanged, handler);
+}
+
+/** An existing transcript segment was explicitly linked to the active
+ * sermon - never implies the transcript segment itself was created,
+ * modified, or reassigned silently. */
+export function onSermonSegmentLinked(
+  handler: (segment: SermonSegment) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<SermonSegment>(AppEvents.SermonSegmentLinked, handler);
 }
 
 /** Unused by `ProcessedSegment` directly but kept for reference/parity -

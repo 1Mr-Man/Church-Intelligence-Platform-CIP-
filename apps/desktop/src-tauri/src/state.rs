@@ -24,6 +24,7 @@ use cip_core_intelligence::{
     SermonIntelligenceEngine, ServiceIntelligenceEngine,
 };
 use cip_core_music::{AcousticMusicRecognizer, CurrentSong, MusicProvider};
+use cip_core_sermon::foundation::{Sermon, SermonSection};
 use cip_core_service::{AudioEngine, ServiceSession};
 use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
@@ -137,6 +138,20 @@ pub struct AppState {
     /// live transcription actually still happening," which manual test
     /// input would only make misleading. See `service.rs::transcript_freshness`.
     pub last_transcript_at: Mutex<Option<DateTime<Utc>>>,
+    /// The active Sermon Foundation entity (Phase 2.5, per the
+    /// authoritative Phase 2 roadmap), if any - `None` when no sermon is
+    /// currently being delivered. Durably persisted to the `sermons`
+    /// table on every mutation (see `persistence.rs`'s sermon functions),
+    /// but - exactly like `active_service` above - never automatically
+    /// restored into this field on app restart; a restart loses the
+    /// *live* session, never the historical record. See
+    /// `docs/sermon-foundation.md`'s "Persistence decision" section.
+    pub active_sermon: Mutex<Option<Sermon>>,
+    /// The section currently open within `active_sermon`, if any - kept
+    /// alongside `active_sermon` rather than re-queried from the database
+    /// on every command, mirroring every other "current live thing" field
+    /// in this struct.
+    pub active_sermon_section: Mutex<Option<SermonSection>>,
 }
 
 impl AppState {
@@ -177,6 +192,8 @@ impl AppState {
             correlation_queue: Mutex::new(CorrelationQueue::new()),
             service_engine: ServiceIntelligenceEngine::new(),
             last_transcript_at: Mutex::new(None),
+            active_sermon: Mutex::new(None),
+            active_sermon_section: Mutex::new(None),
         }
     }
 }

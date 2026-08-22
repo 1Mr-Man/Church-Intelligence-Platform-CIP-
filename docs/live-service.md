@@ -518,6 +518,17 @@ for formal validation as Phase 2.8; the roadmap's actual Phase 2.4 is
 Service Intelligence - see
 [`docs/service-intelligence.md`](service-intelligence.md).
 
+## Sermon Foundation (Phase 2.5, per the authoritative Phase 2 roadmap)
+
+The "Sermon Foundation" panel is a separate structural layer: which
+sermon is active, who is speaking, and which section it's in - never a
+semantic claim about what was said (that remains the "Sermon
+Intelligence" panel's job, built under an earlier internal "Phase 2.3"
+label). It reuses this document's own transcript/timeline/event
+architecture unchanged - no new event bus, no new persistence mechanism
+beyond the additive `sermons`/`sermon_sections`/`sermon_segments` tables.
+See [`docs/sermon-foundation.md`](sermon-foundation.md).
+
 ## Limitations (stated honestly)
 
 - Ambiguity state is session-only, not persisted (see "Ambiguity" above).

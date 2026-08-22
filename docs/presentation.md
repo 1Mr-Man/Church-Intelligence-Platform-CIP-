@@ -240,6 +240,13 @@ and `FindingQueue` have no dependency on `cip_core_presentation` either,
 so mark/correct/acknowledge actions can never create or touch a
 `PresentationItem`.
 
+Sermon Foundation (this repository's authoritative Phase 2.5 - see
+[`docs/sermon-foundation.md`](sermon-foundation.md)) is held to the same standard:
+`apps/desktop/src-tauri/src/sermon_foundation.rs` and its Tauri command handlers in
+`commands.rs` have no dependency on `cip_core_presentation` at all, so no start/pause/resume/
+end/title/speaker/section/segment-link action can create, activate, or otherwise touch a
+`PresentationItem`.
+
 > **Roadmap note.** Under this repository's authoritative Phase 2 roadmap,
 > the cross-domain correlation engine referenced above is reserved for
 > formal validation as Phase 2.8; the roadmap's actual Phase 2.4 is

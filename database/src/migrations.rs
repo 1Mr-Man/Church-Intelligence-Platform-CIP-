@@ -46,6 +46,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0007_music_timeline_category",
         sql: include_str!("../migrations/0007_music_timeline_category.sql"),
     },
+    Migration {
+        version: 8,
+        name: "0008_sermon_foundation",
+        sql: include_str!("../migrations/0008_sermon_foundation.sql"),
+    },
 ];
 
 /// A migration that was applied during this call to [`run_migrations`].
@@ -348,6 +353,95 @@ mod tests {
         assert!(
             result.is_err(),
             "a lyric line referencing a nonexistent song must be rejected"
+        );
+    }
+
+    #[test]
+    fn phase_2_5_sermon_foundation_tables_and_indexes_exist_after_migration() {
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+
+        const EXPECTED_TABLES: [&str; 3] = ["sermons", "sermon_sections", "sermon_segments"];
+        for table in EXPECTED_TABLES {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    params![table],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|count| count == 1)
+                .unwrap();
+            assert!(exists, "expected table `{table}` to exist after migration");
+        }
+
+        const EXPECTED_INDEXES: [&str; 4] = [
+            "idx_sermons_service_id",
+            "idx_sermon_sections_sermon_id",
+            "idx_sermon_segments_sermon_id",
+            "idx_sermon_segments_transcript_segment_id",
+        ];
+        for index in EXPECTED_INDEXES {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                    params![index],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|count| count == 1)
+                .unwrap();
+            assert!(exists, "missing index `{index}`");
+        }
+    }
+
+    #[test]
+    fn sermon_foreign_keys_are_enforced() {
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+
+        let result = conn.execute(
+            "INSERT INTO sermons (id, service_id, status, created_at)
+             VALUES ('s1', 'nonexistent-service', 'active', '2026-01-01T00:00:00Z')",
+            [],
+        );
+        assert!(
+            result.is_err(),
+            "a sermon referencing a nonexistent service must be rejected"
+        );
+    }
+
+    #[test]
+    fn sermon_segment_requires_an_existing_sermon_and_transcript_segment() {
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+
+        let result = conn.execute(
+            "INSERT INTO sermon_segments (id, sermon_id, transcript_segment_id, sequence, linked_at)
+             VALUES ('seg1', 'nonexistent-sermon', 'nonexistent-transcript', 0, '2026-01-01T00:00:00Z')",
+            [],
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn sermon_status_check_constraint_rejects_an_unknown_status() {
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO services (id, title, status, started_at) VALUES ('svc1', 'Test', 'started', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let result = conn.execute(
+            "INSERT INTO sermons (id, service_id, status, created_at)
+             VALUES ('s1', 'svc1', 'not-a-real-status', '2026-01-01T00:00:00Z')",
+            [],
+        );
+        assert!(
+            result.is_err(),
+            "an unknown sermon status must be rejected by the CHECK constraint"
         );
     }
 }

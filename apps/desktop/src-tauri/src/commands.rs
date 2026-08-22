@@ -15,6 +15,7 @@ use crate::music;
 use crate::persistence;
 use crate::pipeline::handle_final_transcript;
 use crate::presentation;
+use crate::sermon_foundation;
 use crate::state::{AppState, DEFAULT_TRANSLATION_ID};
 use crate::timeline::{self, TimelineEntry};
 use cip_core_ai::{Suggestion, SuggestionKind, SuggestionStatus, TranscriptSegment};
@@ -32,6 +33,10 @@ use cip_core_intelligence::{
 };
 use cip_core_music::{search_songs, MatchThresholds, MusicQuery, SongRecognitionCandidate};
 use cip_core_presentation::{PresentationContent, PresentationItem, PresentationItemStatus};
+use cip_core_sermon::foundation::{
+    is_valid_transition, SectionOrigin, Sermon, SermonSection, SermonSectionKind, SermonSegment,
+    SermonStatus, Speaker, SpeakerRole,
+};
 use cip_core_service::{
     AudioChunk, AudioChunkSink, AudioDevice, AudioEngineStatus, ScriptureDetection, ServiceSession,
     ServiceStatus,
@@ -2230,7 +2235,7 @@ fn build_music_context(
         .into_iter()
         .cloned()
         .collect();
-    crate::intelligence::build_intelligence_context(
+    let context = crate::intelligence::build_intelligence_context(
         &db,
         state.content_registry.as_ref(),
         active_service.as_ref(),
@@ -2239,7 +2244,32 @@ fn build_music_context(
         recent_findings,
         ContextBounds::default(),
     )
-    .map_err(AppError::from)
+    .map_err(AppError::from)?;
+
+    // Phase 2.5 (Sermon Foundation, per the authoritative Phase 2
+    // roadmap): additively attach the active sermon/section/segments so
+    // every engine's context (Bible/Music/Sermon/Service alike) can
+    // *observe* sermon structural state - never a reason for one engine
+    // to call another (invariant 4).
+    let active_sermon = state
+        .active_sermon
+        .lock()
+        .expect("active_sermon mutex poisoned")
+        .clone();
+    let current_sermon_section = state
+        .active_sermon_section
+        .lock()
+        .expect("active_sermon_section mutex poisoned")
+        .clone();
+    let recent_sermon_segments = match &active_sermon {
+        Some(sermon) => persistence::list_sermon_segments(&db, sermon.id)?,
+        None => Vec::new(),
+    };
+    Ok(context.with_sermon_context(
+        active_sermon,
+        current_sermon_section,
+        recent_sermon_segments,
+    ))
 }
 
 /// The deterministic acoustic-analysis harness, exposed over IPC - the
@@ -2536,6 +2566,546 @@ pub fn reject_sermon_finding(
 #[tauri::command]
 pub fn get_sermon_state(state: State<'_, AppState>) -> cip_core_intelligence::SermonStateSnapshot {
     state.sermon_engine.snapshot()
+}
+
+// --- sermon foundation (Phase 2.5, per the authoritative Phase 2 roadmap) --
+//
+// The durable entity/lifecycle layer beneath the historical `sermon.rs`/
+// `SermonIntelligenceEngine` semantic-detection commands above - see
+// `sermon_foundation.rs`'s module docs for the roadmap/architecture
+// distinction. Every command here is an explicit operator action; nothing
+// here is called from the live transcript pipeline, and none of it calls
+// `SermonIntelligenceEngine` or any other engine directly.
+
+/// "A sermon must have a distinct identity, and only one may be active at
+/// once" - mirrors `ensure_no_active_service` exactly.
+fn ensure_no_active_sermon(active: Option<&Sermon>) -> Result<(), AppError> {
+    if active.is_some() {
+        return Err(AppError::InvalidInput(
+            "a sermon is already active - end it before starting a new one".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Every mutating lifecycle command's shared guard - delegates to
+/// `cip_core_sermon::foundation::is_valid_transition`, the single source
+/// of truth for the state machine (spec's "SERMON STATE MACHINE" section),
+/// and turns a rejected transition into a clear operator-facing message
+/// rather than silently mutating state.
+fn ensure_valid_sermon_transition(from: SermonStatus, to: SermonStatus) -> Result<(), AppError> {
+    if !is_valid_transition(from, to) {
+        return Err(AppError::InvalidInput(format!(
+            "cannot move a sermon from {from:?} to {to:?}"
+        )));
+    }
+    Ok(())
+}
+
+fn parse_speaker_role_input(value: &str) -> Result<SpeakerRole, AppError> {
+    match value.trim().to_lowercase().as_str() {
+        "primary" => Ok(SpeakerRole::Primary),
+        "guest" => Ok(SpeakerRole::Guest),
+        other => Err(AppError::InvalidInput(format!(
+            "unknown speaker role: {other}"
+        ))),
+    }
+}
+
+/// Matches [`cip_core_sermon::foundation::SermonSectionKind::label`]
+/// case-insensitively - the one place a plain string from the frontend
+/// becomes a real `SermonSectionKind`, mirroring `service::parse_service_phase`.
+fn parse_section_kind_input(value: &str) -> Result<SermonSectionKind, AppError> {
+    let normalized = value.trim().to_uppercase().replace([' ', '-'], "_");
+    [
+        SermonSectionKind::Introduction,
+        SermonSectionKind::ScriptureReading,
+        SermonSectionKind::MainMessage,
+        SermonSectionKind::Illustration,
+        SermonSectionKind::Prayer,
+        SermonSectionKind::AltarCall,
+        SermonSectionKind::Conclusion,
+    ]
+    .into_iter()
+    .find(|k| k.label() == normalized)
+    .ok_or_else(|| AppError::InvalidInput(format!("unknown sermon section: {value}")))
+}
+
+fn active_sermon_or_error(state: &State<'_, AppState>) -> Result<Sermon, AppError> {
+    state
+        .active_sermon
+        .lock()
+        .expect("active_sermon mutex poisoned")
+        .clone()
+        .ok_or(AppError::NoActiveSermon)
+}
+
+/// The read-only summary `get_sermon_foundation_state` returns - what
+/// structural state exists right now, independent of the `FindingQueue`'s
+/// own operator-review status for any finding these commands produced.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SermonFoundationSummary {
+    pub active_sermon: Option<Sermon>,
+    pub current_section: Option<SermonSection>,
+}
+
+#[tauri::command]
+pub fn get_sermon_foundation_state(state: State<'_, AppState>) -> SermonFoundationSummary {
+    SermonFoundationSummary {
+        active_sermon: state
+            .active_sermon
+            .lock()
+            .expect("active_sermon mutex poisoned")
+            .clone(),
+        current_section: state
+            .active_sermon_section
+            .lock()
+            .expect("active_sermon_section mutex poisoned")
+            .clone(),
+    }
+}
+
+/// Starts a new sermon within the active service - "start" begins
+/// delivering immediately (no separate "planned" step in this phase's
+/// operator workflow, mirroring `start_service`). Automatically opens an
+/// `Introduction` section with `SectionOrigin::SystemBoundary` - a
+/// deterministic structural fact ("a sermon has a beginning"), never a
+/// judgment call about transcript content.
+#[tauri::command]
+pub fn start_sermon(
+    title: Option<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Sermon, AppError> {
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    ensure_no_active_sermon(
+        state
+            .active_sermon
+            .lock()
+            .expect("active_sermon mutex poisoned")
+            .as_ref(),
+    )
+    .map_err(log_and_return)?;
+    let title = title
+        .map(|t| require_non_empty(&t, "title"))
+        .transpose()
+        .map_err(log_and_return)?;
+    let sermon = Sermon::start(service_id, title);
+    let section = SermonSection::open(
+        sermon.id,
+        SermonSectionKind::Introduction,
+        SectionOrigin::SystemBoundary,
+        None,
+    );
+
+    {
+        let db = state.db.lock().expect("db connection poisoned");
+        persistence::persist_sermon(&db, &sermon)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        persistence::persist_sermon_section(&db, &section)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        record_timeline(
+            &db,
+            Some(service_id),
+            AppEvent::SermonStarted,
+            LogCategory::App,
+            &sermon,
+        );
+    }
+    *state
+        .active_sermon
+        .lock()
+        .expect("active_sermon mutex poisoned") = Some(sermon.clone());
+    *state
+        .active_sermon_section
+        .lock()
+        .expect("active_sermon_section mutex poisoned") = Some(section);
+
+    let finding = sermon_foundation::finding_for_lifecycle_event(service_id, &sermon, "started");
+    state
+        .intelligence_findings
+        .lock()
+        .expect("intelligence_findings mutex poisoned")
+        .add(finding);
+    let _ = emit(&app, AppEvent::SermonStarted, sermon.clone());
+    Ok(sermon)
+}
+
+#[tauri::command]
+pub fn pause_sermon(app: AppHandle, state: State<'_, AppState>) -> Result<Sermon, AppError> {
+    let mut sermon = active_sermon_or_error(&state).map_err(log_and_return)?;
+    ensure_valid_sermon_transition(sermon.status, SermonStatus::Paused).map_err(log_and_return)?;
+    sermon.pause();
+
+    {
+        let db = state.db.lock().expect("db connection poisoned");
+        persistence::update_sermon(&db, &sermon)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        record_timeline(
+            &db,
+            Some(sermon.service_id),
+            AppEvent::SermonPaused,
+            LogCategory::App,
+            &sermon,
+        );
+    }
+    *state
+        .active_sermon
+        .lock()
+        .expect("active_sermon mutex poisoned") = Some(sermon.clone());
+
+    let finding =
+        sermon_foundation::finding_for_lifecycle_event(sermon.service_id, &sermon, "paused");
+    state
+        .intelligence_findings
+        .lock()
+        .expect("intelligence_findings mutex poisoned")
+        .add(finding);
+    let _ = emit(&app, AppEvent::SermonPaused, sermon.clone());
+    Ok(sermon)
+}
+
+#[tauri::command]
+pub fn resume_sermon(app: AppHandle, state: State<'_, AppState>) -> Result<Sermon, AppError> {
+    let mut sermon = active_sermon_or_error(&state).map_err(log_and_return)?;
+    ensure_valid_sermon_transition(sermon.status, SermonStatus::Active).map_err(log_and_return)?;
+    sermon.resume();
+
+    {
+        let db = state.db.lock().expect("db connection poisoned");
+        persistence::update_sermon(&db, &sermon)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        record_timeline(
+            &db,
+            Some(sermon.service_id),
+            AppEvent::SermonResumed,
+            LogCategory::App,
+            &sermon,
+        );
+    }
+    *state
+        .active_sermon
+        .lock()
+        .expect("active_sermon mutex poisoned") = Some(sermon.clone());
+
+    let finding =
+        sermon_foundation::finding_for_lifecycle_event(sermon.service_id, &sermon, "resumed");
+    state
+        .intelligence_findings
+        .lock()
+        .expect("intelligence_findings mutex poisoned")
+        .add(finding);
+    let _ = emit(&app, AppEvent::SermonResumed, sermon.clone());
+    Ok(sermon)
+}
+
+/// Ends the active sermon - clears `AppState.active_sermon` entirely
+/// (mirrors `end_service`'s `.take()`), also closing whatever section was
+/// still open so no section is ever left dangling with no end time once
+/// its sermon has ended.
+#[tauri::command]
+pub fn end_sermon(app: AppHandle, state: State<'_, AppState>) -> Result<Sermon, AppError> {
+    let mut sermon = state
+        .active_sermon
+        .lock()
+        .expect("active_sermon mutex poisoned")
+        .take()
+        .ok_or(AppError::NoActiveSermon)
+        .map_err(log_and_return)?;
+    ensure_valid_sermon_transition(sermon.status, SermonStatus::Ended).map_err(log_and_return)?;
+    sermon.end();
+
+    {
+        let db = state.db.lock().expect("db connection poisoned");
+        persistence::update_sermon(&db, &sermon)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        persistence::close_open_sermon_section(
+            &db,
+            sermon.id,
+            sermon.ended_at.unwrap_or_else(chrono::Utc::now),
+        )
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
+        record_timeline(
+            &db,
+            Some(sermon.service_id),
+            AppEvent::SermonEnded,
+            LogCategory::App,
+            &sermon,
+        );
+    }
+    *state
+        .active_sermon_section
+        .lock()
+        .expect("active_sermon_section mutex poisoned") = None;
+
+    let finding =
+        sermon_foundation::finding_for_lifecycle_event(sermon.service_id, &sermon, "ended");
+    state
+        .intelligence_findings
+        .lock()
+        .expect("intelligence_findings mutex poisoned")
+        .add(finding);
+    let _ = emit(&app, AppEvent::SermonEnded, sermon.clone());
+    Ok(sermon)
+}
+
+/// Explicit operator correction/assignment of the active sermon's title -
+/// unknown until an operator supplies it (spec's "unknown metadata
+/// remains unknown" invariant); calling this again later is how a title
+/// is corrected, not a separate "correct" action.
+#[tauri::command]
+pub fn set_sermon_title(
+    title: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Sermon, AppError> {
+    let title = require_non_empty(&title, "title").map_err(log_and_return)?;
+    let mut sermon = active_sermon_or_error(&state).map_err(log_and_return)?;
+    sermon.set_title(title.clone());
+
+    {
+        let db = state.db.lock().expect("db connection poisoned");
+        persistence::update_sermon(&db, &sermon)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        record_timeline(
+            &db,
+            Some(sermon.service_id),
+            AppEvent::SermonMetadataChanged,
+            LogCategory::App,
+            &sermon,
+        );
+    }
+    *state
+        .active_sermon
+        .lock()
+        .expect("active_sermon mutex poisoned") = Some(sermon.clone());
+
+    let finding = sermon_foundation::finding_for_metadata_updated(
+        sermon.service_id,
+        sermon.id,
+        "title",
+        &title,
+    );
+    state
+        .intelligence_findings
+        .lock()
+        .expect("intelligence_findings mutex poisoned")
+        .add(finding);
+    let _ = emit(&app, AppEvent::SermonMetadataChanged, sermon.clone());
+    Ok(sermon)
+}
+
+/// Explicit operator speaker assignment - never biometric/automatic
+/// speaker recognition (spec's "SPEAKER MODEL" section). Calling this
+/// again replaces the previously assigned speaker; the prior value is
+/// still recoverable from the timeline/audit trail, never silently lost
+/// with no record.
+#[tauri::command]
+pub fn assign_sermon_speaker(
+    name: String,
+    role: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Sermon, AppError> {
+    let name = require_non_empty(&name, "name").map_err(log_and_return)?;
+    let role = parse_speaker_role_input(&role).map_err(log_and_return)?;
+    let mut sermon = active_sermon_or_error(&state).map_err(log_and_return)?;
+    let speaker = Speaker::new(name, role);
+    sermon.assign_speaker(speaker.clone());
+
+    {
+        let db = state.db.lock().expect("db connection poisoned");
+        persistence::update_sermon(&db, &sermon)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        record_timeline(
+            &db,
+            Some(sermon.service_id),
+            AppEvent::SermonSpeakerChanged,
+            LogCategory::App,
+            &sermon,
+        );
+    }
+    *state
+        .active_sermon
+        .lock()
+        .expect("active_sermon mutex poisoned") = Some(sermon.clone());
+
+    let finding =
+        sermon_foundation::finding_for_speaker_assigned(sermon.service_id, sermon.id, &speaker);
+    state
+        .intelligence_findings
+        .lock()
+        .expect("intelligence_findings mutex poisoned")
+        .add(finding);
+    let _ = emit(&app, AppEvent::SermonSpeakerChanged, sermon.clone());
+    Ok(sermon)
+}
+
+/// Explicit operator section assignment - closes whatever section was
+/// previously open (with an explicit, shared timestamp, never deleting
+/// its history) and opens the new one. Never inferred from transcript
+/// content in this phase (spec's "message section state" rule: "do not
+/// allow two active sections simultaneously").
+#[tauri::command]
+pub fn change_sermon_section(
+    kind: String,
+    note: Option<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<SermonSection, AppError> {
+    let kind = parse_section_kind_input(&kind).map_err(log_and_return)?;
+    let sermon = active_sermon_or_error(&state).map_err(log_and_return)?;
+    let new_section = SermonSection::open(sermon.id, kind, SectionOrigin::OperatorAssigned, note);
+
+    {
+        let db = state.db.lock().expect("db connection poisoned");
+        persistence::close_open_sermon_section(&db, sermon.id, new_section.started_at)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        persistence::persist_sermon_section(&db, &new_section)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        record_timeline(
+            &db,
+            Some(sermon.service_id),
+            AppEvent::SermonSectionChanged,
+            LogCategory::App,
+            &new_section,
+        );
+    }
+    *state
+        .active_sermon_section
+        .lock()
+        .expect("active_sermon_section mutex poisoned") = Some(new_section.clone());
+
+    let finding =
+        sermon_foundation::finding_for_section_changed(sermon.service_id, sermon.id, &new_section);
+    state
+        .intelligence_findings
+        .lock()
+        .expect("intelligence_findings mutex poisoned")
+        .add(finding);
+    let _ = emit(&app, AppEvent::SermonSectionChanged, new_section.clone());
+    Ok(new_section)
+}
+
+/// Explicitly links an already-persisted transcript segment (from any
+/// existing ingestion path - `process_test_transcript`, or a real live
+/// segment) to the active sermon - "which portion of the transcript
+/// belongs to this sermon," never a second transcript-creation path (spec's
+/// "SERMON → TRANSCRIPT RELATIONSHIP" section). Rejects a segment that
+/// belongs to a different service outright; never silently reassigns.
+#[tauri::command]
+pub fn link_transcript_segment_to_sermon(
+    transcript_segment_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<SermonSegment, AppError> {
+    let transcript_segment_id = parse_uuid(&transcript_segment_id).map_err(log_and_return)?;
+    let sermon = active_sermon_or_error(&state).map_err(log_and_return)?;
+
+    let db = state.db.lock().expect("db connection poisoned");
+    let owning_service = persistence::get_transcript_segment_service_id(&db, transcript_segment_id)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
+    match owning_service {
+        Some(service_id) if service_id == sermon.service_id => {}
+        Some(_) => {
+            return Err(log_and_return(AppError::InvalidInput(
+                "transcript segment belongs to a different service".to_string(),
+            )))
+        }
+        None => {
+            return Err(log_and_return(AppError::InvalidInput(
+                "unknown transcript segment".to_string(),
+            )))
+        }
+    }
+
+    let sequence = persistence::count_sermon_segments(&db, sermon.id)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
+    let section_id = state
+        .active_sermon_section
+        .lock()
+        .expect("active_sermon_section mutex poisoned")
+        .as_ref()
+        .map(|s| s.id);
+    let segment = SermonSegment::new(sermon.id, transcript_segment_id, sequence, section_id);
+    persistence::persist_sermon_segment(&db, &segment)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
+    record_timeline(
+        &db,
+        Some(sermon.service_id),
+        AppEvent::SermonSegmentLinked,
+        LogCategory::App,
+        &segment,
+    );
+    drop(db);
+
+    let _ = emit(&app, AppEvent::SermonSegmentLinked, segment.clone());
+    Ok(segment)
+}
+
+/// Every transcript segment linked to the active sermon, in link order -
+/// the read side of `link_transcript_segment_to_sermon`, never the
+/// transcript text itself (follow `transcriptSegmentId` back to
+/// `list_transcript_history`/`TranscriptUpdated` for that).
+#[tauri::command]
+pub fn list_sermon_segments(state: State<'_, AppState>) -> Result<Vec<SermonSegment>, AppError> {
+    let sermon = active_sermon_or_error(&state).map_err(log_and_return)?;
+    let db = state.db.lock().expect("db connection poisoned");
+    persistence::list_sermon_segments(&db, sermon.id)
+        .map_err(AppError::from)
+        .map_err(log_and_return)
+}
+
+/// Every section (open or closed) recorded for the active sermon, in the
+/// order they were opened - the read side of `change_sermon_section`,
+/// including history `change_sermon_section` itself never exposes.
+#[tauri::command]
+pub fn list_sermon_sections(state: State<'_, AppState>) -> Result<Vec<SermonSection>, AppError> {
+    let sermon = active_sermon_or_error(&state).map_err(log_and_return)?;
+    let db = state.db.lock().expect("db connection poisoned");
+    persistence::list_sermon_sections(&db, sermon.id)
+        .map_err(AppError::from)
+        .map_err(log_and_return)
+}
+
+/// Sermons previously delivered in the active service, most recently
+/// created first - the sermon-history counterpart to `list_service_history`.
+#[tauri::command]
+pub fn list_sermon_history(
+    limit: u32,
+    state: State<'_, AppState>,
+) -> Result<Vec<Sermon>, AppError> {
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let db = state.db.lock().expect("db connection poisoned");
+    persistence::list_sermons_for_service(&db, service_id, limit)
+        .map_err(AppError::from)
+        .map_err(log_and_return)
+}
+
+/// A single sermon by id, independent of whichever one (if any) is
+/// currently active - the sermon archive's detail view, mirroring
+/// `get_service`.
+#[tauri::command]
+pub fn get_sermon(sermon_id: String, state: State<'_, AppState>) -> Result<Sermon, AppError> {
+    let id = parse_uuid(&sermon_id).map_err(log_and_return)?;
+    let db = state.db.lock().expect("db connection poisoned");
+    persistence::get_sermon(&db, id)
+        .map_err(AppError::from)
+        .map_err(log_and_return)
 }
 
 // --- cross-domain intelligence (Phase 2.4) ----------------------------------
@@ -3505,5 +4075,88 @@ mod tests {
         assert_eq!(registered_json["capability"], "available");
         assert!(unregistered_json["engineId"].is_null());
         assert_eq!(unregistered_json["capability"], "unavailable");
+    }
+
+    // --- sermon foundation guards (Phase 2.5, per the authoritative Phase
+    // 2 roadmap) - mirrors the Phase 1.3 service guard tests above.
+
+    #[test]
+    fn ensure_no_active_sermon_accepts_none_and_rejects_any_existing_sermon() {
+        assert!(ensure_no_active_sermon(None).is_ok());
+        let sermon = Sermon::start(Uuid::new_v4(), None);
+        assert!(matches!(
+            ensure_no_active_sermon(Some(&sermon)),
+            Err(AppError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn ensure_no_active_sermon_rejects_even_a_paused_sermon() {
+        let mut sermon = Sermon::start(Uuid::new_v4(), None);
+        sermon.pause();
+        assert!(ensure_no_active_sermon(Some(&sermon)).is_err());
+    }
+
+    #[test]
+    fn ensure_valid_sermon_transition_accepts_every_documented_transition() {
+        assert!(ensure_valid_sermon_transition(SermonStatus::Active, SermonStatus::Paused).is_ok());
+        assert!(ensure_valid_sermon_transition(SermonStatus::Paused, SermonStatus::Active).is_ok());
+        assert!(ensure_valid_sermon_transition(SermonStatus::Active, SermonStatus::Ended).is_ok());
+    }
+
+    #[test]
+    fn ensure_valid_sermon_transition_rejects_ended_to_active() {
+        assert!(matches!(
+            ensure_valid_sermon_transition(SermonStatus::Ended, SermonStatus::Active),
+            Err(AppError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn ensure_valid_sermon_transition_rejects_a_same_state_call() {
+        assert!(
+            ensure_valid_sermon_transition(SermonStatus::Active, SermonStatus::Active).is_err()
+        );
+    }
+
+    #[test]
+    fn parse_speaker_role_input_accepts_known_roles_case_insensitively_and_rejects_garbage() {
+        assert_eq!(
+            parse_speaker_role_input("primary").unwrap(),
+            SpeakerRole::Primary
+        );
+        assert_eq!(
+            parse_speaker_role_input("GUEST").unwrap(),
+            SpeakerRole::Guest
+        );
+        assert!(parse_speaker_role_input("keynote").is_err());
+    }
+
+    #[test]
+    fn parse_section_kind_input_accepts_labels_case_insensitively_and_rejects_garbage() {
+        assert_eq!(
+            parse_section_kind_input("main_message").unwrap(),
+            SermonSectionKind::MainMessage
+        );
+        assert_eq!(
+            parse_section_kind_input("Altar Call").unwrap(),
+            SermonSectionKind::AltarCall
+        );
+        assert_eq!(
+            parse_section_kind_input("scripture-reading").unwrap(),
+            SermonSectionKind::ScriptureReading
+        );
+        assert!(parse_section_kind_input("not-a-real-section").is_err());
+    }
+
+    #[test]
+    fn sermon_foundation_summary_serializes_with_camel_case_fields() {
+        let summary = SermonFoundationSummary {
+            active_sermon: Some(Sermon::start(Uuid::new_v4(), Some("Grace".to_string()))),
+            current_section: None,
+        };
+        let json = serde_json::to_value(&summary).unwrap();
+        assert!(json.get("activeSermon").is_some());
+        assert!(json.get("currentSection").is_some());
     }
 }

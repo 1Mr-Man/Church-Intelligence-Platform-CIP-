@@ -37,7 +37,19 @@ import type {
   MusicImportReport,
   SongRecognitionCandidate,
 } from "./music";
-import type { SermonPoint, SermonState, SermonStateSnapshot, ThemeCandidate } from "./sermon";
+import type {
+  Sermon,
+  SermonFoundationSummary,
+  SermonPoint,
+  SermonSection,
+  SermonSectionKind,
+  SermonSegment,
+  SermonState,
+  SermonStateSnapshot,
+  SermonStatus,
+  SpeakerRole,
+  ThemeCandidate,
+} from "./sermon";
 
 describe("domain contracts", () => {
   it("constructs a ScriptureReference and a matching BibleTranslation", () => {
@@ -678,5 +690,85 @@ describe("domain contracts", () => {
     expect(transition.kind).toBe("service_state");
     expect(transition.priority).toBe("high");
     expect(transition.assertionLevel).not.toBe("generated");
+  });
+
+  // --- Sermon Foundation (Phase 2.5, per the authoritative Phase 2 roadmap) --
+
+  it("constructs a Sermon for every SermonStatus value, with unknown title/speaker as null", () => {
+    const statuses: SermonStatus[] = ["planned", "active", "paused", "ended", "cancelled"];
+    for (const status of statuses) {
+      const sermon: Sermon = {
+        id: "11111111-1111-1111-1111-111111111111",
+        serviceId: "22222222-2222-2222-2222-222222222222",
+        title: null,
+        speaker: null,
+        status,
+        startedAt: null,
+        endedAt: null,
+        createdAt: "2026-01-01T00:00:00Z",
+      };
+      expect(sermon.status).toBe(status);
+      expect(sermon.title).toBeNull();
+      expect(sermon.speaker).toBeNull();
+    }
+  });
+
+  it("a Sermon's id is never the same as its serviceId (invariant 1/2)", () => {
+    const sermon: Sermon = {
+      id: "11111111-1111-1111-1111-111111111111",
+      serviceId: "22222222-2222-2222-2222-222222222222",
+      title: "Grace Abounding",
+      speaker: { id: "33333333-3333-3333-3333-333333333333", name: "Pastor Jane Doe", role: "primary" as SpeakerRole },
+      status: "active",
+      startedAt: "2026-01-01T00:00:00Z",
+      endedAt: null,
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    expect(sermon.id).not.toBe(sermon.serviceId);
+  });
+
+  it("constructs a SermonSection for every SermonSectionKind, open and closed", () => {
+    const kinds: SermonSectionKind[] = [
+      "introduction",
+      "scripture_reading",
+      "main_message",
+      "illustration",
+      "prayer",
+      "altar_call",
+      "conclusion",
+    ];
+    for (const kind of kinds) {
+      const open: SermonSection = {
+        id: "44444444-4444-4444-4444-444444444444",
+        sermonId: "11111111-1111-1111-1111-111111111111",
+        kind,
+        origin: "operator_assigned",
+        startedAt: "2026-01-01T00:00:00Z",
+        endedAt: null,
+        note: null,
+      };
+      expect(open.endedAt).toBeNull();
+      const closed: SermonSection = { ...open, endedAt: "2026-01-01T00:05:00Z" };
+      expect(closed.endedAt).not.toBeNull();
+    }
+  });
+
+  it("constructs a SermonSegment linking a transcript segment - never carrying transcript text itself", () => {
+    const segment: SermonSegment = {
+      id: "55555555-5555-5555-5555-555555555555",
+      sermonId: "11111111-1111-1111-1111-111111111111",
+      transcriptSegmentId: "66666666-6666-6666-6666-666666666666",
+      sequence: 0,
+      sectionId: null,
+      linkedAt: "2026-01-01T00:00:00Z",
+    };
+    expect(segment.sermonId).not.toBe(segment.transcriptSegmentId);
+    expect("text" in segment).toBe(false);
+  });
+
+  it("constructs a SermonFoundationSummary with both fields null when nothing is active", () => {
+    const summary: SermonFoundationSummary = { activeSermon: null, currentSection: null };
+    expect(summary.activeSermon).toBeNull();
+    expect(summary.currentSection).toBeNull();
   });
 });
