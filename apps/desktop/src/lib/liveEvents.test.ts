@@ -7,6 +7,9 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  onContentCandidateAccepted,
+  onContentCandidateDetected,
+  onContentCandidateRejected,
   onCrossDomainCorrelationDetected,
   onCrossDomainCorrelationDismissed,
   onCrossDomainCorrelationReviewed,
@@ -170,6 +173,30 @@ describe("liveEvents.ts Tauri event-subscription guard", () => {
     isTauriMock.mockReturnValue(false);
 
     const unlisten = await onCrossDomainCorrelationDetected(() => {});
+
+    expect(listenMock).not.toHaveBeenCalled();
+    expect(() => unlisten()).not.toThrow();
+  });
+
+  // --- content intelligence (Phase 2.7, per the authoritative Phase 2 roadmap) --
+
+  it("subscribes to the three distinct content candidate events", async () => {
+    isTauriMock.mockReturnValue(true);
+    listenMock.mockResolvedValue(() => {});
+
+    await onContentCandidateDetected(() => {});
+    await onContentCandidateAccepted(() => {});
+    await onContentCandidateRejected(() => {});
+
+    expect(listenMock).toHaveBeenCalledWith("CONTENT_CANDIDATE_DETECTED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("CONTENT_CANDIDATE_ACCEPTED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("CONTENT_CANDIDATE_REJECTED", expect.any(Function));
+  });
+
+  it("resolves to a no-op unlisten for every content candidate event outside the Tauri runtime", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    const unlisten = await onContentCandidateDetected(() => {});
 
     expect(listenMock).not.toHaveBeenCalled();
     expect(() => unlisten()).not.toThrow();

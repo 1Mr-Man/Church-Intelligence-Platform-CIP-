@@ -2,6 +2,7 @@ mod acoustic;
 mod commands;
 mod config;
 mod content;
+mod content_intelligence;
 mod cross_domain;
 mod errors;
 pub mod events;
@@ -205,6 +206,19 @@ pub fn run() {
                 "sermon foundation initialized (deterministic, offline, no engine registration)"
             );
 
+            // Phase 2.7 (Content Intelligence, per the authoritative Phase
+            // 2 roadmap): also has no `IntelligenceEngine` to register -
+            // `ContentIntelligenceEngine` produces `ContentCandidate`s, a
+            // structurally different type than `IntelligenceFinding`, the
+            // same reason `CrossDomainCorrelationEngine` (Phase 2.4) isn't
+            // registered either. See `content_intelligence.rs`'s module
+            // docs. State lives on `AppState.content_candidate_queue`,
+            // initialized empty in `AppState::new` below.
+            log::info!(
+                target: LogCategory::App.target(),
+                "content intelligence initialized (deterministic, offline, no engine registration)"
+            );
+
             let audio_engine: Box<dyn cip_core_service::AudioEngine> =
                 Box::new(cip_integrations_audio::CpalAudioEngine::new());
             let speech_engine = create_speech_engine(&config);
@@ -306,6 +320,10 @@ pub fn run() {
             commands::list_cross_domain_correlations,
             commands::review_cross_domain_correlation,
             commands::dismiss_cross_domain_correlation,
+            commands::analyze_content_intelligence,
+            commands::list_content_candidates,
+            commands::accept_content_candidate,
+            commands::reject_content_candidate,
             commands::analyze_service_transcript,
             commands::get_service_intelligence_state,
             commands::list_service_transitions,

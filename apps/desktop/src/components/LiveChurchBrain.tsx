@@ -3,6 +3,7 @@ import type {
   AudioDevice,
   BibleSearchResult,
   BibleTranslation,
+  ContentCandidate,
   ContentMetadata,
   DomainCapabilityReport,
   ImportReport,
@@ -170,6 +171,11 @@ export function LiveChurchBrain() {
   // reachable for correlation at all (see `commands.ts`'s own docs).
   const [crossDomainCorrelations, setCrossDomainCorrelations] = useState<IntelligenceCorrelation[]>([]);
   const [bibleManualText, setBibleManualText] = useState("");
+  // Content Intelligence (Phase 2.7, per the authoritative Phase 2
+  // roadmap) - read-only diagnostic list of `ContentCandidate`s, never
+  // final copy; candidates only ever appear from an explicit "Run
+  // analysis" action or the accept/reject operator actions below.
+  const [contentCandidates, setContentCandidates] = useState<ContentCandidate[]>([]);
   // Service Intelligence (Phase 2.4, per the authoritative Phase 2
   // roadmap - distinct from the correlation work above) - `serviceIntel`
   // is the read-only phase/freshness summary, polled alongside status;
@@ -246,6 +252,7 @@ export function LiveChurchBrain() {
       commands.listServiceAnomalies().then(setServiceAnomalies).catch(() => {});
       commands.getSermonFoundationState().then(setSermonFoundation).catch(() => {});
       commands.listSermonSegments().then(setSermonSegments).catch(() => {});
+      commands.listContentCandidates().then(setContentCandidates).catch(() => {});
     } else {
       setSuggestions([]);
       setApprovedSuggestions([]);
@@ -267,6 +274,7 @@ export function LiveChurchBrain() {
       setServiceAnomalies([]);
       setSermonFoundation(null);
       setSermonSegments([]);
+      setContentCandidates([]);
     }
   }, [activeServiceId]);
 
@@ -357,6 +365,15 @@ export function LiveChurchBrain() {
       ),
       liveEvents.onCrossDomainCorrelationDismissed((correlation) =>
         setCrossDomainCorrelations((prev) => prev.filter((c) => c.id !== correlation.id)),
+      ),
+      liveEvents.onContentCandidateDetected((candidate) =>
+        setContentCandidates((prev) => [candidate, ...prev]),
+      ),
+      liveEvents.onContentCandidateAccepted((candidate) =>
+        setContentCandidates((prev) => prev.filter((c) => c.id !== candidate.id)),
+      ),
+      liveEvents.onContentCandidateRejected((candidate) =>
+        setContentCandidates((prev) => prev.filter((c) => c.id !== candidate.id)),
       ),
       liveEvents.onServicePhaseChanged((finding) =>
         setServiceTransitions((prev) => [finding, ...prev]),
@@ -1678,6 +1695,82 @@ export function LiveChurchBrain() {
                     }
                   >
                     Dismiss
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="live-brain__panel">
+        <h2>Content Intelligence</h2>
+        <p className="live-brain__hint">
+          Future content opportunities structured from already-proven findings (Phase 2.7, per the authoritative
+          Phase 2 roadmap) - never final copy, never a social post, never published or scheduled. Each candidate
+          names the finding(s) it was derived from; content potential is a separate dimension from confidence (spec
+          section 21: a highly-confident finding does not automatically score high content potential, and vice
+          versa).
+        </p>
+
+        <div className="live-brain__row">
+          <button
+            type="button"
+            disabled={!status?.service || isBusy("content-intelligence-analyze")}
+            onClick={() =>
+              withBusy("content-intelligence-analyze", async () => {
+                const found = await commands.analyzeContentIntelligence();
+                setContentCandidates((prev) => {
+                  const existingIds = new Set(prev.map((c) => c.id));
+                  return [...found.filter((c) => !existingIds.has(c.id)), ...prev];
+                });
+              })
+            }
+          >
+            Run content analysis
+          </button>
+        </div>
+
+        {contentCandidates.length === 0 ? (
+          <p className="live-brain__hint">No pending content candidates.</p>
+        ) : (
+          <ul className="live-brain__suggestions">
+            {contentCandidates.map((candidate) => (
+              <li key={candidate.id} className="live-brain__suggestion-card">
+                <div className="live-brain__suggestion-header">
+                  <strong>{candidate.titleOrLabel}</strong>
+                  <span className="live-brain__confidence">
+                    Content potential: {Math.round(candidate.contentPotential * 100)}%
+                  </span>
+                </div>
+                <p className="live-brain__hint">{candidate.workingConcept}</p>
+                <p className="live-brain__hint">
+                  {candidate.candidateType.replace(/_/g, " ").toUpperCase()} &middot; Confidence:{" "}
+                  {Math.round(candidate.confidence.score * 100)}% &middot; {candidate.evidence.length} evidence
+                  &middot; {candidate.status.toUpperCase()}
+                </p>
+                <div className="live-brain__row">
+                  <button
+                    type="button"
+                    disabled={isBusy(`content-candidate-accept-${candidate.id}`)}
+                    onClick={() =>
+                      withBusy(`content-candidate-accept-${candidate.id}`, async () => {
+                        await commands.acceptContentCandidate(candidate.id);
+                      })
+                    }
+                  >
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isBusy(`content-candidate-reject-${candidate.id}`)}
+                    onClick={() =>
+                      withBusy(`content-candidate-reject-${candidate.id}`, async () => {
+                        await commands.rejectContentCandidate(candidate.id);
+                      })
+                    }
+                  >
+                    Reject
                   </button>
                 </div>
               </li>

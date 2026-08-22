@@ -609,13 +609,12 @@ this phase does not implement any new correlation rules (spec's explicit
 "do not implement correlation rules in Phase 2.6"). See
 [`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md).
 
-## Phase 2.7 handoff (Content Intelligence)
+## Phase 2.7 handoff (Content Intelligence) - fulfilled
 
-Phase 2.7 is expected to transform accepted Sermon Intelligence findings
-into content candidates (e.g. a social-media quote card from an accepted
-`KeyStatement`/`Takeaway`/`FoodForThought`). This phase deliberately does
-not implement that transformation - it only guarantees the output
-contract Phase 2.7 will consume:
+Phase 2.7 (see [`docs/content-intelligence.md`](content-intelligence.md))
+now transforms eligible Sermon Intelligence findings into
+`ContentCandidate`s (e.g. a `Quote` candidate from an accepted
+`KeyStatement`), reading the exact contract this section promised:
 
 - Every finding is an ordinary `IntelligenceFinding` (`domain: Sermon`,
   `kind: Sermon`) with a stable `summary`, `assertionLevel`, `confidence`,

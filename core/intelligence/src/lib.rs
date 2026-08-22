@@ -47,6 +47,8 @@
 #[cfg(test)]
 mod acceptance_tests;
 pub mod bible_adapter;
+mod content_candidate;
+pub mod content_intelligence;
 mod context;
 mod correlation;
 pub mod cross_domain;
@@ -63,6 +65,11 @@ pub mod sermon_adapter;
 pub mod service_adapter;
 
 pub use bible_adapter::{BibleIntelligenceEngine, BIBLE_ENGINE_ID, BIBLE_ENGINE_VERSION};
+pub use content_candidate::{ContentCandidate, ContentCandidateType};
+pub use content_intelligence::{
+    ContentCandidateQueue, ContentCandidateQueueAddOutcome, ContentIntelligenceEngine,
+    CONTENT_ENGINE_ID, CONTENT_ENGINE_VERSION,
+};
 pub use context::{
     ContextBounds, ContextWindow, ContextWindowView, IntelligenceContext, ServiceEventSummary,
     DEFAULT_MAX_RECENT_FINDINGS, DEFAULT_MAX_RECENT_SERMON_SEGMENTS,

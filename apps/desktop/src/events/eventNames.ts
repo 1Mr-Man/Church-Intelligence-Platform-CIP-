@@ -89,6 +89,13 @@ export const AppEvents = {
   SermonMetadataChanged: "SERMON_METADATA_CHANGED",
   /** Payload is a `SermonSegment` (Phase 2.5). */
   SermonSegmentLinked: "SERMON_SEGMENT_LINKED",
+
+  /** Payload is the new/updated `ContentCandidate` (Phase 2.7, per the
+   * authoritative Phase 2 roadmap) - never a publish/schedule/presentation
+   * event. */
+  ContentCandidateDetected: "CONTENT_CANDIDATE_DETECTED",
+  ContentCandidateAccepted: "CONTENT_CANDIDATE_ACCEPTED",
+  ContentCandidateRejected: "CONTENT_CANDIDATE_REJECTED",
 } as const;
 
 export type AppEventName = (typeof AppEvents)[keyof typeof AppEvents];

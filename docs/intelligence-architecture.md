@@ -17,9 +17,14 @@ engine - it extends `IntelligenceContext` additively instead (a new
 `with_sermon_context` builder method, never a required constructor
 argument, so every existing call site is unchanged) - see
 [`docs/sermon-foundation.md`](sermon-foundation.md)'s "Sermon context"
-and "Engine boundary" sections. Content Intelligence and the formal,
-roadmap Phase 2.8 Cross-Domain Intelligence validation remain
-**PLANNED / NOT IMPLEMENTED**; an earlier cross-domain correlation rule
+and "Engine boundary" sections. The roadmap's actual Phase 2.7, Content
+Intelligence, likewise adds no fifth `IntelligenceEngine` - it reads
+already-produced findings out of the existing `IntelligenceContext` and
+structures them into a new, separate type (`ContentCandidate`), the same
+"not an `IntelligenceEngine`" pattern the cross-domain correlation engine
+already established - see [`docs/content-intelligence.md`](content-intelligence.md).
+The formal, roadmap Phase 2.8 Cross-Domain Intelligence validation
+remains **PLANNED / NOT IMPLEMENTED**; an earlier cross-domain correlation rule
 engine was already built under an internal label that also read
 "Phase 2.4" (see [`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md))
 and is reserved for that future Phase 2.8 validation - that historical

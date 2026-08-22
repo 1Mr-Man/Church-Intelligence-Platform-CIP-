@@ -20,8 +20,8 @@ use cip_core_ai::SpeechEngine;
 use cip_core_bible::{BibleProvider, DefaultScriptureContextManager};
 use cip_core_content::ContentRegistry;
 use cip_core_intelligence::{
-    CorrelationQueue, FindingQueue, IntelligenceEngineRegistry, MusicIntelligenceEngine,
-    SermonIntelligenceEngine, ServiceIntelligenceEngine,
+    ContentCandidateQueue, CorrelationQueue, FindingQueue, IntelligenceEngineRegistry,
+    MusicIntelligenceEngine, SermonIntelligenceEngine, ServiceIntelligenceEngine,
 };
 use cip_core_music::{AcousticMusicRecognizer, CurrentSong, MusicProvider};
 use cip_core_sermon::foundation::{Sermon, SermonSection};
@@ -152,6 +152,17 @@ pub struct AppState {
     /// on every command, mirroring every other "current live thing" field
     /// in this struct.
     pub active_sermon_section: Mutex<Option<SermonSection>>,
+    /// In-memory queue of content candidates awaiting operator review
+    /// (Phase 2.7's `ContentCandidateQueue`, per the authoritative Phase 2
+    /// roadmap) - the content-candidate counterpart to `intelligence_findings`/
+    /// `correlation_queue`, populated only by
+    /// `commands::analyze_content_intelligence`. Deliberately not
+    /// persisted, for the same reason `correlation_queue` isn't: a
+    /// candidate is derived from a finding that already carries its own
+    /// provenance/persistence story, so nothing here needs to survive a
+    /// restart (see `docs/content-intelligence.md`'s persistence-decision
+    /// section).
+    pub content_candidate_queue: Mutex<ContentCandidateQueue>,
 }
 
 impl AppState {
@@ -194,6 +205,7 @@ impl AppState {
             last_transcript_at: Mutex::new(None),
             active_sermon: Mutex::new(None),
             active_sermon_section: Mutex::new(None),
+            content_candidate_queue: Mutex::new(ContentCandidateQueue::new()),
         }
     }
 }

@@ -8,10 +8,12 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  acceptContentCandidate,
   acceptMusicFinding,
   acceptSermonFinding,
   acknowledgeServiceAnomaly,
   analyzeBibleTranscript,
+  analyzeContentIntelligence,
   analyzeCrossDomain,
   analyzeMusicAudio,
   analyzeMusicTranscript,
@@ -34,6 +36,7 @@ import {
   importBibleDataset,
   importMusicDataset,
   linkTranscriptSegmentToSermon,
+  listContentCandidates,
   listContentRegistry,
   listCrossDomainCorrelations,
   listMusicFindings,
@@ -47,6 +50,7 @@ import {
   pauseSermon,
   previewPresentation,
   previewScripture,
+  rejectContentCandidate,
   rejectMusicFinding,
   rejectSermonFinding,
   resumeSermon,
@@ -436,6 +440,64 @@ describe("commands.ts Tauri IPC guard", () => {
     await expect(listCrossDomainCorrelations()).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(reviewCrossDomainCorrelation("id")).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(dismissCrossDomainCorrelation("id")).rejects.toBeInstanceOf(TauriUnavailableError);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  // --- content intelligence (Phase 2.7, per the authoritative Phase 2 roadmap) --
+
+  /** Proves the explicit, never-automatic nature of content intelligence:
+   * `analyzeContentIntelligence` is its own distinct command, never bundled
+   * into a transcript-analysis call. */
+  it("analyzeContentIntelligence calls only analyze_content_intelligence with no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await analyzeContentIntelligence();
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("analyze_content_intelligence", undefined);
+  });
+
+  it("listContentCandidates calls list_content_candidates with no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await listContentCandidates();
+
+    expect(invokeMock).toHaveBeenCalledWith("list_content_candidates", undefined);
+  });
+
+  it("acceptContentCandidate calls only accept_content_candidate, never a presentation command", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await acceptContentCandidate("candidate-1");
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("accept_content_candidate", {
+      candidateId: "candidate-1",
+    });
+  });
+
+  it("rejectContentCandidate calls only reject_content_candidate, never a presentation command", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await rejectContentCandidate("candidate-1");
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("reject_content_candidate", {
+      candidateId: "candidate-1",
+    });
+  });
+
+  it("rejects every content-intelligence command outside the Tauri runtime, without calling invoke()", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    await expect(analyzeContentIntelligence()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(listContentCandidates()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(acceptContentCandidate("id")).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(rejectContentCandidate("id")).rejects.toBeInstanceOf(TauriUnavailableError);
     expect(invokeMock).not.toHaveBeenCalled();
   });
 

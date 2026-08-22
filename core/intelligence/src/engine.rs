@@ -125,6 +125,8 @@ pub enum IntelligenceError {
     FindingNotFound(Uuid),
     #[error("correlation {0} not found")]
     CorrelationNotFound(Uuid),
+    #[error("content candidate {0} not found")]
+    ContentCandidateNotFound(Uuid),
 }
 
 /// The shared contract every intelligence engine implements. Synchronous

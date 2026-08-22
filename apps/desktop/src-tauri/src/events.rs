@@ -152,6 +152,20 @@ pub enum AppEvent {
     /// transcript segment itself was created, modified, or reassigned
     /// silently.
     SermonSegmentLinked,
+
+    /// The Phase 2.7 content-intelligence layer structured a new content
+    /// candidate from an already-proven finding (per the authoritative
+    /// Phase 2 roadmap) - never implies anything was published, scheduled,
+    /// or presented; see `docs/content-intelligence.md`.
+    ContentCandidateDetected,
+    /// The operator explicitly accepted a content opportunity (Phase 2.7) -
+    /// changes only the candidate's own status, never publishes/schedules
+    /// it or creates a `PresentationItem`.
+    ContentCandidateAccepted,
+    /// The operator explicitly rejected a content candidate (Phase 2.7) -
+    /// never automatic, and never alters the source finding it was built
+    /// from.
+    ContentCandidateRejected,
 }
 
 impl AppEvent {
@@ -220,6 +234,10 @@ impl AppEvent {
             AppEvent::SermonSpeakerChanged => "SERMON_SPEAKER_CHANGED",
             AppEvent::SermonMetadataChanged => "SERMON_METADATA_CHANGED",
             AppEvent::SermonSegmentLinked => "SERMON_SEGMENT_LINKED",
+
+            AppEvent::ContentCandidateDetected => "CONTENT_CANDIDATE_DETECTED",
+            AppEvent::ContentCandidateAccepted => "CONTENT_CANDIDATE_ACCEPTED",
+            AppEvent::ContentCandidateRejected => "CONTENT_CANDIDATE_REJECTED",
         }
     }
 }
@@ -293,6 +311,9 @@ mod tests {
             AppEvent::SermonSpeakerChanged,
             AppEvent::SermonMetadataChanged,
             AppEvent::SermonSegmentLinked,
+            AppEvent::ContentCandidateDetected,
+            AppEvent::ContentCandidateAccepted,
+            AppEvent::ContentCandidateRejected,
         ];
         let mut names: Vec<&str> = events.iter().map(|e| e.name()).collect();
         let unique_before = names.len();

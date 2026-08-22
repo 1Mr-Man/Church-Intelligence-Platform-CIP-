@@ -14,6 +14,7 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AppEvents } from "../events/eventNames";
 import type {
+  ContentCandidate,
   CurrentSong,
   IntelligenceCorrelation,
   IntelligenceFinding,
@@ -247,6 +248,31 @@ export function onSermonSegmentLinked(
   handler: (segment: SermonSegment) => void,
 ): Promise<UnlistenFn> {
   return listenSafe<SermonSegment>(AppEvents.SermonSegmentLinked, handler);
+}
+
+/** The Phase 2.7 content intelligence engine produced a new content
+ * candidate - never implies anything was published, scheduled, or
+ * presented; see `docs/content-intelligence.md`. */
+export function onContentCandidateDetected(
+  handler: (candidate: ContentCandidate) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<ContentCandidate>(AppEvents.ContentCandidateDetected, handler);
+}
+
+/** The operator explicitly accepted a content candidate - never
+ * automatic, and never implies the candidate was turned into final
+ * content. */
+export function onContentCandidateAccepted(
+  handler: (candidate: ContentCandidate) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<ContentCandidate>(AppEvents.ContentCandidateAccepted, handler);
+}
+
+/** The operator explicitly rejected a content candidate. */
+export function onContentCandidateRejected(
+  handler: (candidate: ContentCandidate) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<ContentCandidate>(AppEvents.ContentCandidateRejected, handler);
 }
 
 /** Unused by `ProcessedSegment` directly but kept for reference/parity -

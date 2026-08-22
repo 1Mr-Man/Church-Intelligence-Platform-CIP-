@@ -50,6 +50,7 @@ import type {
   SpeakerRole,
   ThemeCandidate,
 } from "./sermon";
+import type { ContentCandidate, ContentCandidateType } from "./contentIntelligence";
 
 describe("domain contracts", () => {
   it("constructs a ScriptureReference and a matching BibleTranslation", () => {
@@ -777,5 +778,78 @@ describe("domain contracts", () => {
     const summary: SermonFoundationSummary = { activeSermon: null, currentSection: null };
     expect(summary.activeSermon).toBeNull();
     expect(summary.currentSection).toBeNull();
+  });
+
+  it("constructs a ContentCandidate for every ContentCandidateType, tracing back to its source finding", () => {
+    const types: ContentCandidateType[] = [
+      "theme",
+      "teaching",
+      "reflection",
+      "takeaway",
+      "food_for_thought",
+      "quote",
+      "discussion_question",
+      "scripture_reflection",
+      "illustration",
+    ];
+    const confidence: ConfidenceResult = { score: 0.8, level: "high", source: "heuristic", reason: null };
+    for (const candidateType of types) {
+      const candidate: ContentCandidate = {
+        id: "11111111-1111-1111-1111-111111111111",
+        serviceId: "22222222-2222-2222-2222-222222222222",
+        sermonId: "33333333-3333-3333-3333-333333333333",
+        sourceFindingIds: ["44444444-4444-4444-4444-444444444444"],
+        candidateType,
+        titleOrLabel: "Theme: grace",
+        workingConcept: "grace abounding",
+        assertionLevel: "inferred",
+        status: "detected",
+        confidence,
+        contentPotential: 0.7,
+        evidence: [{ kind: "another_finding", findingId: "44444444-4444-4444-4444-444444444444" }],
+        provenance: { contentId: null, note: "derived from a Phase 2.6 sermon finding" },
+        engineId: "content-intelligence",
+        engineVersion: "0.1.0",
+        createdAt: "2026-01-01T00:00:00Z",
+      };
+      expect(candidate.candidateType).toBe(candidateType);
+      expect(candidate.sourceFindingIds).toHaveLength(1);
+    }
+  });
+
+  it("a ContentCandidate's contentPotential is independent of its confidence - not derived from it", () => {
+    const highConfidenceLowPotential: ContentCandidate = {
+      id: "11111111-1111-1111-1111-111111111111",
+      serviceId: "22222222-2222-2222-2222-222222222222",
+      sermonId: null,
+      sourceFindingIds: ["44444444-4444-4444-4444-444444444444"],
+      candidateType: "reflection",
+      titleOrLabel: "Application: pray daily",
+      workingConcept: "pray daily",
+      assertionLevel: "suggested",
+      status: "detected",
+      confidence: { score: 0.95, level: "high", source: "heuristic", reason: null },
+      contentPotential: 0.2,
+      evidence: [],
+      provenance: { contentId: null, note: null },
+      engineId: "content-intelligence",
+      engineVersion: "0.1.0",
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    const lowConfidenceHighPotential: ContentCandidate = {
+      ...highConfidenceLowPotential,
+      candidateType: "quote",
+      confidence: { score: 0.3, level: "low", source: "heuristic", reason: null },
+      contentPotential: 0.9,
+    };
+    expect(highConfidenceLowPotential.confidence.score).toBeGreaterThan(highConfidenceLowPotential.contentPotential);
+    expect(lowConfidenceHighPotential.contentPotential).toBeGreaterThan(lowConfidenceHighPotential.confidence.score);
+  });
+
+  it("moves a ContentCandidate through the accept/reject lifecycle using FindingStatus, never a separate status enum", () => {
+    const detected: FindingStatus = "detected";
+    const accepted: FindingStatus = "accepted";
+    const rejected: FindingStatus = "rejected";
+    expect([detected, accepted, rejected]).toEqual(["detected", "accepted", "rejected"]);
   });
 });

@@ -14,6 +14,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import type { AppConfig, AppEnvironment } from "../config/appConfig";
+import type { ContentCandidate } from "../domain/contentIntelligence";
 import type {
   AudioDevice,
   BibleSearchResult,
@@ -516,6 +517,40 @@ export function reviewCrossDomainCorrelation(correlationId: string): Promise<Int
  * the source findings, the transcript, or the active Scripture context. */
 export function dismissCrossDomainCorrelation(correlationId: string): Promise<IntelligenceCorrelation> {
   return invokeCommand("dismiss_cross_domain_correlation", { correlationId });
+}
+
+// --- content intelligence (Phase 2.7, per the authoritative Phase 2 roadmap) --
+//
+// The `ContentCandidate` counterpart to the cross-domain correlation
+// commands above. Read-only from the operator's perspective:
+// `analyzeContentIntelligence` is an explicit diagnostic/review action,
+// never triggered automatically by a transcript segment arriving. Never
+// prepares or projects a presentation item, never publishes or schedules
+// anything - see `docs/content-intelligence.md`.
+
+/** Run the Phase 2.7 content-intelligence layer against this app's real,
+ * current findings and queue any new candidates - an explicit operator/
+ * diagnostic action. */
+export function analyzeContentIntelligence(): Promise<ContentCandidate[]> {
+  return invokeCommand("analyze_content_intelligence");
+}
+
+/** Content candidates still awaiting an operator decision, for the active
+ * service - the Content Intelligence panel's data source. */
+export function listContentCandidates(): Promise<ContentCandidate[]> {
+  return invokeCommand("list_content_candidates");
+}
+
+/** Explicit operator acceptance of a content opportunity - changes only
+ * the candidate's own status; never publishes, schedules, or projects it. */
+export function acceptContentCandidate(candidateId: string): Promise<ContentCandidate> {
+  return invokeCommand("accept_content_candidate", { candidateId });
+}
+
+/** Explicit operator rejection - never automatic, and has no way to alter
+ * the source finding, the transcript, or the active Scripture context. */
+export function rejectContentCandidate(candidateId: string): Promise<ContentCandidate> {
+  return invokeCommand("reject_content_candidate", { candidateId });
 }
 
 // --- service intelligence (Phase 2.4, per the authoritative Phase 2 roadmap) --

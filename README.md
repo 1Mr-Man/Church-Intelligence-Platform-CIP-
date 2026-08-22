@@ -15,14 +15,15 @@ Foundation & Song Recognition Architecture**, **Phase 2.2 - Acoustic
 Music Recognition & Live Song Detection**, **Phase 2.3 - Sermon
 Intelligence & Live Message Understanding**, **Phase 2.4 -
 Cross-Domain Intelligence & Correlation**, **Phase 2.4 - Service
-Intelligence**, **Phase 2.5 - Sermon Intelligence Foundation**, and
-**Phase 2.6 - Sermon Intelligence**.
+Intelligence**, **Phase 2.5 - Sermon Intelligence Foundation**,
+**Phase 2.6 - Sermon Intelligence**, and **Phase 2.7 - Content
+Intelligence**.
 
 > **Roadmap note.** This repository's authoritative Phase 2 roadmap is:
 > 2.0 Intelligence Architecture -> 2.1 Unified Intelligence Event/Context
 > Layer -> 2.2 Music Content Foundation -> 2.3 Music Intelligence -> **2.4
 > Service Intelligence** -> **2.5 Sermon Intelligence Foundation** ->
-> **2.6 Sermon Intelligence** -> 2.7 Content Intelligence -> **2.8
+> **2.6 Sermon Intelligence** -> **2.7 Content Intelligence** -> **2.8
 > Cross-Domain Intelligence** -> 2.9 Unified Operator Intelligence
 > Workspace -> 2.10 Full Phase 2 Validation. The "Phase 2.4 - Cross-Domain
 > Intelligence & Correlation" work above, and the "Phase 2.3 - Sermon
@@ -90,6 +91,9 @@ deterministic sermon structure/theme/meaning detection,
 [`docs/cross-domain-intelligence.md`](docs/cross-domain-intelligence.md)
 for the deterministic rule engine that correlates Bible/Music/Sermon
 findings with each other,
+[`docs/content-intelligence.md`](docs/content-intelligence.md) for how
+accepted findings are structured into future content opportunities
+(never final copy, never published or scheduled),
 [`docs/development.md`](docs/development.md) to get running locally, and
 [`docs/database.md`](docs/database.md) for the SQLite/migration story.
 
@@ -279,6 +283,24 @@ every existing engine's own logic were not modified; the one new bridge
 to make its findings reachable for correlation, mirroring Music's and
 Sermon's existing manual-command pattern. See
 [`docs/cross-domain-intelligence.md`](docs/cross-domain-intelligence.md).
+
+**Phase 2.7 (Content Intelligence)** added the bridge between intelligence
+and future content production - never a leap into it. A new
+`core/intelligence::content_intelligence::ContentIntelligenceEngine`
+reads already-produced, already-reviewable findings and structures them
+into `ContentCandidate`s: a typed record that a piece of already-proven
+information *appears suitable* as a future content opportunity, never
+final copy, never a social post, never published or scheduled. Like the
+Phase 2.4/2.8 correlation engine, it is not registered into
+`IntelligenceEngineRegistry` (a candidate is not an `IntelligenceFinding`,
+so it does not implement `IntelligenceEngine`). Confidence is reused
+unchanged from the source finding; a separate, independently-varying
+`content_potential` score answers a different question ("how suitable
+does this look as content"), proven by a dedicated test that the two
+dimensions can diverge or invert. Only Sermon-domain findings are mapped
+in this initial phase, via an explicit, documented summary-prefix table -
+nothing is guessed from free text. See
+[`docs/content-intelligence.md`](docs/content-intelligence.md).
 
 Still deliberately **not** implemented: a chosen/trained acoustic model
 (so real-world acoustic recognition accuracy remains unverified in this

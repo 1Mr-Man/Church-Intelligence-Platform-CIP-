@@ -27,9 +27,9 @@ use cip_core_bible::{
 use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
 use cip_core_content::{ContentMetadata, ContentRegistryError, ContentStatus, ContentType};
 use cip_core_intelligence::{
-    ContextBounds, CrossDomainCorrelationEngine, EngineCapability, IntelligenceContext,
-    IntelligenceCorrelation, IntelligenceDomain, IntelligenceFinding, IntelligenceInput,
-    QueueAddOutcome, ServicePhase,
+    ContentCandidate, ContentIntelligenceEngine, ContextBounds, CrossDomainCorrelationEngine,
+    EngineCapability, IntelligenceContext, IntelligenceCorrelation, IntelligenceDomain,
+    IntelligenceFinding, IntelligenceInput, QueueAddOutcome, ServicePhase,
 };
 use cip_core_music::{search_songs, MatchThresholds, MusicQuery, SongRecognitionCandidate};
 use cip_core_presentation::{PresentationContent, PresentationItem, PresentationItemStatus};
@@ -3239,6 +3239,154 @@ pub fn dismiss_cross_domain_correlation(
         AppEvent::CrossDomainCorrelationDismissed,
         updated.clone(),
     );
+    Ok(updated)
+}
+
+// --- content intelligence (Phase 2.7, per the authoritative Phase 2 roadmap) --
+//
+// The `ContentCandidate` counterpart to the cross-domain correlation block
+// above. `ContentIntelligenceEngine` reads `context.recent_findings`
+// (every domain, via `build_music_context`) and structures candidates -
+// never calls another engine, never mutates a source finding. See
+// `content_intelligence.rs`'s module docs.
+
+/// Run the Phase 2.7 content-intelligence layer against this app's real,
+/// current state and queue any new candidates - an explicit operator/
+/// diagnostic action, never triggered automatically by a transcript
+/// segment arriving (mirrors `analyze_cross_domain` exactly).
+#[tauri::command]
+pub fn analyze_content_intelligence(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<ContentCandidate>, AppError> {
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let context = build_music_context(&state, service_id).map_err(log_and_return)?;
+
+    let engine = ContentIntelligenceEngine::new();
+    let queued = {
+        let mut candidates = state
+            .content_candidate_queue
+            .lock()
+            .expect("content_candidate_queue mutex poisoned");
+        crate::content_intelligence::analyze_and_queue(&engine, &context, &mut candidates)
+    };
+
+    let db = state.db.lock().expect("db connection poisoned");
+    for candidate in &queued {
+        record_timeline(
+            &db,
+            Some(service_id),
+            AppEvent::ContentCandidateDetected,
+            LogCategory::App,
+            serde_json::json!({
+                "candidateId": candidate.id,
+                "candidateType": candidate.candidate_type.label(),
+                "titleOrLabel": &candidate.title_or_label,
+                "contentPotential": candidate.content_potential,
+            }),
+        );
+    }
+    drop(db);
+    for candidate in &queued {
+        let _ = emit(&app, AppEvent::ContentCandidateDetected, candidate.clone());
+    }
+
+    Ok(queued)
+}
+
+/// Content candidates still awaiting an operator decision
+/// (`Detected`/`Reviewed`), for the active service - the Content
+/// Intelligence panel's read-only data source. Mirrors
+/// `list_cross_domain_correlations`.
+#[tauri::command]
+pub fn list_content_candidates(
+    state: State<'_, AppState>,
+) -> Result<Vec<ContentCandidate>, AppError> {
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let candidates = state
+        .content_candidate_queue
+        .lock()
+        .expect("content_candidate_queue mutex poisoned");
+    Ok(candidates
+        .pending()
+        .into_iter()
+        .filter(|c| c.service_id == service_id)
+        .cloned()
+        .collect())
+}
+
+/// Explicit operator acceptance of a content opportunity (spec section
+/// 11/35) - changes only the candidate's own status; has no code path into
+/// `presentation::persist_prepared_item` or anything else that could
+/// publish/schedule/project it.
+#[tauri::command]
+pub fn accept_content_candidate(
+    candidate_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ContentCandidate, AppError> {
+    let id = parse_uuid(&candidate_id).map_err(log_and_return)?;
+    let updated = {
+        let mut candidates = state
+            .content_candidate_queue
+            .lock()
+            .expect("content_candidate_queue mutex poisoned");
+        candidates
+            .accept(id)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        candidates
+            .get(id)
+            .cloned()
+            .expect("just-accepted candidate is still present")
+    };
+    let db = state.db.lock().expect("db connection poisoned");
+    record_timeline(
+        &db,
+        Some(updated.service_id),
+        AppEvent::ContentCandidateAccepted,
+        LogCategory::App,
+        serde_json::json!({ "candidateId": updated.id, "titleOrLabel": &updated.title_or_label }),
+    );
+    drop(db);
+    let _ = emit(&app, AppEvent::ContentCandidateAccepted, updated.clone());
+    Ok(updated)
+}
+
+/// Explicit operator rejection of a content candidate - never automatic,
+/// and has no way to alter the source finding, the transcript, or the
+/// active Scripture context.
+#[tauri::command]
+pub fn reject_content_candidate(
+    candidate_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ContentCandidate, AppError> {
+    let id = parse_uuid(&candidate_id).map_err(log_and_return)?;
+    let updated = {
+        let mut candidates = state
+            .content_candidate_queue
+            .lock()
+            .expect("content_candidate_queue mutex poisoned");
+        candidates
+            .reject(id)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        candidates
+            .get(id)
+            .cloned()
+            .expect("just-rejected candidate is still present")
+    };
+    let db = state.db.lock().expect("db connection poisoned");
+    record_timeline(
+        &db,
+        Some(updated.service_id),
+        AppEvent::ContentCandidateRejected,
+        LogCategory::App,
+        serde_json::json!({ "candidateId": updated.id, "titleOrLabel": &updated.title_or_label }),
+    );
+    drop(db);
+    let _ = emit(&app, AppEvent::ContentCandidateRejected, updated.clone());
     Ok(updated)
 }
 
