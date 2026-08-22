@@ -23,6 +23,9 @@ pub enum LogCategory {
     Presentation,
     /// Content Registry / dataset import operations (Phase 1.5).
     Content,
+    /// Music Intelligence (Phase 2.1): recognition analysis, dataset
+    /// import, and operator finding review.
+    Music,
     Network,
     Security,
     /// For errors that don't cleanly belong to one of the above (see
@@ -42,6 +45,7 @@ impl LogCategory {
             LogCategory::Ai => "cip::ai",
             LogCategory::Presentation => "cip::presentation",
             LogCategory::Content => "cip::content",
+            LogCategory::Music => "cip::music",
             LogCategory::Network => "cip::network",
             LogCategory::Security => "cip::security",
             LogCategory::Error => "cip::error",
@@ -64,6 +68,7 @@ mod tests {
             LogCategory::Ai,
             LogCategory::Presentation,
             LogCategory::Content,
+            LogCategory::Music,
             LogCategory::Network,
             LogCategory::Security,
             LogCategory::Error,

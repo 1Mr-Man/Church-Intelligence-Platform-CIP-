@@ -55,6 +55,7 @@ mod evidence;
 mod finding;
 #[cfg(test)]
 mod fixtures;
+pub mod music_adapter;
 mod queue;
 mod registry;
 
@@ -75,5 +76,8 @@ pub use engine::{
 };
 pub use evidence::{EvidenceSource, IntelligenceProvenance};
 pub use finding::IntelligenceFinding;
+pub use music_adapter::{
+    acoustic_recognition_available, MusicIntelligenceEngine, MUSIC_ENGINE_ID, MUSIC_ENGINE_VERSION,
+};
 pub use queue::{FindingQueue, QueueAddOutcome};
 pub use registry::{EngineOutcome, IntelligenceEngineRegistry};

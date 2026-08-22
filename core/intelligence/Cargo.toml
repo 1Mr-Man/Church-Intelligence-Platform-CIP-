@@ -17,6 +17,7 @@ cip-core-bible.workspace = true
 cip-core-ai.workspace = true
 cip-core-service.workspace = true
 cip-core-content.workspace = true
+cip-core-music.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

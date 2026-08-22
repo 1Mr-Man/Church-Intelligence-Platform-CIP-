@@ -10,6 +10,7 @@ use crate::content;
 use crate::errors::AppError;
 use crate::events::{emit, AppEvent};
 use crate::logging::LogCategory;
+use crate::music;
 use crate::persistence;
 use crate::pipeline::handle_final_transcript;
 use crate::presentation;
@@ -23,13 +24,17 @@ use cip_core_bible::{
 };
 use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
 use cip_core_content::{ContentMetadata, ContentRegistryError, ContentStatus, ContentType};
-use cip_core_intelligence::{EngineCapability, IntelligenceDomain};
+use cip_core_intelligence::{
+    ContextBounds, EngineCapability, IntelligenceDomain, IntelligenceFinding, IntelligenceInput,
+};
+use cip_core_music::{search_songs, MatchThresholds, MusicQuery, SongRecognitionCandidate};
 use cip_core_presentation::{PresentationContent, PresentationItem, PresentationItemStatus};
 use cip_core_service::{
     AudioChunk, AudioChunkSink, AudioDevice, AudioEngineStatus, ScriptureDetection, ServiceSession,
     ServiceStatus,
 };
 use cip_integrations_bible::{BibleDatasetInput, ImportReport};
+use cip_integrations_music::{ImportReport as MusicImportReport, MusicDatasetInput};
 use cip_presentation_renderer::{RenderedSlide, SCRIPTURE_DEFAULT_TEMPLATE};
 use rusqlite::Connection;
 use serde::Serialize;
@@ -1584,6 +1589,297 @@ pub fn get_intelligence_capabilities(state: State<'_, AppState>) -> Vec<DomainCa
         .collect()
 }
 
+// --- music intelligence (Phase 2.1) -----------------------------------------
+//
+// Dataset listing deliberately reuses `list_content_registry(Some("music"))`
+// above rather than a second "list music datasets" command - Music
+// datasets are ordinary Content Registry entries (`ContentType::Music`),
+// so a dedicated listing command would only duplicate an existing one.
+
+fn parse_music_query(query_type: &str, query_text: String) -> Result<MusicQuery, AppError> {
+    match query_type {
+        "title" => Ok(MusicQuery::Title(query_text)),
+        "number" => Ok(MusicQuery::Number(query_text)),
+        "lyric" => Ok(MusicQuery::Lyric(query_text)),
+        other => Err(AppError::InvalidInput(format!(
+            "unknown music query type: {other}"
+        ))),
+    }
+}
+
+/// Every currently-enabled Music dataset - `search_music`'s default scope
+/// when the operator does not explicitly name datasets, mirroring
+/// `is_translation_selectable`'s "disabled content is hidden from normal
+/// selection" rule (applied to Music instead of Bible).
+fn enabled_music_content_ids(state: &State<'_, AppState>) -> Result<Vec<String>, AppError> {
+    Ok(state
+        .content_registry
+        .list(Some(ContentType::Music))
+        .map_err(AppError::from)?
+        .into_iter()
+        .filter(|m| m.status == ContentStatus::Enabled)
+        .map(|m| m.id)
+        .collect())
+}
+
+/// Manual song search - works with no audio/speech/network, same reasoning
+/// as `search_bible`. `content_ids` lets the operator explicitly name
+/// which dataset(s) to search (including a disabled one, exactly like
+/// `search_bible` accepts any `translation_id` regardless of that
+/// translation's own enabled/disabled status); omitted, only
+/// currently-enabled Music datasets are searched.
+#[tauri::command]
+pub fn search_music(
+    query: String,
+    query_type: String,
+    content_ids: Option<Vec<String>>,
+    state: State<'_, AppState>,
+) -> Result<Vec<SongRecognitionCandidate>, AppError> {
+    let query_text = require_non_empty(&query, "query").map_err(log_and_return)?;
+    let music_query = parse_music_query(&query_type, query_text).map_err(log_and_return)?;
+    let content_ids = match content_ids {
+        Some(ids) => ids,
+        None => enabled_music_content_ids(&state).map_err(log_and_return)?,
+    };
+    search_songs(
+        state.music_provider.as_ref(),
+        &content_ids,
+        &music_query,
+        &MatchThresholds::default(),
+    )
+    .map_err(AppError::from)
+    .map_err(log_and_return)
+}
+
+/// Imports a local music dataset, already read and parsed to JSON text by
+/// the frontend (never a filesystem path) - mirrors `import_bible_dataset`
+/// exactly; see `docs/music-datasets.md`.
+#[tauri::command]
+pub fn import_music_dataset(
+    dataset_json: String,
+    state: State<'_, AppState>,
+) -> Result<MusicImportReport, AppError> {
+    let dataset_json = require_non_empty(&dataset_json, "datasetJson").map_err(log_and_return)?;
+    let dataset: MusicDatasetInput = serde_json::from_str(&dataset_json).map_err(|e| {
+        log_and_return(AppError::InvalidInput(format!(
+            "malformed dataset JSON: {e}"
+        )))
+    })?;
+    let db = state.db.lock().expect("db connection poisoned");
+    music::import_and_register_music(&db, state.content_registry.as_ref(), &dataset)
+        .map_err(AppError::from)
+        .map_err(log_and_return)
+}
+
+/// The deterministic music-analysis harness, exposed over IPC - the Music
+/// Intelligence counterpart to `process_test_transcript`. Persists `text`
+/// as an ordinary transcript segment (so a later call's multi-line lyric
+/// continuity has real history to look at - see `music_adapter`'s module
+/// docs), builds a real `IntelligenceContext` from this app's actual
+/// state, and calls the registered Music engine directly - never routed
+/// through `handle_final_transcript`/the Bible pipeline, since Music must
+/// be reachable independently of Bible's path (Phase 2.1 spec section 2).
+/// Findings are queued in `AppState.intelligence_findings`; this command
+/// never prepares or projects a presentation item.
+#[tauri::command]
+pub fn analyze_music_transcript(
+    text: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<IntelligenceFinding>, AppError> {
+    let text = require_non_empty(&text, "text").map_err(log_and_return)?;
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let sequence = state.transcript_sequence.fetch_add(1, Ordering::SeqCst);
+
+    let segment = TranscriptSegment {
+        id: Uuid::new_v4(),
+        sequence,
+        text,
+        is_final: true,
+        confidence: ConfidenceResult::new(
+            1.0,
+            ConfidenceSource::Human,
+            Some("manually entered test transcript for music analysis".to_string()),
+        ),
+        start_ms: 0,
+        end_ms: 0,
+        language: Some("en".to_string()),
+        speaker_id: None,
+    };
+
+    {
+        let db = state.db.lock().expect("db connection poisoned");
+        persistence::persist_transcript_segment(&db, service_id, &segment)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+    }
+    let _ = emit(&app, AppEvent::TranscriptUpdated, segment.clone());
+
+    let context = {
+        let db = state.db.lock().expect("db connection poisoned");
+        let recent_timeline = timeline::list_timeline(&db, service_id, 20)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        let active_service = state
+            .active_service
+            .lock()
+            .expect("active_service mutex poisoned");
+        let context_manager = state
+            .context_manager
+            .lock()
+            .expect("context_manager mutex poisoned");
+        crate::intelligence::build_intelligence_context(
+            &db,
+            state.content_registry.as_ref(),
+            active_service.as_ref(),
+            &*context_manager,
+            &recent_timeline,
+            ContextBounds::default(),
+        )
+        .map_err(AppError::from)
+        .map_err(log_and_return)?
+    };
+
+    let input = IntelligenceInput::new(service_id, segment);
+    let engine = state
+        .intelligence_registry
+        .resolve(IntelligenceDomain::Music)
+        .ok_or_else(|| {
+            log_and_return(AppError::InvalidInput(
+                "music intelligence engine is not registered".to_string(),
+            ))
+        })?;
+
+    let queued = {
+        let mut findings = state
+            .intelligence_findings
+            .lock()
+            .expect("intelligence_findings mutex poisoned");
+        music::analyze_and_queue(engine, &input, &context, &mut findings)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?
+    };
+
+    {
+        let db = state.db.lock().expect("db connection poisoned");
+        for finding in &queued {
+            record_timeline(
+                &db,
+                Some(service_id),
+                AppEvent::MusicFindingDetected,
+                LogCategory::Music,
+                serde_json::json!({
+                    "findingId": finding.id,
+                    "summary": &finding.summary,
+                    "confidence": finding.confidence.score,
+                }),
+            );
+        }
+    }
+    for finding in &queued {
+        let _ = emit(&app, AppEvent::MusicFindingDetected, finding.clone());
+    }
+
+    Ok(queued)
+}
+
+/// Music findings still awaiting an operator decision (`Detected`/`Reviewed`),
+/// for the active service - the Music Intelligence panel's data source.
+/// `FindingQueue` is not itself service-scoped (Phase 2.0's in-memory
+/// design), so this filters to the active service and the Music domain
+/// explicitly.
+#[tauri::command]
+pub fn list_music_findings(
+    state: State<'_, AppState>,
+) -> Result<Vec<IntelligenceFinding>, AppError> {
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let findings = state
+        .intelligence_findings
+        .lock()
+        .expect("intelligence_findings mutex poisoned");
+    Ok(findings
+        .pending()
+        .into_iter()
+        .filter(|f| f.service_id == service_id && f.domain == IntelligenceDomain::Music)
+        .cloned()
+        .collect())
+}
+
+/// Explicit operator acceptance of a music finding (Phase 2.1 hard
+/// requirement: music recognition must never automatically create a
+/// presentation item). This changes only the finding's own status in
+/// `AppState.intelligence_findings` - there is no call from here into
+/// `presentation::persist_prepared_item` or anything else that could
+/// project a slide. An operator who wants a prepared item still uses the
+/// existing, separate manual presentation commands.
+#[tauri::command]
+pub fn accept_music_finding(
+    finding_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<IntelligenceFinding, AppError> {
+    let id = parse_uuid(&finding_id).map_err(log_and_return)?;
+    let updated = {
+        let mut findings = state
+            .intelligence_findings
+            .lock()
+            .expect("intelligence_findings mutex poisoned");
+        findings
+            .accept(id)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        findings
+            .get(id)
+            .cloned()
+            .expect("just-accepted finding is still present")
+    };
+    let db = state.db.lock().expect("db connection poisoned");
+    record_timeline(
+        &db,
+        Some(updated.service_id),
+        AppEvent::MusicFindingAccepted,
+        LogCategory::Music,
+        serde_json::json!({ "findingId": updated.id, "summary": &updated.summary }),
+    );
+    drop(db);
+    let _ = emit(&app, AppEvent::MusicFindingAccepted, updated.clone());
+    Ok(updated)
+}
+
+#[tauri::command]
+pub fn reject_music_finding(
+    finding_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<IntelligenceFinding, AppError> {
+    let id = parse_uuid(&finding_id).map_err(log_and_return)?;
+    let updated = {
+        let mut findings = state
+            .intelligence_findings
+            .lock()
+            .expect("intelligence_findings mutex poisoned");
+        findings
+            .reject(id)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?;
+        findings
+            .get(id)
+            .cloned()
+            .expect("just-rejected finding is still present")
+    };
+    let db = state.db.lock().expect("db connection poisoned");
+    record_timeline(
+        &db,
+        Some(updated.service_id),
+        AppEvent::MusicFindingRejected,
+        LogCategory::Music,
+        serde_json::json!({ "findingId": updated.id, "summary": &updated.summary }),
+    );
+    drop(db);
+    let _ = emit(&app, AppEvent::MusicFindingRejected, updated.clone());
+    Ok(updated)
+}
+
 // --- live status -------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1931,6 +2227,26 @@ mod tests {
         );
         assert!(matches!(
             parse_content_type("sermon"),
+            Err(AppError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn parse_music_query_accepts_known_types_and_rejects_unknown() {
+        assert_eq!(
+            parse_music_query("title", "Amazing Grace".to_string()).unwrap(),
+            MusicQuery::Title("Amazing Grace".to_string())
+        );
+        assert_eq!(
+            parse_music_query("number", "120".to_string()).unwrap(),
+            MusicQuery::Number("120".to_string())
+        );
+        assert_eq!(
+            parse_music_query("lyric", "grace how sweet".to_string()).unwrap(),
+            MusicQuery::Lyric("grace how sweet".to_string())
+        );
+        assert!(matches!(
+            parse_music_query("acoustic", "hum a few bars".to_string()),
             Err(AppError::InvalidInput(_))
         ));
     }

@@ -8,15 +8,21 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  acceptMusicFinding,
+  analyzeMusicTranscript,
   checkBibleDatasetIntegrity,
   createManualPresentation,
   getAppConfig,
   getIntelligenceCapabilities,
   importBibleDataset,
+  importMusicDataset,
   listContentRegistry,
+  listMusicFindings,
   previewPresentation,
   previewScripture,
+  rejectMusicFinding,
   searchBible,
+  searchMusic,
   setContentEnabled,
   TauriUnavailableError,
 } from "./commands";
@@ -151,5 +157,87 @@ describe("commands.ts Tauri IPC guard", () => {
     await getIntelligenceCapabilities();
 
     expect(invokeMock).toHaveBeenCalledWith("get_intelligence_capabilities", undefined);
+  });
+
+  // --- music intelligence (Phase 2.1) --------------------------------------
+
+  it("searchMusic passes null contentIds when omitted, searching only enabled datasets", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await searchMusic("Amazing Grace", "title");
+
+    expect(invokeMock).toHaveBeenCalledWith("search_music", {
+      query: "Amazing Grace",
+      queryType: "title",
+      contentIds: null,
+    });
+  });
+
+  it("searchMusic forwards explicit contentIds, letting the operator name a disabled dataset", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await searchMusic("120", "number", ["music:dev-disabled-set"]);
+
+    expect(invokeMock).toHaveBeenCalledWith("search_music", {
+      query: "120",
+      queryType: "number",
+      contentIds: ["music:dev-disabled-set"],
+    });
+  });
+
+  it("importMusicDataset never reads the filesystem itself - it only forwards already-read JSON text", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await importMusicDataset('{"contentId":"music:test"}');
+
+    expect(invokeMock).toHaveBeenCalledWith("import_music_dataset", {
+      datasetJson: '{"contentId":"music:test"}',
+    });
+  });
+
+  it("analyzeMusicTranscript calls analyze_music_transcript with the raw text", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await analyzeMusicTranscript("Let's sing Amazing Grace");
+
+    expect(invokeMock).toHaveBeenCalledWith("analyze_music_transcript", { text: "Let's sing Amazing Grace" });
+  });
+
+  it("listMusicFindings calls list_music_findings with no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await listMusicFindings();
+
+    expect(invokeMock).toHaveBeenCalledWith("list_music_findings", undefined);
+  });
+
+  /** Structural proof (mirroring `previewPresentation`'s test above): the
+   * operator-decision wrappers each make exactly one IPC call, to their
+   * own command - never a second, presentation-related call. Music
+   * recognition must never automatically create a presentation item
+   * (Phase 2.1 hard requirement). */
+  it("acceptMusicFinding calls only accept_music_finding, never a presentation command", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await acceptMusicFinding("finding-1");
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("accept_music_finding", { findingId: "finding-1" });
+  });
+
+  it("rejectMusicFinding calls only reject_music_finding, never a presentation command", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await rejectMusicFinding("finding-1");
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("reject_music_finding", { findingId: "finding-1" });
   });
 });

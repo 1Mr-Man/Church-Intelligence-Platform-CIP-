@@ -61,6 +61,11 @@ fn category_str(category: LogCategory) -> &'static str {
         // rather than an additive migration for a category with no
         // current caller.
         LogCategory::Content => "app",
+        // Unlike Content above, Music Intelligence timeline entries are a
+        // real, permanent caller (see commands.rs's music section) - the
+        // CHECK constraint was extended for it (migration 0007) rather
+        // than mapped onto an unrelated bucket.
+        LogCategory::Music => "music",
         LogCategory::Network => "network",
         LogCategory::Security => "security",
         LogCategory::Error => "error",

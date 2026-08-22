@@ -15,6 +15,7 @@ use cip_core_bible::{
     BibleBook, BibleChapter, BibleProvider, BibleProviderError, BibleTranslation, BibleVerse,
     ScriptureReference, Testament,
 };
+use cip_core_music::{LyricLine, MusicProvider, MusicProviderError, Song, SongSection, SongType};
 
 pub struct FakeBibleProvider {
     verses: HashMap<(String, String, u32, u32), String>,
@@ -149,5 +150,187 @@ impl BibleProvider for FakeBibleProvider {
         chapters.sort_unstable();
         chapters.dedup();
         Ok(chapters)
+    }
+}
+
+/// A minimal in-memory `MusicProvider`, matching the same
+/// crate-local-fixture pattern as `FakeBibleProvider` above -
+/// `cip_core_music::fixtures::FakeMusicProvider` is `#[cfg(test)]`-gated
+/// and private to `core/music` itself, so this crate keeps its own.
+#[derive(Default)]
+pub struct FakeMusicProvider {
+    songs: HashMap<(String, String), Song>,
+    lyrics: HashMap<(String, String), Vec<LyricLine>>,
+}
+
+impl FakeMusicProvider {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add_song(&mut self, song: Song) {
+        self.songs
+            .insert((song.content_id.clone(), song.id.clone()), song);
+    }
+
+    pub fn add_lyrics(&mut self, content_id: &str, song_id: &str, lines: Vec<LyricLine>) {
+        self.lyrics
+            .insert((content_id.to_string(), song_id.to_string()), lines);
+    }
+
+    /// One dataset (`"music:test-hymnbook"`) with two songs: "Test Hymn
+    /// One" (number "120", alias "First Test Hymn", a distinctive
+    /// two-line lyric) and "Test Hymn Two" (number "121", unrelated
+    /// lyrics) - the same shape used throughout `core/music`'s own
+    /// matcher tests.
+    pub fn hymnbook_fixture() -> Self {
+        let mut provider = Self::new();
+        let hymn_one = Song::new(
+            "h1",
+            "music:test-hymnbook",
+            "Test Hymn One",
+            vec!["First Test Hymn".to_string()],
+            SongType::Hymn,
+            "en",
+            Some("120".to_string()),
+            None,
+            None,
+        );
+        provider.add_song(hymn_one);
+        provider.add_lyrics(
+            "music:test-hymnbook",
+            "h1",
+            vec![
+                LyricLine::new("h1", None, 0, "Great is thy faithfulness my Father"),
+                LyricLine::new("h1", None, 1, "Morning by morning new mercies I see"),
+            ],
+        );
+
+        let hymn_two = Song::new(
+            "h2",
+            "music:test-hymnbook",
+            "Test Hymn Two",
+            vec![],
+            SongType::Hymn,
+            "en",
+            Some("121".to_string()),
+            None,
+            None,
+        );
+        provider.add_song(hymn_two);
+        provider.add_lyrics(
+            "music:test-hymnbook",
+            "h2",
+            vec![LyricLine::new(
+                "h2",
+                None,
+                0,
+                "A completely unrelated lyric line",
+            )],
+        );
+
+        provider
+    }
+}
+
+impl MusicProvider for FakeMusicProvider {
+    fn list_datasets(&self) -> Result<Vec<String>, MusicProviderError> {
+        let mut ids: Vec<String> = self.songs.keys().map(|(c, _)| c.clone()).collect();
+        ids.sort();
+        ids.dedup();
+        Ok(ids)
+    }
+
+    fn get_song(
+        &self,
+        content_id: &str,
+        song_id: &str,
+    ) -> Result<Option<Song>, MusicProviderError> {
+        Ok(self
+            .songs
+            .get(&(content_id.to_string(), song_id.to_string()))
+            .cloned())
+    }
+
+    fn search_title(
+        &self,
+        content_id: &str,
+        normalized_title: &str,
+    ) -> Result<Vec<Song>, MusicProviderError> {
+        Ok(self
+            .songs
+            .values()
+            .filter(|s| s.content_id == content_id && s.normalized_title == normalized_title)
+            .cloned()
+            .collect())
+    }
+
+    fn search_alias(
+        &self,
+        content_id: &str,
+        normalized_alias: &str,
+    ) -> Result<Vec<Song>, MusicProviderError> {
+        Ok(self
+            .songs
+            .values()
+            .filter(|s| {
+                s.content_id == content_id
+                    && s.aliases.iter().any(|a| {
+                        cip_core_music::normalize::normalize_for_matching(a) == normalized_alias
+                    })
+            })
+            .cloned()
+            .collect())
+    }
+
+    fn search_number(
+        &self,
+        content_id: &str,
+        number: &str,
+    ) -> Result<Option<Song>, MusicProviderError> {
+        Ok(self
+            .songs
+            .values()
+            .find(|s| s.content_id == content_id && s.number.as_deref() == Some(number))
+            .cloned())
+    }
+
+    fn search_lyrics(
+        &self,
+        content_id: &str,
+        normalized_phrase: &str,
+    ) -> Result<Vec<LyricLine>, MusicProviderError> {
+        let mut out = Vec::new();
+        for ((cid, _), lines) in &self.lyrics {
+            if cid != content_id {
+                continue;
+            }
+            for line in lines {
+                if line.normalized_text.contains(normalized_phrase) {
+                    out.push(line.clone());
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    fn get_sections(
+        &self,
+        _content_id: &str,
+        _song_id: &str,
+    ) -> Result<Vec<SongSection>, MusicProviderError> {
+        Ok(Vec::new())
+    }
+
+    fn get_lyrics(
+        &self,
+        content_id: &str,
+        song_id: &str,
+    ) -> Result<Vec<LyricLine>, MusicProviderError> {
+        Ok(self
+            .lyrics
+            .get(&(content_id.to_string(), song_id.to_string()))
+            .cloned()
+            .unwrap_or_default())
     }
 }

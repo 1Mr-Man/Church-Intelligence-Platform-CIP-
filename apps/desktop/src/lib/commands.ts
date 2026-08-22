@@ -23,12 +23,16 @@ import type {
   DomainCapabilityReport,
   ImportReport,
   IntegrityReport,
+  IntelligenceFinding,
   LiveStatus,
+  MusicImportReport,
+  MusicQueryType,
   PresentationItem,
   PresentationPreview,
   ProcessedSegment,
   ScriptureContext,
   ServiceSession,
+  SongRecognitionCandidate,
   Suggestion,
   SuggestionStatus,
   TimelineEntry,
@@ -271,6 +275,52 @@ export function checkBibleDatasetIntegrity(translationId: string): Promise<Integ
  * fabricates a capability for a domain with no registered engine. */
 export function getIntelligenceCapabilities(): Promise<DomainCapabilityReport[]> {
   return invokeCommand("get_intelligence_capabilities");
+}
+
+// --- music intelligence (Phase 2.1) -------------------------------------------
+//
+// Dataset listing reuses `listContentRegistry("music")` above - Music
+// datasets are ordinary Content Registry entries, so there is no separate
+// "list music datasets" command.
+
+/** Manual song search - works with no audio/speech/network, same
+ * reasoning as `searchBible`. `contentIds` lets the operator explicitly
+ * name which dataset(s) to search (including a disabled one); omitted,
+ * only currently-enabled Music datasets are searched. */
+export function searchMusic(
+  query: string,
+  queryType: MusicQueryType,
+  contentIds?: string[],
+): Promise<SongRecognitionCandidate[]> {
+  return invokeCommand("search_music", { query, queryType, contentIds: contentIds ?? null });
+}
+
+/** Imports a local music dataset, already read as text by the frontend -
+ * mirrors `importBibleDataset`. See `docs/music-datasets.md` for the
+ * expected JSON shape (`MusicDatasetInput`). */
+export function importMusicDataset(datasetJson: string): Promise<MusicImportReport> {
+  return invokeCommand("import_music_dataset", { datasetJson });
+}
+
+/** The deterministic music-analysis harness - the Music Intelligence
+ * counterpart to `processTestTranscript`. Never creates a presentation
+ * item; findings are queued for operator review only. */
+export function analyzeMusicTranscript(text: string): Promise<IntelligenceFinding[]> {
+  return invokeCommand("analyze_music_transcript", { text });
+}
+
+/** Music findings still awaiting an operator decision, for the active
+ * service - the Music Intelligence panel's data source. */
+export function listMusicFindings(): Promise<IntelligenceFinding[]> {
+  return invokeCommand("list_music_findings");
+}
+
+export function acceptMusicFinding(findingId: string): Promise<IntelligenceFinding> {
+  return invokeCommand("accept_music_finding", { findingId });
+}
+
+export function rejectMusicFinding(findingId: string): Promise<IntelligenceFinding> {
+  return invokeCommand("reject_music_finding", { findingId });
 }
 
 // --- live status --------------------------------------------------------------

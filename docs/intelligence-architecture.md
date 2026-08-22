@@ -1,11 +1,13 @@
-# Intelligence Architecture (Phase 2.0)
+# Intelligence Architecture (Phase 2.0, extended in Phase 2.1)
 
-This document explains `core/intelligence` - the shared contracts future
-Bible/Music/Sermon/Content/Cross-Domain intelligence engines are built on.
-It does **not** implement Music, Sermon, or Content intelligence; those
-remain **PLANNED / NOT IMPLEMENTED**. The only real engine in this phase is
+This document explains `core/intelligence` - the shared contracts
+Bible/Music/Sermon/Content/Cross-Domain intelligence engines are built
+on. Phase 2.0 established the architecture with exactly one real engine:
 a thin compatibility adapter over the Bible Intelligence Core Phase 1.1
-already built - see "Bible compatibility" below.
+already built - see section 24. Phase 2.1 added the first real *second*
+engine, Music - see section 25 and
+[`docs/music-intelligence.md`](music-intelligence.md). Sermon, Content,
+and Cross-Domain intelligence remain **PLANNED / NOT IMPLEMENTED**.
 
 ## 1. Phase 2 vision
 
@@ -34,8 +36,9 @@ engines.
 
 `IntelligenceDomain` (`core/intelligence/src/domain.rs`) is a closed enum:
 `Bible`, `Music`, `Service`, `Sermon`, `Content`, `CrossDomain`. It answers
-*which* intelligence domain produced a finding. Only `Bible` has a real
-engine registered anywhere in this codebase - see section 24.
+*which* intelligence domain produced a finding. `Bible` (section 24) and,
+as of Phase 2.1, `Music` (section 25) have real engines registered;
+`Service`/`Sermon`/`Content`/`CrossDomain` remain reserved shape only.
 
 ## 3. `IntelligenceFinding`
 
@@ -300,10 +303,13 @@ in this crate (see section 5).
 `core/intelligence` depends on nothing beyond `serde`/`chrono`/`uuid`/
 `thiserror` and the existing `core/*` domain crates
 (`cip-core-confidence`/`cip-core-bible`/`cip-core-ai`/`cip-core-service`/
-`cip-core-content`) - no Tauri, no React, no SQLite implementation, no
-`cpal`, no `whisper-rs`, no network client. Verified structurally: `cargo
-tree -p cip-core-intelligence` shows only those crates, and a
-whole-workspace scan for `reqwest`/`hyper`/`ureq`/`tungstenite` finds none.
+`cip-core-content`/`cip-core-music`, the last added in Phase 2.1) - no
+Tauri, no React, no SQLite implementation, no `cpal`, no `whisper-rs`, no
+network client. Verified structurally: `cargo tree -p cip-core-intelligence`
+shows only those crates, and a whole-workspace scan for
+`reqwest`/`hyper`/`ureq`/`tungstenite` finds none. `core/music` itself is
+held to the same standard - see
+[`docs/music-intelligence.md`](music-intelligence.md#offline-guarantee).
 
 ## 24. Bible compatibility (the one real engine)
 
@@ -325,16 +331,45 @@ module's own tests; the live transcript pipeline
 (`pipeline.rs::handle_final_transcript`) is completely unchanged and does
 not call into it.
 
-### Future Music / Sermon / Content engines - PLANNED / NOT IMPLEMENTED
+## 25. Music (the second real engine, Phase 2.1)
 
-`IntelligenceDomain::Music`/`Sermon`/`Content` and the matching
-`FindingKind` variants reserve the shape those engines will occupy. No
-song recognition, audio fingerprinting, sermon summarization, topic
-extraction, or content generation exists anywhere in this codebase. A
-future engine for any of these domains implements `IntelligenceEngine`,
-gets registered in `IntelligenceEngineRegistry`, and receives the same
-bounded `IntelligenceContext` the Bible engine does - never a direct call
-to `BibleIntelligenceEngine` or any other engine.
+`MusicIntelligenceEngine` (`core/intelligence/src/music_adapter.rs`) is
+Phase 2.1's proof that this architecture generalizes beyond Bible: a
+second, independently-registered `IntelligenceEngine` that never calls
+`BibleIntelligenceEngine` (or vice versa), sharing only what the
+orchestrator puts into `IntelligenceContext`. Like the Bible adapter, it
+does not reimplement recognition logic itself - every candidate comes
+from `cip_core_music::search_songs`, a deterministic, documented,
+explainable matcher (title/alias/hymn-number/lyric text - explicitly
+**not** audio fingerprinting; see
+[`docs/music-intelligence.md`](music-intelligence.md#what-song-recognition-means-here-honestly)
+for exactly what is and isn't implemented).
+
+Registered in the desktop app (`apps/desktop/src-tauri/src/music.rs`)
+against a real, dedicated `SqliteMusicProvider` connection, alongside the
+Bible engine in the same `IntelligenceEngineRegistry`. Exercised by the
+manual `analyze_music_transcript` command (the Music counterpart to
+`process_test_transcript`) and by `get_intelligence_capabilities`; the
+live audio/speech transcript pipeline still only calls Bible detection,
+unchanged.
+
+Full details - the confidence hierarchy, text normalization policy,
+free-text dispatch heuristic, song continuity, ambiguity handling, the
+operator workflow, and why acoustic recognition is honestly reported
+unavailable - live in
+[`docs/music-intelligence.md`](music-intelligence.md), not duplicated
+here.
+
+### Remaining Sermon / Content / CrossDomain engines - PLANNED / NOT IMPLEMENTED
+
+`IntelligenceDomain::Sermon`/`Content`/`CrossDomain` and the matching
+`FindingKind` variants still only reserve the shape those engines will
+occupy. No sermon summarization, topic extraction, content generation,
+or real cross-domain correlation logic exists anywhere in this
+codebase. A future engine for any of these domains implements
+`IntelligenceEngine`, gets registered in `IntelligenceEngineRegistry`,
+and receives the same bounded `IntelligenceContext` Bible and Music
+already do - never a direct call to either existing engine.
 
 ## Performance
 
@@ -351,6 +386,10 @@ before commit, matching the Phase 1.5 measurement methodology):
 | `FindingQueue::add` (average, building up to 1,000 queued findings - each add does an O(n) duplicate scan) | ~2.4µs |
 | `FindingQueue::pending()` over 1,000 findings | ~4.9µs |
 
+See [`docs/music-intelligence.md`](music-intelligence.md#performance) for
+the Phase 2.1 Music-specific measurements (matcher, engine, and the full
+real-SQLite orchestration path).
+
 Real numbers from one measurement pass, not "instant"/"real-time" claims.
 Every operation here is sub-millisecond even at these synthetic scales,
 far above what a live service actually produces per transcript segment.
@@ -358,9 +397,11 @@ far above what a live service actually produces per transcript segment.
 ## Verifying this architecture
 
 ```sh
-cargo test -p cip-core-intelligence   # 56 tests: every type + the
-                                       # architectural acceptance scenarios
+cargo test -p cip-core-intelligence   # every type + the architectural
+                                       # acceptance scenarios (Bible +
+                                       # Music, Phase 2.0 and 2.1)
 cargo test -p cip-desktop intelligence::   # real-app-state wiring tests
+cargo test -p cip-desktop music::           # Music orchestration + degradation tests
 cargo test -p cip-core-service              # unchanged Bible regression suite
 ```
 

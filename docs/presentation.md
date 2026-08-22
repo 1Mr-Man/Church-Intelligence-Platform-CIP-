@@ -217,6 +217,14 @@ Two boundaries this phase explicitly proves, not just documents:
    prepared item is still exactly `Prepared` after reopening the database
    - a restart can never advance it either.
 
+Phase 2.1's Music Intelligence findings are held to the identical
+standard: `apps/desktop/src-tauri/src/music.rs` and
+`cip_core_intelligence::FindingQueue` have no dependency on
+`cip_core_presentation` at all, so accepting or rejecting a music
+finding is structurally incapable of creating, activating, or otherwise
+touching a `PresentationItem` - see
+[`docs/music-intelligence.md`](music-intelligence.md#findings-and-the-operator-workflow).
+
 ## Offline and failure-fallback behavior
 
 `presentation.rs` and `presentation/renderer` depend on nothing but

@@ -14,6 +14,7 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AppEvents } from "../events/eventNames";
 import type {
+  IntelligenceFinding,
   PresentationItem,
   ProcessedSegment,
   ScriptureDetection,
@@ -68,6 +69,26 @@ export function onPresentationPrepared(handler: (item: PresentationItem) => void
 
 export function onPresentationCancelled(handler: (item: PresentationItem) => void): Promise<UnlistenFn> {
   return listenSafe<PresentationItem>(AppEvents.PresentationCancelled, handler);
+}
+
+/** A new Music Intelligence finding (Phase 2.1) - never implies a
+ * presentation item was created; see `docs/music-intelligence.md`. */
+export function onMusicFindingDetected(
+  handler: (finding: IntelligenceFinding) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<IntelligenceFinding>(AppEvents.MusicFindingDetected, handler);
+}
+
+export function onMusicFindingAccepted(
+  handler: (finding: IntelligenceFinding) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<IntelligenceFinding>(AppEvents.MusicFindingAccepted, handler);
+}
+
+export function onMusicFindingRejected(
+  handler: (finding: IntelligenceFinding) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<IntelligenceFinding>(AppEvents.MusicFindingRejected, handler);
 }
 
 /** Unused by `ProcessedSegment` directly but kept for reference/parity -

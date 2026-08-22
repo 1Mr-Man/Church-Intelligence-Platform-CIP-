@@ -19,6 +19,10 @@ here is executed automatically.
 | `presentation_items`   | Queued/active/stopped items in the presentation queue.                |
 | `audit_events`         | Append-only log of domain events, categorized (see logging docs).    |
 | `content_registry`     | One row per locally-installed content item (Bible today), with provenance/licensing metadata and enabled/disabled status (Phase 1.5, see `docs/content-registry.md`). |
+| `music_songs`          | One row per song/hymn, scoped to its dataset (`content_id`) - title, type, language, number, author/composer (Phase 2.1, see `docs/music-datasets.md`). |
+| `music_aliases`        | Alternate titles/aliases for a song, indexed for lookup (Phase 2.1). |
+| `music_sections`       | A song's structural sections (verse/chorus/bridge/...), ordered (Phase 2.1). |
+| `music_lyrics`         | Lyric lines, ordered, optionally linked to a section (Phase 2.1). |
 
 ## Conventions
 
@@ -26,7 +30,12 @@ here is executed automatically.
   `scripture_detections`, `ai_suggestions`, `presentation_items`,
   `audit_events`) use TEXT UUID primary keys generated in application code.
   Bible content tables use surrogate `INTEGER` ids since they are
-  provider-populated, not user-created.
+  provider-populated, not user-created. Music content tables use a
+  composite `(content_id, id)` TEXT primary key instead - a song/section
+  id is only ever meaningful *within* its dataset (see
+  `docs/music-datasets.md`'s dataset-isolation section), so the dataset
+  id is part of the key everywhere it's referenced, not just a foreign
+  key alongside it.
 - **Timestamps**: ISO-8601 TEXT in UTC (`chrono`'s default
   `DateTime<Utc>` serialization).
 - **Confidence**: any row produced by inference stores both

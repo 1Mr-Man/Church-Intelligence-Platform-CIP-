@@ -7,13 +7,16 @@ import type {
   DomainCapabilityReport,
   ImportReport,
   IntegrityReport,
+  IntelligenceFinding,
   LiveStatus,
+  MusicQueryType,
   PresentationItem,
   PresentationPreview,
   ScriptureContext,
   ScriptureDetection,
   ScriptureReference,
   ServiceSession,
+  SongRecognitionCandidate,
   Suggestion,
   TimelineEntry,
   TranscriptSegment,
@@ -95,6 +98,15 @@ export function LiveChurchBrain() {
   // intelligence domains have a real engine registered. Not
   // service-scoped: loads once on mount.
   const [intelligenceCapabilities, setIntelligenceCapabilities] = useState<DomainCapabilityReport[]>([]);
+  // Music Intelligence (Phase 2.1) - findings await operator review the
+  // same way suggestions do, but never auto-prepare a presentation item
+  // (see docs/music-intelligence.md's hard requirement). Service-scoped,
+  // like suggestions/transcript above.
+  const [musicFindings, setMusicFindings] = useState<IntelligenceFinding[]>([]);
+  const [musicManualText, setMusicManualText] = useState("");
+  const [musicSearchQuery, setMusicSearchQuery] = useState("");
+  const [musicSearchType, setMusicSearchType] = useState<MusicQueryType>("title");
+  const [musicSearchResults, setMusicSearchResults] = useState<SongRecognitionCandidate[] | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -150,6 +162,7 @@ export function LiveChurchBrain() {
       commands.listPreparedPresentations().then(setPreparedItems).catch(() => {});
       commands.listTranscript(TRANSCRIPT_LIMIT).then(setTranscript).catch(() => {});
       commands.listTimeline(TIMELINE_LIMIT).then(setTimeline).catch(() => {});
+      commands.listMusicFindings().then(setMusicFindings).catch(() => {});
     } else {
       setSuggestions([]);
       setApprovedSuggestions([]);
@@ -163,6 +176,7 @@ export function LiveChurchBrain() {
       setLastReference(null);
       setRecentReferences([]);
       setAmbiguous([]);
+      setMusicFindings([]);
     }
   }, [activeServiceId]);
 
@@ -218,6 +232,13 @@ export function LiveChurchBrain() {
       }),
       liveEvents.onPresentationCancelled((item) =>
         setPreparedItems((prev) => prev.filter((x) => x.id !== item.id)),
+      ),
+      liveEvents.onMusicFindingDetected((finding) => setMusicFindings((prev) => [finding, ...prev])),
+      liveEvents.onMusicFindingAccepted((finding) =>
+        setMusicFindings((prev) => prev.filter((f) => f.id !== finding.id)),
+      ),
+      liveEvents.onMusicFindingRejected((finding) =>
+        setMusicFindings((prev) => prev.filter((f) => f.id !== finding.id)),
       ),
     ];
     return () => {
@@ -943,6 +964,142 @@ export function LiveChurchBrain() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className="live-brain__panel">
+        <h2>Music Intelligence</h2>
+        <p className="live-brain__hint">
+          Deterministic title/alias/number/lyric recognition (Phase 2.1) - never audio fingerprinting. Findings are
+          never automatically prepared as a presentation item; accept or reject each one explicitly.
+        </p>
+
+        <details className="live-brain__manual-entry">
+          <summary>Manual / test music transcript entry</summary>
+          <p className="live-brain__hint">
+            Feeds text through the Music Intelligence engine the same way a real transcript segment would.
+          </p>
+          <div className="live-brain__row">
+            <input
+              value={musicManualText}
+              onChange={(e) => setMusicManualText(e.target.value)}
+              placeholder='e.g. "Let&rsquo;s sing Amazing Grace" or a line of lyrics'
+              aria-label="Manual music transcript text"
+            />
+            <button
+              type="button"
+              disabled={!status?.service || !musicManualText.trim() || isBusy("music-transcript")}
+              onClick={() =>
+                withBusy("music-transcript", async () => {
+                  await commands.analyzeMusicTranscript(musicManualText.trim());
+                  setMusicManualText("");
+                })
+              }
+            >
+              Submit
+            </button>
+          </div>
+        </details>
+
+        {musicFindings.length === 0 ? (
+          <p className="live-brain__hint">No pending music findings.</p>
+        ) : (
+          <ul className="live-brain__suggestions">
+            {musicFindings.map((finding) => (
+              <li key={finding.id} className="live-brain__suggestion-card">
+                <div className="live-brain__suggestion-header">
+                  <strong>{finding.summary}</strong>
+                  <span className="live-brain__confidence">
+                    Confidence: {Math.round(finding.confidence.score * 100)}%
+                  </span>
+                </div>
+                <p className="live-brain__hint">
+                  {finding.assertionLevel} &middot; {finding.provenance.contentId ?? "unknown dataset"}
+                </p>
+                <div className="live-brain__row">
+                  <button
+                    type="button"
+                    disabled={isBusy(`music-accept-${finding.id}`)}
+                    onClick={() =>
+                      withBusy(`music-accept-${finding.id}`, async () => {
+                        await commands.acceptMusicFinding(finding.id);
+                      })
+                    }
+                  >
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isBusy(`music-reject-${finding.id}`)}
+                    onClick={() =>
+                      withBusy(`music-reject-${finding.id}`, async () => {
+                        await commands.rejectMusicFinding(finding.id);
+                      })
+                    }
+                  >
+                    Reject
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <details className="live-brain__manual-entry">
+          <summary>Song search</summary>
+          <p className="live-brain__hint">
+            Ad hoc title/number/lyric lookup across currently-enabled Music datasets - works with no active service.
+          </p>
+          <div className="live-brain__row">
+            <input
+              value={musicSearchQuery}
+              onChange={(e) => setMusicSearchQuery(e.target.value)}
+              placeholder="Search text"
+              aria-label="Music search query"
+            />
+            <select
+              value={musicSearchType}
+              onChange={(e) => setMusicSearchType(e.target.value as MusicQueryType)}
+              aria-label="Music search type"
+            >
+              <option value="title">Title/alias</option>
+              <option value="number">Number</option>
+              <option value="lyric">Lyric</option>
+            </select>
+            <button
+              type="button"
+              disabled={!musicSearchQuery.trim() || isBusy("music-search")}
+              onClick={() =>
+                withBusy("music-search", async () => {
+                  const results = await commands.searchMusic(musicSearchQuery.trim(), musicSearchType);
+                  setMusicSearchResults(results);
+                })
+              }
+            >
+              Search
+            </button>
+          </div>
+          {musicSearchResults && (
+            <ul className="live-brain__content-items">
+              {musicSearchResults.length === 0 ? (
+                <li className="live-brain__hint">No matches.</li>
+              ) : (
+                musicSearchResults.map((candidate) => (
+                  <li key={`${candidate.source}:${candidate.songId}`}>
+                    <div className="live-brain__suggestion-header">
+                      <strong>{candidate.explanation}</strong>
+                      <span className="live-brain__confidence">
+                        {Math.round(candidate.confidence.score * 100)}%
+                      </span>
+                    </div>
+                    <p className="live-brain__hint">
+                      {candidate.source} &middot; {candidate.matchType}
+                    </p>
+                  </li>
+                ))
+              )}
+            </ul>
+          )}
+        </details>
       </section>
 
       <section className="live-brain__panel">

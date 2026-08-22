@@ -6,7 +6,14 @@
  * doesn't exist).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { onPresentationPrepared, onPresentationPreviewed, onSuggestionCreated } from "./liveEvents";
+import {
+  onMusicFindingAccepted,
+  onMusicFindingDetected,
+  onMusicFindingRejected,
+  onPresentationPrepared,
+  onPresentationPreviewed,
+  onSuggestionCreated,
+} from "./liveEvents";
 
 const listenMock = vi.fn();
 const isTauriMock = vi.fn();
@@ -52,5 +59,18 @@ describe("liveEvents.ts Tauri event-subscription guard", () => {
 
     expect(listenMock).toHaveBeenCalledWith("PRESENTATION_PREVIEWED", expect.any(Function));
     expect(listenMock).toHaveBeenCalledWith("PRESENTATION_PREPARED", expect.any(Function));
+  });
+
+  it("subscribes to the three distinct music finding events (Phase 2.1)", async () => {
+    isTauriMock.mockReturnValue(true);
+    listenMock.mockResolvedValue(() => {});
+
+    await onMusicFindingDetected(() => {});
+    await onMusicFindingAccepted(() => {});
+    await onMusicFindingRejected(() => {});
+
+    expect(listenMock).toHaveBeenCalledWith("MUSIC_FINDING_DETECTED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("MUSIC_FINDING_ACCEPTED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("MUSIC_FINDING_REJECTED", expect.any(Function));
   });
 });

@@ -1,6 +1,6 @@
 [package]
 name = "cip-core-music"
-description = "Music domain placeholder. Reserved for song/lyric recognition (out of scope for Phase 1 foundation)."
+description = "Music domain contracts: the Song/lyric model, MusicProvider, and deterministic lyric/title/number recognition (Phase 2.1)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,3 +9,8 @@ repository.workspace = true
 
 [dependencies]
 serde.workspace = true
+thiserror.workspace = true
+cip-core-confidence.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

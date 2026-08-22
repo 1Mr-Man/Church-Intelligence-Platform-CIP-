@@ -43,6 +43,10 @@ export const AppEvents = {
 
   ScriptureContextCorrected: "SCRIPTURE_CONTEXT_CORRECTED",
   ScriptureAmbiguousResolved: "SCRIPTURE_AMBIGUOUS_RESOLVED",
+
+  MusicFindingDetected: "MUSIC_FINDING_DETECTED",
+  MusicFindingAccepted: "MUSIC_FINDING_ACCEPTED",
+  MusicFindingRejected: "MUSIC_FINDING_REJECTED",
 } as const;
 
 export type AppEventName = (typeof AppEvents)[keyof typeof AppEvents];

@@ -4,6 +4,7 @@ export * from "./confidence";
 export * from "./content";
 export * from "./intelligence";
 export * from "./live";
+export * from "./music";
 export * from "./presentation";
 export * from "./search";
 export * from "./service";

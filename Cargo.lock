@@ -489,6 +489,7 @@ dependencies = [
  "cip-core-bible",
  "cip-core-confidence",
  "cip-core-content",
+ "cip-core-music",
  "cip-core-service",
  "serde",
  "serde_json",
@@ -500,7 +501,10 @@ dependencies = [
 name = "cip-core-music"
 version = "0.1.0"
 dependencies = [
+ "cip-core-confidence",
  "serde",
+ "serde_json",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -561,12 +565,14 @@ dependencies = [
  "cip-core-confidence",
  "cip-core-content",
  "cip-core-intelligence",
+ "cip-core-music",
  "cip-core-presentation",
  "cip-core-service",
  "cip-database",
  "cip-integrations-audio",
  "cip-integrations-bible",
  "cip-integrations-content",
+ "cip-integrations-music",
  "cip-presentation-renderer",
  "log",
  "rusqlite",
@@ -629,6 +635,13 @@ dependencies = [
 [[package]]
 name = "cip-integrations-music"
 version = "0.1.0"
+dependencies = [
+ "cip-core-music",
+ "cip-database",
+ "rusqlite",
+ "serde",
+ "thiserror 2.0.20",
+]
 
 [[package]]
 name = "cip-integrations-obs"

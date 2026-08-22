@@ -15,10 +15,14 @@ Content Registry is the general version of that question: one metadata
 record per installed content item, regardless of which domain-specific
 tables actually hold the content itself.
 
-Phase 1.5 only *populates* the Bible category. Music/Service/Media/
-Reference exist as the closed set of categories a future phase would
-populate - explicitly not implemented as engines here (see
-[`README.md`](../README.md)'s phase boundary).
+Phase 1.5 populated the Bible category; Phase 2.1 is the first phase to
+populate a second one, Music (`music:dev-hymnbook` and friends - see
+[`docs/music-datasets.md`](music-datasets.md)), reusing this exact
+registry and the same `"<type>:<domain-id>"` convention, no second
+licensing/provenance system. Service/Media/Reference remain the closed
+set of categories a future phase would populate - explicitly not
+implemented as engines here (see [`README.md`](../README.md)'s phase
+boundary).
 
 ## Domain model
 
@@ -153,11 +157,11 @@ administrator CMS - no bulk operations, no remote content browsing.
 
 ## Extensibility
 
-Nothing about `ContentRegistry`/`ContentMetadata` assumes Bible content
-specifically - a future Music or Sermon engine registers its own
-`ContentMetadata` rows (`content_type: Music`/`Sermon`, its own `id`
-prefix) against the same table and trait, without a schema change and
-without `core/content` needing to know anything about music or sermon
-domain internals. This phase deliberately implements only the Bible
-category; the rest is the reserved shape, not implemented engines (see
-`README.md`'s explicit "not implemented" list).
+Nothing about `ContentRegistry`/`ContentMetadata` assumed Bible content
+specifically, and Phase 2.1 is the proof: Music registers its own
+`ContentMetadata` rows (`content_type: Music`, its own `id` prefix -
+e.g. `"music:dev-hymnbook"`) against this exact same table and trait, no
+schema change, and `core/content` still knows nothing about music or
+Bible domain internals. A future Sermon engine would do the same. See
+[`docs/music-datasets.md`](music-datasets.md) for how Music's importer
+uses this registry.

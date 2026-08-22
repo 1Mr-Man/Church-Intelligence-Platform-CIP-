@@ -36,6 +36,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "0005_content_registry",
         sql: include_str!("../migrations/0005_content_registry.sql"),
     },
+    Migration {
+        version: 6,
+        name: "0006_music_content",
+        sql: include_str!("../migrations/0006_music_content.sql"),
+    },
+    Migration {
+        version: 7,
+        name: "0007_music_timeline_category",
+        sql: include_str!("../migrations/0007_music_timeline_category.sql"),
+    },
 ];
 
 /// A migration that was applied during this call to [`run_migrations`].
@@ -279,5 +289,65 @@ mod tests {
                 .unwrap();
             assert!(exists, "expected table `{table}` to exist after migration");
         }
+    }
+
+    #[test]
+    fn phase_2_1_music_tables_and_indexes_exist_after_migration() {
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+
+        const EXPECTED_TABLES: [&str; 4] = [
+            "music_songs",
+            "music_aliases",
+            "music_sections",
+            "music_lyrics",
+        ];
+        for table in EXPECTED_TABLES {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    params![table],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|count| count == 1)
+                .unwrap();
+            assert!(exists, "expected table `{table}` to exist after migration");
+        }
+
+        const EXPECTED_INDEXES: [&str; 5] = [
+            "idx_music_songs_normalized_title",
+            "idx_music_songs_number",
+            "idx_music_aliases_normalized",
+            "idx_music_sections_song",
+            "idx_music_lyrics_normalized",
+        ];
+        for index in EXPECTED_INDEXES {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                    params![index],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|count| count == 1)
+                .unwrap();
+            assert!(exists, "missing index `{index}`");
+        }
+    }
+
+    #[test]
+    fn music_foreign_keys_are_enforced() {
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+
+        let result = conn.execute(
+            "INSERT INTO music_lyrics (content_id, song_id, section_id, sequence, text, normalized_text)
+             VALUES ('music:dev', 'nonexistent-song', NULL, 0, 'x', 'x')",
+            [],
+        );
+        assert!(
+            result.is_err(),
+            "a lyric line referencing a nonexistent song must be rejected"
+        );
     }
 }

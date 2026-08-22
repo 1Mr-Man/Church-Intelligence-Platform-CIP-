@@ -34,6 +34,14 @@ pub enum AppError {
     ContentRegistry(#[from] cip_core_content::ContentRegistryError),
     #[error(transparent)]
     BibleSearch(#[from] cip_core_bible::BibleSearchError),
+    #[error(transparent)]
+    Music(#[from] crate::music::MusicError),
+    #[error(transparent)]
+    MusicProvider(#[from] cip_core_music::MusicProviderError),
+    #[error(transparent)]
+    Intelligence(#[from] cip_core_intelligence::IntelligenceError),
+    #[error(transparent)]
+    ContextBuild(#[from] crate::intelligence::ContextBuildError),
     #[error("no service is currently active - start one first")]
     NoActiveService,
     #[error("invalid input: {0}")]
@@ -53,6 +61,10 @@ impl AppError {
             AppError::Content(_) => LogCategory::Content,
             AppError::ContentRegistry(_) => LogCategory::Content,
             AppError::BibleSearch(_) => LogCategory::Bible,
+            AppError::Music(_) => LogCategory::Music,
+            AppError::MusicProvider(_) => LogCategory::Music,
+            AppError::Intelligence(_) => LogCategory::Music,
+            AppError::ContextBuild(_) => LogCategory::Music,
             AppError::NoActiveService => LogCategory::App,
             AppError::InvalidInput(_) => LogCategory::App,
         }

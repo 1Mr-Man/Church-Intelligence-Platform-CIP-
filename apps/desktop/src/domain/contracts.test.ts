@@ -24,6 +24,7 @@ import type {
 import type { PresentationItem, PresentationPreview, RenderedSlide } from "./presentation";
 import type { ServiceSession } from "./service";
 import type { LiveStatus, TimelineEntry } from "./live";
+import type { MusicDatasetInput, MusicImportReport, SongRecognitionCandidate } from "./music";
 
 describe("domain contracts", () => {
   it("constructs a ScriptureReference and a matching BibleTranslation", () => {
@@ -320,5 +321,98 @@ describe("domain contracts", () => {
     const music: DomainCapabilityReport = { domain: "music", capability: "unavailable", engineId: null, engineVersion: null };
     expect(bible.capability).toBe("available");
     expect(music.engineId).toBeNull();
+  });
+
+  it("constructs a music IntelligenceFinding distinguishing a strong title match from a weak partial lyric match (Phase 2.1)", () => {
+    const explicitTitle: ConfidenceResult = { score: 0.97, level: "high", source: "heuristic", reason: "Exact title match" };
+    const strong: IntelligenceFinding = {
+      id: "66666666-6666-6666-6666-666666666666",
+      serviceId: "22222222-2222-2222-2222-222222222222",
+      domain: "music",
+      kind: "music",
+      assertionLevel: "suggested",
+      status: "detected",
+      priority: "normal",
+      confidence: explicitTitle,
+      summary: "Exact title match",
+      transcriptSegmentIds: ["33333333-3333-3333-3333-333333333333"],
+      evidence: [
+        { kind: "transcript", segmentIds: ["33333333-3333-3333-3333-333333333333"], excerpt: "Amazing Grace" },
+        { kind: "context", description: "song_id:h1" },
+      ],
+      provenance: { contentId: "music:dev-hymnbook", note: null },
+      engineId: "music-lyric",
+      engineVersion: "0.1.0",
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    const weakPartial: IntelligenceFinding = {
+      ...strong,
+      assertionLevel: "inferred",
+      confidence: { score: 0.3, level: "low", source: "heuristic", reason: null },
+      summary: "1 song(s) match the phrase 'we praise you'",
+    };
+
+    expect(strong.domain).toBe("music");
+    expect(strong.assertionLevel).toBe("suggested");
+    expect(weakPartial.assertionLevel).toBe("inferred");
+    expect(strong.provenance.contentId).toBe("music:dev-hymnbook");
+  });
+
+  it("constructs a SongRecognitionCandidate always carrying evidence, never a bare song reference (Phase 2.1)", () => {
+    const candidate: SongRecognitionCandidate = {
+      songId: "h1",
+      matchType: "explicit_title",
+      matchedText: "Test Fixture Hymn One",
+      confidence: { score: 0.97, level: "high", source: "heuristic", reason: "Exact title match" },
+      evidence: ["Exact title match"],
+      source: "music:dev-hymnbook",
+      ranking: 0,
+      explanation: "Exact title match",
+    };
+    expect(candidate.evidence.length).toBeGreaterThan(0);
+    expect(candidate.matchType).toBe("explicit_title");
+  });
+
+  it("constructs a MusicImportReport with dataset-derived song/lyric counts, distinct from the Bible ImportReport shape (Phase 2.1)", () => {
+    const report: MusicImportReport = {
+      contentId: "music:dev-hymnbook",
+      datasetVersion: "dev-fixture",
+      songsTotal: 3,
+      songsImported: 3,
+      songsAlreadyPresent: 0,
+      songsInvalid: 0,
+      lyricLinesImported: 4,
+      lyricLinesAlreadyPresent: 0,
+      errors: [],
+      checksum: "abc123",
+    };
+    expect(report.songsImported).toBe(report.songsTotal);
+    expect(report.errors).toHaveLength(0);
+  });
+
+  it("constructs a MusicDatasetInput with fictional fixture songs, mirroring the importer's JSON shape (Phase 2.1)", () => {
+    const dataset: MusicDatasetInput = {
+      contentId: "music:test",
+      name: "Test Dataset",
+      language: "en",
+      publisher: "Test Publisher",
+      license: "public domain",
+      distribution: "public domain",
+      datasetVersion: "1.0",
+      songs: [
+        {
+          id: "s1",
+          title: "Test Fixture Song",
+          aliases: ["Fixture Song"],
+          songType: "hymn",
+          language: "en",
+          number: "1",
+          sections: [{ id: "v1", kind: "verse", sequence: 0 }],
+          lyrics: [{ sectionId: "v1", sequence: 0, text: "A fictional test line" }],
+        },
+      ],
+    };
+    expect(dataset.songs).toHaveLength(1);
+    expect(dataset.songs[0].sections?.[0].kind).toBe("verse");
   });
 });

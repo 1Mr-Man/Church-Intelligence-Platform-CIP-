@@ -5,6 +5,7 @@ mod errors;
 pub mod events;
 mod intelligence;
 pub mod logging;
+mod music;
 mod persistence;
 mod pipeline;
 mod presentation;
@@ -110,12 +111,37 @@ pub fn run() {
             // Bible compatibility adapter's own Scripture Context state,
             // never contending with the live pipeline's connection.
             let intelligence_bible_conn = cip_database::open(&config.database_path)?;
-            let intelligence_registry = intelligence::build_registry(
+            let mut intelligence_registry = intelligence::build_registry(
                 Box::new(cip_integrations_bible::SqliteBibleProvider::new(
                     intelligence_bible_conn,
                 )),
                 state::DEFAULT_TRANSLATION_ID,
             );
+
+            // Phase 2.1: Music's own read path, mirroring `bible_conn`
+            // above, plus a second dedicated connection for the Music
+            // engine's own copy of the same provider - the engine and
+            // `AppState.music_provider` never share a connection, same
+            // discipline as Bible's `intelligence_bible_conn`/`bible_conn`
+            // split.
+            let music_conn = cip_database::open(&config.database_path)?;
+            let music_provider = Box::new(cip_integrations_music::SqliteMusicProvider::new(music_conn));
+
+            let intelligence_music_conn = cip_database::open(&config.database_path)?;
+            music::register_music_engine(
+                &mut intelligence_registry,
+                Box::new(cip_integrations_music::SqliteMusicProvider::new(
+                    intelligence_music_conn,
+                )),
+            )?;
+
+            // Dev/test convenience only, mirroring the Bible/content
+            // dev-seed guards above: register the three dev-fixture music
+            // datasets so Music Intelligence has something to recognize
+            // against outside Production.
+            if config.environment != config::AppEnvironment::Production {
+                music::register_dev_seed_music_content_if_missing(content_registry.as_ref())?;
+            }
 
             let audio_engine: Box<dyn cip_core_service::AudioEngine> =
                 Box::new(cip_integrations_audio::CpalAudioEngine::new());
@@ -127,6 +153,7 @@ pub fn run() {
                 bible_provider,
                 content_registry,
                 intelligence_registry,
+                music_provider,
                 audio_engine,
                 speech_engine,
             ));
@@ -163,6 +190,12 @@ pub fn run() {
             commands::import_bible_dataset,
             commands::check_bible_dataset_integrity,
             commands::get_intelligence_capabilities,
+            commands::search_music,
+            commands::import_music_dataset,
+            commands::analyze_music_transcript,
+            commands::list_music_findings,
+            commands::accept_music_finding,
+            commands::reject_music_finding,
             commands::get_live_status,
             commands::list_timeline,
             commands::list_service_history,

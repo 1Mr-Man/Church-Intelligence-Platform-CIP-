@@ -63,6 +63,15 @@ pub enum AppEvent {
     /// The operator resolved an `Ambiguous` detection by choosing one of
     /// the offered candidates (Phase 1.3).
     ScriptureAmbiguousResolved,
+
+    /// The Music Intelligence engine produced a new song-recognition
+    /// finding (Phase 2.1) - never implies a presentation item was
+    /// created; see `docs/music-intelligence.md`.
+    MusicFindingDetected,
+    /// The operator accepted a music finding (Phase 2.1) - a review
+    /// decision only, still no presentation side effect.
+    MusicFindingAccepted,
+    MusicFindingRejected,
 }
 
 impl AppEvent {
@@ -100,6 +109,10 @@ impl AppEvent {
 
             AppEvent::ScriptureContextCorrected => "SCRIPTURE_CONTEXT_CORRECTED",
             AppEvent::ScriptureAmbiguousResolved => "SCRIPTURE_AMBIGUOUS_RESOLVED",
+
+            AppEvent::MusicFindingDetected => "MUSIC_FINDING_DETECTED",
+            AppEvent::MusicFindingAccepted => "MUSIC_FINDING_ACCEPTED",
+            AppEvent::MusicFindingRejected => "MUSIC_FINDING_REJECTED",
         }
     }
 }
@@ -148,6 +161,9 @@ mod tests {
             AppEvent::ErrorOccurred,
             AppEvent::ScriptureContextCorrected,
             AppEvent::ScriptureAmbiguousResolved,
+            AppEvent::MusicFindingDetected,
+            AppEvent::MusicFindingAccepted,
+            AppEvent::MusicFindingRejected,
         ];
         let mut names: Vec<&str> = events.iter().map(|e| e.name()).collect();
         let unique_before = names.len();

@@ -57,6 +57,25 @@ distribution, all nullable - `NULL` means honestly unknown, never
 guessed) and enabled/disabled status, plus an index on `content_type`.
 See [`docs/content-registry.md`](content-registry.md).
 
+`0006_music_content.sql` (Phase 2.1) added four new tables -
+`music_songs`, `music_aliases`, `music_sections`, `music_lyrics` - the
+music-domain counterpart to `bible_translations`/`bible_books`/
+`bible_chapters`/`bible_verses`. Unlike the Bible tables' surrogate
+`INTEGER` primary keys, every music table uses a composite
+`(content_id, id)` `TEXT` primary key, since a song id or number is only
+ever meaningful *within* its dataset - see
+[`docs/music-datasets.md`](music-datasets.md#dataset-isolation---the-core-guarantee-this-phase-adds).
+
+`0007_music_timeline_category.sql` (Phase 2.1) extended
+`audit_events.category`'s `CHECK` constraint to accept `'music'` (SQLite
+has no `ALTER TABLE` for `CHECK` constraints, so the table is recreated
+with the extended constraint and its rows copied across) - Music
+Intelligence timeline entries (a finding detected/accepted/rejected) are
+a real, permanent new caller of the service timeline, unlike Content
+Registry management, which `timeline.rs` deliberately maps onto the
+existing `'app'` bucket instead of extending the schema for a category
+with no real caller.
+
 ## Schema
 
 See [`database/schema/README.md`](../database/schema/README.md) for the
@@ -66,15 +85,20 @@ confidence-score columns, JSON payload columns). The Phase 1 tables:
 `services`, `transcript_segments`, `bible_translations`, `bible_books`,
 `bible_chapters`, `bible_verses`, `scripture_detections`, `ai_suggestions`,
 `presentation_items`, `audit_events`. Phase 1.5 added an eleventh:
-`content_registry`.
+`content_registry`. Phase 2.1 added four more: `music_songs`,
+`music_aliases`, `music_sections`, `music_lyrics`.
 
 ## Seed data
 
 `database/seeds/dev_seed.sql` inserts one Bible translation (KJV), six
 verses (John 3:16 and Romans 8:18, 28, 29, 30, 31 - enough to exercise the
 Bible Intelligence Core's context/sequential-verse behavior, see
-[`docs/bible-intelligence.md`](bible-intelligence.md)), and one sample
-service. It is **not** a full Bible dataset, and it is never applied
+[`docs/bible-intelligence.md`](bible-intelligence.md)), one sample
+service, and (Phase 2.1) five entirely fictional fixture songs across
+three music datasets - two enabled, one deliberately disabled, so "a
+disabled dataset is never searched" has something real to prove against
+(see [`docs/music-datasets.md`](music-datasets.md)). It is **not** a
+full Bible dataset or a real hymnal/worship set, and it is never applied
 automatically in `production`;
 in `development`/`test` the app shell applies it once, on first launch,
 guarded by a check that `bible_translations` is empty (see `lib.rs`'s
@@ -89,5 +113,6 @@ Apply it manually against any connection with
 cargo test -p cip-database             # migration idempotency + every table exists
 cargo test -p cip-integrations-bible   # SqliteBibleProvider + dataset importer against the real schema
 cargo test -p cip-integrations-content # SqliteContentRegistry against the real schema
+cargo test -p cip-integrations-music   # SqliteMusicProvider + dataset importer against the real schema
 cargo test -p cip-integration-tests    # full cross-domain flow through the DB
 ```

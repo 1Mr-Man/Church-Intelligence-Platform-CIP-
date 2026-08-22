@@ -1,6 +1,6 @@
 [package]
 name = "cip-integrations-music"
-description = "Music/song provider adapters - placeholder. Song recognition is out of scope for Phase 1."
+description = "Music/song provider adapter (Phase 2.1): SqliteMusicProvider and the deterministic music dataset importer."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,3 +8,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+cip-core-music.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+cip-database.workspace = true

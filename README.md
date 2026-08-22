@@ -9,8 +9,9 @@ contains **Phase 1 - Foundation**, **Phase 1.1 - Bible Intelligence Core**,
 Compatibility**, **Phase 1.3 - Live Service Intelligence & Operator
 Workflow**, **Phase 1.4 - Presentation Foundation & Real-Service
 Validation**, **Phase 1.5 - Content/Dataset Foundation &
-Full-Service Validation**, and **Phase 2.0 - Intelligence Architecture &
-Unified Intelligence Context**.
+Full-Service Validation**, **Phase 2.0 - Intelligence Architecture &
+Unified Intelligence Context**, and **Phase 2.1 - Music Intelligence
+Foundation & Song Recognition Architecture**.
 
 ## Approved architecture
 
@@ -43,8 +44,13 @@ importer/integrity checker and the licensing policy governing them,
 [`docs/full-service-validation.md`](docs/full-service-validation.md) for
 the realistic full-service validation results,
 [`docs/intelligence-architecture.md`](docs/intelligence-architecture.md)
-for the shared intelligence contracts future Bible/Music/Sermon/Content
-engines are built on,
+for the shared intelligence contracts Bible/Music/Sermon/Content engines
+are built on,
+[`docs/music-intelligence.md`](docs/music-intelligence.md) for the Music
+Intelligence engine (deterministic title/alias/number/lyric recognition
+- explicitly not audio fingerprinting),
+[`docs/music-datasets.md`](docs/music-datasets.md) for the music dataset
+importer and its licensing policy,
 [`docs/development.md`](docs/development.md) to get running locally, and
 [`docs/database.md`](docs/database.md) for the SQLite/migration story.
 
@@ -158,13 +164,34 @@ intelligence remain **not implemented** - `IntelligenceDomain` only
 reserves the shape they will occupy. See
 [`docs/intelligence-architecture.md`](docs/intelligence-architecture.md).
 
-Still deliberately **not** implemented: song recognition, sermon
-intelligence, semantic/paraphrase Bible search, automatic bullet
-extraction, a web research engine, online Bible fallback, content
-generation, cloud sync, OBS/vMix integration, remote operator accounts, a
-mobile app, real display/projection output, and the full presentation
-designer (visual/typographic design beyond one deterministic template).
-Those are later phases.
+**Phase 2.1 (Music Intelligence Foundation & Song Recognition
+Architecture)** added the first real *second* intelligence domain:
+`MusicIntelligenceEngine`, a second `IntelligenceEngine` registered
+alongside Bible, proving the Phase 2.0 architecture generalizes. A new
+`core/music` crate implements deterministic, offline title/alias/hymn-
+number/lyric recognition (never audio fingerprinting - that stays
+honestly reported unavailable), scored by a documented confidence
+hierarchy and distinctiveness formula, with first-class ambiguity
+handling and song continuity. `integrations/music` provides a real
+`SqliteMusicProvider` and an idempotent dataset importer, dataset-
+isolated the same way two Bible translations are (two datasets can both
+have song number "120" and never collide). Music and Bible never call
+each other directly; the only channel is the shared
+`IntelligenceContext`, proven with both real engines registered
+simultaneously. Music recognition never automatically creates a
+presentation item - accepting a finding is a review decision, nothing
+more. `core/bible`, `core/service`, and `bible_adapter.rs` were not
+modified by this phase. See
+[`docs/music-intelligence.md`](docs/music-intelligence.md) and
+[`docs/music-datasets.md`](docs/music-datasets.md).
+
+Still deliberately **not** implemented: real audio fingerprinting/
+acoustic song recognition, sermon intelligence, semantic/paraphrase
+Bible search, automatic bullet extraction, a web research engine, online
+Bible fallback, content generation, cloud sync, OBS/vMix integration,
+remote operator accounts, a mobile app, real display/projection output,
+and the full presentation designer (visual/typographic design beyond one
+deterministic template). Those are later phases.
 
 ## Repository layout
 
@@ -176,9 +203,9 @@ apps/desktop/          Tauri + React + TypeScript desktop application
 core/                  Domain logic and contracts, one crate per domain
   bible/               BibleProvider, text normalization, reference detection, verse-range/search, integrity checker, Scripture Context Manager
   content/              ContentRegistry - what local content exists, and its provenance/licensing
-  intelligence/          Shared intelligence architecture (Phase 2.0) - IntelligenceContext/Engine/Finding, the Bible compatibility adapter
-  music/                (placeholder - Phase 2+ engine implementation)
-  sermon/               (placeholder - Phase 2+ engine implementation)
+  intelligence/          Shared intelligence architecture (Phase 2.0) - IntelligenceContext/Engine/Finding, the Bible compatibility adapter, the Music adapter (Phase 2.1)
+  music/                 Song/lyric domain model, MusicProvider trait, deterministic title/alias/number/lyric matcher (Phase 2.1)
+  sermon/                (placeholder - Phase 2+ engine implementation)
   service/              ServiceSession + AudioEngine
   presentation/         PresentationItem
   search/               SearchEngine
@@ -186,7 +213,7 @@ core/                  Domain logic and contracts, one crate per domain
   confidence/            ConfidenceResult (shared by every domain above)
 
 database/              Local-first SQLite: migrations, schema docs, seeds
-integrations/          Provider/adaptor implementations (bible - incl. dataset importer, content, audio, music, web, obs, vmix)
+integrations/          Provider/adaptor implementations (bible - incl. dataset importer, content, audio, music - incl. dataset importer, web, obs, vmix)
 ai/                    AI backend implementations (speech, embeddings, classifiers, models)
 presentation/          Rendering subsystem (renderer, templates, outputs)
 tests/                 Cross-crate integration tests

@@ -35,11 +35,16 @@ timeline, or suggestion workflow this document describes - see
 established the shared intelligence architecture (`core/intelligence`)
 that future Music/Sermon/Content engines will sit behind - the live
 transcript pipeline this document describes
-(`pipeline.rs::handle_final_transcript`) is completely unchanged; the one
-real intelligence engine (a Bible compatibility adapter) is exercised only
-by a diagnostic command and its own tests, not by anything in the live
-service path - see
+(`pipeline.rs::handle_final_transcript`) is completely unchanged; the
+Bible compatibility adapter is exercised only by a diagnostic command
+and its own tests, not by anything in the live service path - see
 [`docs/intelligence-architecture.md`](intelligence-architecture.md).
+Phase 2.1 registered the second real engine, Music, alongside it and
+added a "Music Intelligence" panel to the Live Church Brain UI (manual
+transcript analysis, pending-finding accept/reject, and ad hoc song
+search) - also not wired into the live audio/speech pipeline itself, the
+same deliberate boundary the Bible adapter keeps. See
+[`docs/music-intelligence.md`](music-intelligence.md).
 
 ## Service lifecycle
 

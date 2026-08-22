@@ -39,6 +39,8 @@ cip-core-presentation.workspace = true
 cip-presentation-renderer.workspace = true
 cip-integrations-bible.workspace = true
 cip-integrations-audio.workspace = true
+cip-core-music.workspace = true
+cip-integrations-music.workspace = true
 cip-ai-speech.workspace = true
 
 [features]

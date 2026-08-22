@@ -18,7 +18,8 @@ use crate::config::AppConfig;
 use cip_core_ai::SpeechEngine;
 use cip_core_bible::{BibleProvider, DefaultScriptureContextManager};
 use cip_core_content::ContentRegistry;
-use cip_core_intelligence::IntelligenceEngineRegistry;
+use cip_core_intelligence::{FindingQueue, IntelligenceEngineRegistry};
+use cip_core_music::MusicProvider;
 use cip_core_service::{AudioEngine, ServiceSession};
 use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
@@ -40,11 +41,21 @@ pub struct AppState {
     /// `bible_provider`'s, for the same reason: an independent read path
     /// that never contends with the primary `db` mutex.
     pub content_registry: Box<dyn ContentRegistry>,
-    /// The Phase 2.0 intelligence engine registry - today, only the Bible
-    /// compatibility adapter is registered (see `intelligence.rs`).
-    /// Exercised only by `get_intelligence_capabilities`; nothing in the
-    /// live transcript pipeline calls into it.
+    /// The Phase 2.0 intelligence engine registry - the Bible
+    /// compatibility adapter and (Phase 2.1) the Music engine are
+    /// registered here (see `intelligence.rs`/`music.rs`). Exercised by
+    /// `get_intelligence_capabilities` and the manual `analyze_music_transcript`
+    /// command; nothing in the live audio/speech transcript pipeline
+    /// calls into it yet.
     pub intelligence_registry: IntelligenceEngineRegistry,
+    /// Music's own read path (Phase 2.1), mirroring `bible_provider`'s
+    /// dedicated connection.
+    pub music_provider: Box<dyn MusicProvider>,
+    /// In-memory queue of intelligence findings awaiting operator review
+    /// (Phase 2.0's `FindingQueue`, first given a real writer in Phase
+    /// 2.1 by `analyze_music_transcript`). Deliberately not persisted -
+    /// see `docs/music-intelligence.md`'s persistence-decision section.
+    pub intelligence_findings: Mutex<FindingQueue>,
     pub context_manager: Mutex<DefaultScriptureContextManager>,
     pub audio_engine: Mutex<Box<dyn AudioEngine>>,
     pub speech_engine: Mutex<Box<dyn SpeechEngine>>,
@@ -72,6 +83,7 @@ impl AppState {
         bible_provider: Box<dyn BibleProvider>,
         content_registry: Box<dyn ContentRegistry>,
         intelligence_registry: IntelligenceEngineRegistry,
+        music_provider: Box<dyn MusicProvider>,
         audio_engine: Box<dyn AudioEngine>,
         speech_engine: Box<dyn SpeechEngine>,
     ) -> Self {
@@ -81,6 +93,8 @@ impl AppState {
             bible_provider,
             content_registry,
             intelligence_registry,
+            music_provider,
+            intelligence_findings: Mutex::new(FindingQueue::new()),
             context_manager: Mutex::new(DefaultScriptureContextManager::new(
                 DEFAULT_TRANSLATION_ID,
             )),
