@@ -36,6 +36,7 @@ import { shouldHandleShortcut } from "../lib/keyboardShortcuts";
 import { buildAttentionQueue } from "../lib/attentionQueue";
 import { buildUnifiedFeed, type UnifiedIntelligenceItem } from "../lib/unifiedFeed";
 import { WorkspaceHeader } from "./workspace/WorkspaceHeader";
+import { PilotDiagnosticsPanel } from "./workspace/PilotDiagnosticsPanel";
 import { AttentionQueue } from "./workspace/AttentionQueue";
 import { IntelligenceFeed } from "./workspace/IntelligenceFeed";
 import type { UnifiedItemAction } from "./workspace/actions";
@@ -617,6 +618,7 @@ export function LiveChurchBrain() {
         activeDisplayItem={activeDisplayItem}
         displayWindowOpen={displayWindowOpen}
       />
+      <PilotDiagnosticsPanel />
       <AttentionQueue items={attentionQueue} busy={busy} onAction={handleUnifiedAction} />
       <IntelligenceFeed items={unifiedFeed} />
 

@@ -37,6 +37,9 @@ export interface DisplayDiagnostic {
   name: string | null;
   widthPx: number;
   heightPx: number;
+  /** Phase 3.4: top-left position in the OS's virtual screen coordinate space. */
+  positionX: number;
+  positionY: number;
   scaleFactor: number;
   isPrimary: boolean;
 }
@@ -66,6 +69,8 @@ export interface PilotDiagnostics {
     sampleRateHz: number;
     inputLevel: number | null;
     streamError: string | null;
+    selectedDevice: string | null;
+    channels: number | null;
   };
   /**
    * Every display this process can detect (via Tauri's own monitor API).

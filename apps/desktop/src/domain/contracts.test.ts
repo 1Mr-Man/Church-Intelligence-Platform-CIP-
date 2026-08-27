@@ -192,6 +192,8 @@ describe("domain contracts", () => {
         sampleRateHz: 16000,
         inputLevel: 0.2,
         streamError: null,
+        selectedDevice: "Built-in Microphone",
+        channels: 1,
       },
       audioStatus: "listening",
       speechStatus: "ready",

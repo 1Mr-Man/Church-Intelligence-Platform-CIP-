@@ -36,6 +36,15 @@ export interface AudioEngineStatus {
    * failed, or has been cleared by a subsequent successful `start()`.
    */
   streamError: string | null;
+  /**
+   * Phase 3.4: the device id passed to the most recent successful
+   * `start()`. `null` before the engine has ever started capturing;
+   * persists after `stop()` so diagnostics can show "which microphone
+   * was selected" without a live capture running.
+   */
+  selectedDevice: string | null;
+  /** The input channel count negotiated on the most recent successful `start()`. */
+  channels: number | null;
 }
 
 /**

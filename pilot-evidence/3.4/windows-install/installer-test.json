@@ -1,0 +1,79 @@
+{
+  "_schema": "testId, environment, timestampUtc, machineId, softwareVersion, gitCommit, procedure, expectedResult, observedResult, status (PASS|FAIL|BLOCKED|NOT_VERIFIED|NOT_APPLICABLE), evidenceRef, operatorNotes",
+  "records": [
+    {
+      "testId": "WIN-BUILD-01",
+      "environment": "automated",
+      "timestampUtc": "2026-08-27T23:16:xxZ",
+      "machineId": "build-container (this Linux/container environment - NOT the HP EliteBook 830 G6 pilot machine)",
+      "softwareVersion": "0.1.0",
+      "gitCommit": "SEE_FINAL_COMMIT_IN_QUALIFICATION_REPORT",
+      "procedure": "rustup target add x86_64-pc-windows-gnu; apt-get install mingw-w64 nsis; cargo tauri build --target x86_64-pc-windows-gnu --bundles nsis, with CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc",
+      "expectedResult": "a real PE32+ Windows x64 executable and NSIS .exe installer are produced without fabricating either",
+      "observedResult": "cip-desktop.exe built successfully (PE32+ executable (GUI) x86-64, stripped to external PDB, for MS Windows, 11 sections, confirmed via `file`); see release/release-manifest-3.4.json for the bundled installer result and checksum",
+      "status": "PASS",
+      "evidenceRef": "release/release-manifest-3.4.json",
+      "operatorNotes": "This is Environment A/B cross-compilation evidence only - it proves the toolchain produces a well-formed Windows PE binary and NSIS installer from this Linux container. It is NOT evidence the installer runs, installs, or launches on a real Windows machine - no Wine, no Windows VM, and no WebView2 runtime exist in this container to test that. See WIN-INSTALL-02 through WIN-INSTALL-07 below."
+    },
+    {
+      "testId": "WIN-INSTALL-02",
+      "environment": "real_hardware",
+      "procedure": "Copy the .exe installer to the HP EliteBook 830 G6 (or equivalent Windows 11 machine). Double-click to run it. Confirm no admin/Git/Rust/Node/dev-tool prompt appears beyond normal Windows installer/UAC behavior.",
+      "expectedResult": "Installer runs to completion using only the standard Windows installer UI",
+      "observedResult": null,
+      "status": "BLOCKED",
+      "evidenceRef": null,
+      "operatorNotes": "No Windows machine available in this container. See docs/phase-3-4-windows-pilot.md section F for the exact operator procedure."
+    },
+    {
+      "testId": "WIN-INSTALL-03",
+      "environment": "real_hardware",
+      "procedure": "Launch CIP from the Start Menu / desktop shortcut the installer created.",
+      "expectedResult": "Application window opens, no crash, no missing-DLL error",
+      "observedResult": null,
+      "status": "BLOCKED",
+      "evidenceRef": null,
+      "operatorNotes": "Requires WIN-INSTALL-02 first."
+    },
+    {
+      "testId": "WIN-INSTALL-04",
+      "environment": "real_hardware",
+      "procedure": "Exit the application via its normal close control.",
+      "expectedResult": "Clean exit, no error dialog, process fully terminates",
+      "observedResult": null,
+      "status": "BLOCKED",
+      "evidenceRef": null,
+      "operatorNotes": null
+    },
+    {
+      "testId": "WIN-INSTALL-05",
+      "environment": "real_hardware",
+      "procedure": "Re-launch the application a second time.",
+      "expectedResult": "Application opens normally, database/BSB dataset already present from first launch (0 re-import), no duplicate data",
+      "observedResult": null,
+      "status": "BLOCKED",
+      "evidenceRef": null,
+      "operatorNotes": null
+    },
+    {
+      "testId": "WIN-INSTALL-06",
+      "environment": "real_hardware",
+      "procedure": "Uninstall CIP via Windows Settings > Apps, or the NSIS uninstaller shortcut.",
+      "expectedResult": "Application and its Start Menu entries are removed cleanly",
+      "observedResult": null,
+      "status": "BLOCKED",
+      "evidenceRef": null,
+      "operatorNotes": "Whether user data (%APPDATA%) is retained or removed on uninstall should be recorded, not assumed."
+    },
+    {
+      "testId": "WIN-INSTALL-07",
+      "environment": "real_hardware",
+      "procedure": "Reinstall CIP after WIN-INSTALL-06.",
+      "expectedResult": "Reinstall succeeds without manual cleanup",
+      "observedResult": null,
+      "status": "BLOCKED",
+      "evidenceRef": null,
+      "operatorNotes": null
+    }
+  ]
+}

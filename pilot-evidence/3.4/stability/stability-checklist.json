@@ -1,0 +1,9 @@
+{
+  "_schema": "testId, environment, procedure, expectedResult, observedResult, status, evidenceRef, operatorNotes",
+  "automated": [
+    { "testId": "STAB-A-01", "environment": "automated", "procedure": "Phase 3.2's compressed 60-minute simulated service (20 compressed cycles) - re-verified unchanged this phase", "expectedResult": "Bounded queue growth, no stale presentation state, no data loss over the simulated duration", "observedResult": "PASS - see ../software/automated-regression.json", "status": "PASS", "evidenceRef": "../software/automated-regression.json", "operatorNotes": "A compressed simulation is not a substitute for real wall-clock hours - it proves logical stability under repeated cycling only." }
+  ],
+  "realHardwareRequired": [
+    { "testId": "STAB-01", "environment": "real_hardware", "procedure": "Run CIP continuously on the real target machine for a minimum 2 real wall-clock hours (4 preferred) under realistic simulated-service load, monitoring memory, CPU, database growth, queue growth, audio stability, Whisper stability, presentation stability, event duplication, and UI responsiveness", "expectedResult": "No unbounded growth, no crash, no stale state, UI remains responsive throughout", "observedResult": null, "status": "BLOCKED", "evidenceRef": null, "operatorNotes": "No real machine available in this container to run a genuine multi-hour wall-clock test - a container-based multi-hour run would still only be Environment B/A, not Environment C, even if attempted here." }
+  ]
+}

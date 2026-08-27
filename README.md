@@ -94,6 +94,25 @@ own hardware named in Phase 3.2. See
 [`docs/phase-3-3-pilot-qualification.md`](docs/phase-3-3-pilot-qualification.md)
 and the [`pilot-evidence/`](pilot-evidence/) directory.
 
+**Phase 3.4** attempted, for the first time, a real Windows release
+candidate: cross-compiling from this Linux build environment using
+`rustup target add x86_64-pc-windows-gnu`, `mingw-w64`, and `nsis`. It
+worked - a genuine Windows PE executable and a real NSIS installer
+(`Church Intelligence Platform_0.1.0_x64-setup.exe`, **unsigned**) were
+produced and verified with `file`/SHA-256, something Phase 3.2's own
+release manifest had recorded as not possible in this environment.
+`get_pilot_diagnostics` (Phase 3.3) finally got a frontend: a "System
+Diagnostics" panel showing machine, database, Bible, microphone, Whisper
+model, and display status in plain language. `AudioEngineStatus` gained
+`selectedDevice`/`channels`, and `DisplayDiagnostic` gained
+`positionX`/`positionY`, closing two real gaps in the hardware-diagnostic
+surface. None of this puts a real Windows machine, a real microphone, or
+a real projector in this container - hardware qualification remains
+**HOLD**, honestly, pending the same real-hardware pilot Phase 3.2/3.3
+already called for, now on the actual target Windows laptop. See
+[`docs/phase-3-4-windows-pilot.md`](docs/phase-3-4-windows-pilot.md) and
+[`pilot-evidence/3.4/`](pilot-evidence/3.4/).
+
 > **Roadmap note.** This repository's authoritative Phase 2 roadmap is:
 > 2.0 Intelligence Architecture -> 2.1 Unified Intelligence Event/Context
 > Layer -> 2.2 Music Content Foundation -> 2.3 Music Intelligence -> **2.4

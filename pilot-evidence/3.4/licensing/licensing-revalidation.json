@@ -1,0 +1,26 @@
+{
+  "environment": "automated",
+  "bibleDataset": {
+    "translationId": "BSB",
+    "books": 66,
+    "chapters": 1189,
+    "verses": 31086,
+    "checksum": "d4335582ff26a3ac",
+    "licensingStatus": "verified_public_domain",
+    "reconfirmedThisPhase": true,
+    "source": "docs/data/bible/BSB/manifest.json, re-read and re-confirmed byte-for-byte unchanged this phase"
+  },
+  "hardImportGate": {
+    "status": "confirmed_active",
+    "noNewTranslationImported": true,
+    "noUnknownToApprovedConversion": "confirmed - this phase's diff touches zero content_registry licensing/publisher/copyright fields",
+    "noScrapingOfAnyBibleWebsite": "confirmed - this phase performed no data collection of any kind; all Rust/TS/evidence-file work this phase used only pre-existing repository data"
+  },
+  "windowsPackagingLicensing": {
+    "mingwW64": "GPL/LGPL-licensed cross-compilation toolchain (gcc-mingw-w64, Ubuntu noble/universe apt package) - a BUILD-TIME tool on this container, not linked into or shipped with the CIP application binary itself",
+    "nsis": "zlib/bzip2/Common Public License - the NSIS installer generator itself is build tooling, not a runtime dependency of the shipped application",
+    "nsisTauriUtilsDll": "Tauri's own official nsis_tauri_utils.dll (MIT/Apache-2.0, tauri-apps/nsis-tauri-utils GitHub releases), downloaded and hash-verified during the bundling step - the same helper Tauri's own NSIS bundler always uses, including on native Windows builds; not an addition specific to cross-compilation",
+    "conclusion": "No new copyleft or otherwise incompatible license was introduced into the shipped CIP application by Windows packaging - the toolchain dependencies above are build-time only."
+  },
+  "conclusion": "No licensing change this phase. BSB remains the sole production Bible dataset, verified public domain, hard import gate active."
+}

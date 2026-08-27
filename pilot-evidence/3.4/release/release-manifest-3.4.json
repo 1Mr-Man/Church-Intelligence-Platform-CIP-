@@ -1,0 +1,63 @@
+{
+  "applicationName": "Church Intelligence Platform",
+  "version": "0.1.0",
+  "gitCommit": "SEE_FINAL_COMMIT_IN_docs/phase-3-4-windows-pilot.md",
+  "gitBranch": "claude/cip-foundation-init-i85g87",
+  "targetPlatform": "Windows x64 (win32/win64, x86_64-pc-windows-gnu)",
+  "architecture": "x86_64",
+  "artifact": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "53c1bc7f3c9a36c21ed29b3d8eebb8906f8a1eb417334116a2831052e762ccb4",
+    "sizeBytes": 7078276,
+    "installerType": "NSIS (.exe)",
+    "fileType": "PE32 executable (GUI) Intel 80386 (stripped to external PDB), for MS Windows, Nullsoft Installer self-extracting archive, 7 sections - confirmed via `file`"
+  },
+  "innerBinary": {
+    "filename": "cip-desktop.exe",
+    "fileType": "PE32+ executable (GUI) x86-64 (stripped to external PDB), for MS Windows, 11 sections - confirmed via `file`",
+    "sizeBytes": 31278929
+  },
+  "buildEnvironment": {
+    "hostOs": "Linux (this container - NOT Windows)",
+    "note": "Cross-compiled from Linux using rustup target x86_64-pc-windows-gnu, gcc-mingw-w64 (x86_64-w64-mingw32-gcc 13, win32 threading), and nsis 3.09 (Ubuntu noble/universe apt packages). Tauri's own CLI printed: 'Cross-platform compilation is experimental and does not support all features. Please use a matching host system for full compatibility.' - that warning is reproduced here verbatim and is not overridden by anything in this manifest.",
+    "buildCommand": "CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc npx tauri build --target x86_64-pc-windows-gnu --bundles nsis",
+    "buildTimestampUtc": "2026-08-27T23:34:00Z",
+    "buildMode": "release"
+  },
+  "signingStatus": "UNSIGNED RELEASE CANDIDATE",
+  "signingNote": "No code-signing certificate is available in this environment. Tauri's own build output stated: 'Signing, by default, is only supported on Windows hosts... for now, skipping signing the installer.' This is NOT a Microsoft-trusted or Authenticode-signed release. A real Windows installation will show an 'Unknown Publisher' SmartScreen warning; this is expected and must not be represented as a defect or hidden from the operator.",
+  "verificationStatus": {
+    "crossCompileSucceeded": "PASS (environment A/B - toolchain-level, this container)",
+    "installedAndLaunchedOnRealWindows": "BLOCKED (environment C - no Windows machine in this container)",
+    "note": "A successful cross-compile is evidence the code and its dependency graph are Windows-buildable. It is explicitly NOT evidence the installer runs, installs cleanly, or launches on a real Windows 11 machine - see pilot-evidence/3.4/windows-install/installer-test.json for the real-hardware checklist, all rows BLOCKED pending the real HP EliteBook 830 G6 pilot."
+  },
+  "bsbDataset": {
+    "translationId": "BSB",
+    "books": 66,
+    "chapters": 1189,
+    "verses": 31086,
+    "checksum": "d4335582ff26a3ac",
+    "licensingStatus": "verified_public_domain"
+  },
+  "whisperModel": {
+    "bundled": false,
+    "requirement": "optional - manual transcript entry is a full substitute",
+    "configuredVia": "CIP_WHISPER_MODEL_PATH environment variable (advanced/optional; documented, not required for normal operation)"
+  },
+  "knownDependencies": {
+    "runtime": ["WebView2 Runtime (usually preinstalled on Windows 11; if absent, Windows Update/Microsoft Store installs it automatically - CIP does not bundle it)"],
+    "notRequired": ["Git", "Rust", "Cargo", "Node.js", "npm", "VS Code", "source code", "a development server", "developer credentials", "internet access for core functionality"]
+  },
+  "installationInstructions": "Run the .exe installer. Follow the standard Windows installer prompts (Next/Install/Finish). No command line, no developer tools. A Windows SmartScreen 'unknown publisher' warning is expected for this unsigned release candidate - click 'More info' > 'Run anyway' to proceed.",
+  "uninstallInstructions": "Windows Settings > Apps > Church Intelligence Platform > Uninstall, or the uninstaller shortcut the installer creates.",
+  "knownLimitations": [
+    "UNSIGNED release candidate - Windows SmartScreen will warn on first run",
+    "Cross-compiled, never launch-tested on real Windows - see verificationStatus above",
+    "Real microphone audio capture: BLOCKED - no Windows/audio hardware available in this build environment",
+    "Real Whisper transcription of real speech: BLOCKED (needs both a real model and real microphone audio)",
+    "Physical monitor/projector output: BLOCKED - no physical display in this build environment",
+    "Multi-hour (2-4 real wall-clock hours) stability on Windows: NOT VERIFIED - only a compressed simulated-load equivalent (Environment A) exists"
+  ],
+  "pilotChecklist": "See docs/phase-3-4-windows-pilot.md sections H-R and pilot-evidence/3.4/ for the full Environment C checklist an operator must complete on the real HP EliteBook 830 G6 (or equivalent Windows 11 machine) before this build can be called hardware-qualified or pilot-qualified.",
+  "pilotStatus": "SOFTWARE RELEASE CANDIDATE: PASS (pending final regression re-run); PHYSICAL HARDWARE PILOT: HOLD - Environment C evidence is BLOCKED, no real Windows hardware available in this container"
+}

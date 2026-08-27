@@ -17,8 +17,12 @@ apps/desktop/src-tauri/gen/schemas/
 *.swp
 
 # Local runtime data (dev/test SQLite files, logs) - never committed,
-# CIP is local-first and every install owns its own local database.
+# CIP is local-first and every install owns its own local database. Does
+# NOT apply to pilot-evidence/ - those *.log files are deliberately
+# collected qualification evidence, not local runtime data, and must be
+# committed (see docs/phase-3-3-pilot-qualification.md, docs/phase-3-4-windows-pilot.md).
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
 *.log
+!pilot-evidence/**/*.log

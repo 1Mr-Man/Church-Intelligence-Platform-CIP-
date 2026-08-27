@@ -1,0 +1,9 @@
+{
+  "_schema": "testId, environment, procedure, expectedResult, observedResult, status, evidenceRef, operatorNotes",
+  "automated": [
+    { "testId": "SVC-A-01", "environment": "automated", "procedure": "Phase 3.1's full-service simulation test (all nine domains chained through a single transcript, real SQLite) + Phase 3.2's 60-minute simulated service test", "expectedResult": "Stable, no data loss, correct provenance/evidence/confidence chain", "observedResult": "PASS - unchanged this phase, re-verified in full regression re-run", "status": "PASS", "evidenceRef": "../software/automated-regression.json", "operatorNotes": "SIMULATED - compressed cycles, not real-time. Proves logical stability, never a substitute for a real timed service." }
+  ],
+  "realHardwareRequired": [
+    { "testId": "SVC-01", "environment": "real_hardware", "procedure": "OPEN SERVICE -> microphone setup -> Whisper -> speech -> Bible detection -> Bible context -> Bible suggestion -> Sermon intelligence -> Music intelligence (where applicable) -> Service intelligence -> Content intelligence -> Cross-domain intelligence -> Unified workspace -> operator review -> presentation preparation -> physical presentation -> stop presentation -> continue service -> repeated Scripture detection -> repeated operator actions -> backup -> recovery check, run start-to-finish on the real target machine for a real 60-90 minute service", "expectedResult": "Every step in the chain completes with a real operator, real speech, real hardware - each domain's involvement recorded honestly (which fired, which did not, and why)", "observedResult": null, "status": "BLOCKED", "evidenceRef": null, "operatorNotes": "This is the single most important Environment C test in this package - it is the literal 'can a real church run this' proof the qualification report's closing question depends on." }
+  ]
+}

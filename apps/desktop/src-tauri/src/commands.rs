@@ -277,6 +277,12 @@ pub struct DisplayDiagnostic {
     pub name: Option<String>,
     pub width_px: u32,
     pub height_px: u32,
+    /// Phase 3.4: this display's top-left position in the OS's virtual
+    /// screen coordinate space - the piece of Windows multi-monitor
+    /// layout (primary + a second display extended to one side) that
+    /// width/height alone can't show.
+    pub position_x: i32,
+    pub position_y: i32,
     pub scale_factor: f64,
     pub is_primary: bool,
 }
@@ -354,6 +360,8 @@ pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> Pilo
             name: m.name().cloned(),
             width_px: m.size().width,
             height_px: m.size().height,
+            position_x: m.position().x,
+            position_y: m.position().y,
             scale_factor: m.scale_factor(),
             is_primary: primary_position == Some(*m.position()),
         })
@@ -4748,6 +4756,8 @@ mod tests {
                 sample_rate_hz: 0,
                 input_level: None,
                 stream_error: None,
+                selected_device: None,
+                channels: None,
             },
             audio_status: AudioStatusKind::Unavailable,
             speech_status: SpeechStatusKind::Unavailable,
@@ -4839,11 +4849,15 @@ mod tests {
                 sample_rate_hz: 0,
                 input_level: None,
                 stream_error: None,
+                selected_device: None,
+                channels: None,
             },
             displays: vec![DisplayDiagnostic {
                 name: Some("Virtual-1".to_string()),
                 width_px: 1280,
                 height_px: 800,
+                position_x: 0,
+                position_y: 0,
                 scale_factor: 1.0,
                 is_primary: true,
             }],
@@ -4863,8 +4877,12 @@ mod tests {
             "/tmp/ggml-tiny.en.bin"
         );
         assert_eq!(value["displays"][0]["widthPx"], 1280);
+        assert_eq!(value["displays"][0]["positionX"], 0);
+        assert_eq!(value["displays"][0]["positionY"], 0);
         assert_eq!(value["displays"][0]["scaleFactor"], 1.0);
         assert_eq!(value["displays"][0]["isPrimary"], true);
+        assert_eq!(value["audio"]["selectedDevice"], serde_json::Value::Null);
+        assert_eq!(value["audio"]["channels"], serde_json::Value::Null);
         assert_eq!(value["database"]["writable"], true);
     }
 

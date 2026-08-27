@@ -87,6 +87,13 @@ pub struct CpalAudioEngine {
     /// cpal backend's own error callback (a different thread than the one
     /// that called `start()`) - see `record_stream_error`'s docs.
     stream_error: Arc<Mutex<Option<String>>>,
+    /// Phase 3.4: the device id passed to the most recent successful
+    /// `start()` - real hardware-pilot diagnostics need to show "which
+    /// microphone is selected," not just an opaque capturing/idle flag.
+    selected_device: Arc<Mutex<Option<String>>>,
+    /// The input channel count cpal negotiated on the most recent
+    /// successful `start()`.
+    channels: Arc<Mutex<Option<u16>>>,
 }
 
 impl Default for CpalAudioEngine {
@@ -96,6 +103,8 @@ impl Default for CpalAudioEngine {
         let input_level_bits = Arc::new(AtomicU32::new(0));
         let has_level_reading = Arc::new(AtomicBool::new(false));
         let stream_error = Arc::new(Mutex::new(None));
+        let selected_device = Arc::new(Mutex::new(None));
+        let channels = Arc::new(Mutex::new(None));
 
         let (tx, rx) = mpsc::channel();
         let worker_capturing = Arc::clone(&is_capturing);
@@ -103,6 +112,8 @@ impl Default for CpalAudioEngine {
         let worker_level_bits = Arc::clone(&input_level_bits);
         let worker_has_level = Arc::clone(&has_level_reading);
         let worker_stream_error = Arc::clone(&stream_error);
+        let worker_selected_device = Arc::clone(&selected_device);
+        let worker_channels = Arc::clone(&channels);
         std::thread::spawn(move || {
             run_worker(
                 rx,
@@ -111,6 +122,8 @@ impl Default for CpalAudioEngine {
                 worker_level_bits,
                 worker_has_level,
                 worker_stream_error,
+                worker_selected_device,
+                worker_channels,
             );
         });
 
@@ -121,6 +134,8 @@ impl Default for CpalAudioEngine {
             input_level_bits,
             has_level_reading,
             stream_error,
+            selected_device,
+            channels,
         }
     }
 }
@@ -193,6 +208,12 @@ impl AudioEngine for CpalAudioEngine {
                 .lock()
                 .expect("stream_error mutex poisoned")
                 .clone(),
+            selected_device: self
+                .selected_device
+                .lock()
+                .expect("selected_device mutex poisoned")
+                .clone(),
+            channels: *self.channels.lock().expect("channels mutex poisoned"),
         }
     }
 }
@@ -330,6 +351,7 @@ fn build_stream(
 
 /// The worker thread's whole world: it owns the (thread-affine) `Stream`
 /// for as long as one exists, and never lets it leave this thread.
+#[allow(clippy::too_many_arguments)]
 fn run_worker(
     commands: mpsc::Receiver<WorkerCommand>,
     is_capturing: Arc<AtomicBool>,
@@ -337,6 +359,8 @@ fn run_worker(
     input_level_bits: Arc<AtomicU32>,
     has_level_reading: Arc<AtomicBool>,
     stream_error: Arc<Mutex<Option<String>>>,
+    selected_device: Arc<Mutex<Option<String>>>,
+    channels_out: Arc<Mutex<Option<u16>>>,
 ) {
     let mut stream: Option<Stream> = None;
 
@@ -381,6 +405,10 @@ fn run_worker(
                     // let an old disconnect message linger after the
                     // operator has successfully reconnected and restarted.
                     *stream_error.lock().expect("stream_error mutex poisoned") = None;
+                    *selected_device
+                        .lock()
+                        .expect("selected_device mutex poisoned") = Some(device_id.clone());
+                    *channels_out.lock().expect("channels mutex poisoned") = Some(channels as u16);
                     is_capturing.store(true, Ordering::SeqCst);
                     Ok(())
                 })();
@@ -490,6 +518,19 @@ mod tests {
         let status = engine.status();
         assert!(!status.is_capturing);
         assert!(status.input_level.is_none());
+    }
+
+    /// Phase 3.4: a pilot operator's diagnostics view must never show a
+    /// fabricated "selected device" - honestly `None` until a real
+    /// `start()` has actually succeeded (which never happens in this
+    /// no-hardware environment, per `starting_an_unknown_device_id_...`
+    /// above).
+    #[test]
+    fn selected_device_and_channels_are_none_before_any_successful_start() {
+        let engine = CpalAudioEngine::new();
+        let status = engine.status();
+        assert_eq!(status.selected_device, None);
+        assert_eq!(status.channels, None);
     }
 
     #[test]

@@ -1,0 +1,11 @@
+{
+  "_schema": "testId, environment, procedure, expectedResult, observedResult, status, evidenceRef, operatorNotes",
+  "automated": [
+    { "testId": "PRES-A-01", "environment": "automated", "procedure": "render_content() determinism + presentation Prepared/Active/Stopped lifecycle unit tests", "expectedResult": "Deterministic rendering, correct state transitions", "observedResult": "PASS - unchanged this phase, re-verified in full regression re-run", "status": "PASS", "evidenceRef": "../software/automated-regression.json", "operatorNotes": null },
+    { "testId": "PRES-A-02", "environment": "xvfb", "procedure": "Open/close the display window under Xvfb across three launches this phase's Linux rebuild", "expectedResult": "Window lifecycle correct, stale-Active reconciliation fires on Destroyed", "observedResult": "PASS - see ../software/xvfb-relaunch-3.4-run1-fresh.log and ../software/xvfb-relaunch-3.4-run2-idempotent.log", "status": "PASS", "evidenceRef": "../software/xvfb-relaunch-3.4-run1-fresh.log and ../software/xvfb-relaunch-3.4-run2-idempotent.log", "operatorNotes": "Proves desktop window-lifecycle correctness only - never physical-projector readability." }
+  ],
+  "realHardwareRequired": [
+    { "testId": "PRES-01", "environment": "real_hardware", "procedure": "Presentation activation/update/stop cycle on the real target machine with a real second display, per pilot-evidence/3.4/display/display-projector-checklist.json DISP-03 through DISP-06", "expectedResult": "Same as DISP-03 through DISP-06", "observedResult": null, "status": "BLOCKED", "evidenceRef": "../display/display-projector-checklist.json", "operatorNotes": "Presentation and display are two views of the same real-hardware requirement - see display-projector-checklist.json for the itemized checklist." },
+    { "testId": "PRES-02", "environment": "real_hardware", "procedure": "Rapid prepare/display/stop cycle test (operator quickly cycling through several suggestions in a row)", "expectedResult": "No stuck/duplicate presentation state, no crash", "observedResult": null, "status": "BLOCKED", "evidenceRef": null, "operatorNotes": null }
+  ]
+}

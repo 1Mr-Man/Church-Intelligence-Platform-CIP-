@@ -1,0 +1,24 @@
+{
+  "_notice": "The build/development environment used to produce and test this release, NOT a Windows pilot machine. This container has no audio hardware and no display server, and it is Linux, not Windows. This file documents what environment produced the cross-compiled Windows artifact and the automated/Xvfb evidence in this package - it must never be read as Environment C (real Windows hardware) machine data.",
+  "os": "linux",
+  "osRelease": "Linux vm 6.18.44-fc-v22 #1 SMP PREEMPT_DYNAMIC x86_64 GNU/Linux",
+  "arch": "x86_64",
+  "windowsCrossCompileToolchain": {
+    "rustTarget": "x86_64-pc-windows-gnu",
+    "cCompiler": "x86_64-w64-mingw32-gcc 13 (win32 threading, gcc-mingw-w64-x86-64-win32 apt package)",
+    "installer": "nsis 3.09 (Ubuntu noble/universe apt package)"
+  },
+  "targetPilotMachine": {
+    "make": "HP EliteBook 830 G6",
+    "cpu": "Intel Core i5-8365U",
+    "ram": "8 GB",
+    "gpu": "Intel UHD Graphics 620",
+    "os": "Windows 11 Pro 25H2",
+    "arch": "x64",
+    "note": "This is the DESCRIBED target machine per the Phase 3.4 spec - it has never been physically present in or connected to this container. No diagnostic data has actually been read from it."
+  },
+  "audioHardware": "none (/dev/snd does not exist)",
+  "displayServer": "none ($DISPLAY empty, no xrandr) - Xvfb used only for Environment B validation",
+  "cipVersion": "0.1.0",
+  "gitBranch": "claude/cip-foundation-init-i85g87"
+}

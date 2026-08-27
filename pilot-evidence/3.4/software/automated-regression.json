@@ -1,0 +1,34 @@
+{
+  "environment": "automated",
+  "commands": {
+    "cargo fmt --all -- --check": "pass",
+    "cargo clippy --workspace --all-targets -- -D warnings": "pass",
+    "cargo test --workspace (default features)": "768 passed, 0 failed (one transient failure - config::tests::whisper_model_path_honors_the_env_override - observed on the first full-suite run after this phase's edits, reproduced as a pre-existing parallel-test env-var race unrelated to this phase's diff: it passes in isolation and on two subsequent full clean re-runs; config.rs was not touched this phase)",
+    "cargo test -p cip-ai-speech --features whisper": "7 passed, 0 failed",
+    "cargo test -p cip-desktop --features whisper": "204 passed, 0 failed",
+    "npm run typecheck (tsc -b)": "pass",
+    "npm run test (vitest run)": "179 passed, 0 failed",
+    "npm run lint (oxlint)": "0 errors, 2 pre-existing unrelated warnings (main.tsx fast-refresh, LiveChurchBrain.tsx set-state-in-effect - unchanged from Phase 3.3)",
+    "npm run build (vite build)": "pass",
+    "cargo check --target x86_64-pc-windows-gnu -p cip-desktop": "pass - see ../windows-install/installer-test.json WIN-BUILD-01"
+  },
+  "newTestsThisPhase": [
+    "integrations/audio: selected_device_and_channels_are_none_before_any_successful_start",
+    "commands.rs: pilot_diagnostics_serializes_camel_case extended to assert positionX/positionY/selectedDevice/channels serialize correctly"
+  ],
+  "offlineDependencyCheck": {
+    "command": "cargo tree --workspace --all-features (both native and --target x86_64-pc-windows-gnu)",
+    "result": "no reqwest/hyper-client/ureq/curl anywhere in either dependency graph"
+  },
+  "secretsScan": {
+    "command": "git diff | grep -iE \"TODO|FIXME|api[_-]?key|secret|password|BEGIN (RSA|PRIVATE)|dbg!|console\\.log\"",
+    "result": "no matches"
+  },
+  "flakeInvestigation": {
+    "test": "config::tests::whisper_model_path_honors_the_env_override",
+    "isolatedRun": "PASS (cargo test -p cip-desktop config::tests::whisper_model_path_honors_the_env_override -- --test-threads=1)",
+    "fullSuiteRerun1": "PASS, all green",
+    "fullSuiteRerun2": "PASS, all green",
+    "conclusion": "pre-existing flake (std::env::set_var is process-global; the test suite runs #[test] fns in parallel by default, and this test races against another test that also sets CIP_WHISPER_MODEL_PATH), not a regression introduced this phase - config.rs was not modified this phase"
+  }
+}

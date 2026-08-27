@@ -1,0 +1,48 @@
+{
+  "environment": "automated",
+  "scope": "Fresh security audit for Phase 3.4 - Tauri capabilities, filesystem/shell/HTTP/window permissions, database access, path traversal, env var handling, log leakage, secrets, installer behavior, update mechanism, external process launching, CSP.",
+  "tauriCapabilities": {
+    "windows": ["main", "display"],
+    "permissions": "core:default only on both windows - unchanged from every prior phase",
+    "pluginsInCargoToml": ["tauri-plugin-log"],
+    "fsShellHttpDialogPlugins": "none",
+    "note": "Re-confirmed by reading capabilities/*.json directly this phase, not assumed from prior reports."
+  },
+  "csp": {
+    "value": null,
+    "classification": "accepted_risk, unchanged and re-confirmed this phase",
+    "rationale": "Zero fs/shell/http/dialog plugin surface limits practical exposure. Not weakened or strengthened this phase - no CIP capability changed that would alter this risk calculus."
+  },
+  "environmentVariableHandling": {
+    "CIP_WHISPER_MODEL_PATH": "only ever opened via std::fs::metadata/File::open or the whisper.cpp model loader - no exec/spawn, unchanged this phase",
+    "CIP_ACOUSTIC_MODEL_DIR": "same pattern, unchanged",
+    "note": "Phase 3.4 introduced zero new environment-variable-driven behavior."
+  },
+  "externalProcessLaunching": {
+    "runtimeExecSurface": "none - unchanged from every prior phase",
+    "buildTimeOnly": "build.rs's `git rev-parse --short=12 HEAD` (Phase 3.3) remains the only Command::new in this codebase, and it is compile-time only, never reachable at runtime"
+  },
+  "installerBehavior": {
+    "nsisInstaller": "standard Tauri/NSIS installer flow - no custom install scripts, no elevated post-install actions, no telemetry, no network calls during install",
+    "signing": "UNSIGNED - see release/release-manifest-3.4.json. This is a disclosed limitation, not a hidden one; a real Windows install will show a SmartScreen warning."
+  },
+  "updateMechanism": "none - CIP has no auto-update/update-check mechanism in this codebase (no tauri-plugin-updater), unchanged this phase",
+  "pathTraversalAndInputHandling": {
+    "whisperModelPath": "operator-configured path, opened read-only as a data file - the by-design ability for an operator to point CIP at any file they have read permission to, unchanged risk profile from Phase 3.2/3.3",
+    "windowsPathHandling": "PathBuf::join and Tauri's own app_data_dir() used throughout config.rs - no hardcoded '/' path separators, no Linux-only path assumptions found in a full grep of apps/desktop/src-tauri/src for cfg(unix)/cfg(target_os)/hardcoded absolute paths outside of #[cfg(test)] fixtures (which run on the build host, not a pilot machine)"
+  },
+  "sqlInjectionCheck": {
+    "method": "grep for format!-built SQL in persistence.rs, re-run this phase",
+    "result": "no user-controlled string interpolated into a query; all values bound via rusqlite::params!, unchanged"
+  },
+  "logLeakageAndSecretsScan": {
+    "command": "git diff | grep -iE \"TODO|FIXME|api[_-]?key|secret|password|BEGIN (RSA|PRIVATE)|dbg!|console\\.log\"",
+    "result": "no matches in this phase's diff"
+  },
+  "newSurfaceThisPhase": {
+    "audioEngineStatus.selectedDevice/channels": "reads only already-negotiated cpal state (device id string, channel count) - no new file/network/process access",
+    "displayDiagnostic.positionX/positionY": "reads only Tauri's own existing monitor API - no new access surface",
+    "windowsCrossCompileToolchain": "mingw-w64/nsis/nsis_tauri_utils.dll are build-time-only tooling on THIS container, not shipped in or reachable from the CIP application itself"
+  },
+  "conclusion": "No new release-blocking finding. Every concrete claim above is a specific, checked fact, not a blanket 'secure' assertion."
+}

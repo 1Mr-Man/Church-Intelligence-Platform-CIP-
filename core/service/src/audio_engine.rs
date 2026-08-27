@@ -30,6 +30,16 @@ pub struct AudioEngineStatus {
     /// return it through - see `integrations/audio`'s `CpalAudioEngine`
     /// for where this is actually set.
     pub stream_error: Option<String>,
+    /// Phase 3.4: the device id most recently passed to a successful
+    /// `start()` - `None` before the engine has ever started capturing.
+    /// Persists after `stop()` (mirrors `stream_error`'s persistence) so a
+    /// diagnostics read always shows "which microphone was selected," not
+    /// just "is something capturing right now" - a real pilot operator
+    /// needs to see this without re-triggering a device enumeration.
+    pub selected_device: Option<String>,
+    /// The input channel count cpal negotiated with the device on the
+    /// most recent successful `start()` - `None` before any start.
+    pub channels: Option<u16>,
 }
 
 #[derive(Debug, Error)]
@@ -142,6 +152,8 @@ mod tests {
                 sample_rate_hz: 16_000,
                 input_level: None,
                 stream_error: None,
+                selected_device: None,
+                channels: None,
             }
         }
     }

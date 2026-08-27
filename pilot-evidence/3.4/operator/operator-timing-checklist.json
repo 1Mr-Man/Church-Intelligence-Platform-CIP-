@@ -1,0 +1,16 @@
+{
+  "_schema": "testId, environment, procedure, expectedResult, observedResult, status, evidenceRef, operatorNotes",
+  "note": "All rows require a real, non-developer human operator on the real target machine. No such operator exists in this session - every row is BLOCKED, not estimated.",
+  "records": [
+    { "testId": "OP-01", "environment": "real_hardware", "procedure": "Time from installer double-click to a usable, launched application", "expectedResult": "Recorded honestly, no target assumed", "observedResult": null, "status": "BLOCKED", "evidenceRef": null, "operatorNotes": null },
+    { "testId": "OP-02", "environment": "real_hardware", "procedure": "Time for the operator to identify and select the correct microphone unaided", "expectedResult": "Recorded honestly", "observedResult": null, "status": "BLOCKED", "evidenceRef": null, "operatorNotes": null },
+    { "testId": "OP-03", "environment": "real_hardware", "procedure": "Time to start capture and verify speech is being transcribed", "expectedResult": "Recorded honestly", "observedResult": null, "status": "BLOCKED", "evidenceRef": null, "operatorNotes": null },
+    { "testId": "OP-04", "environment": "real_hardware", "procedure": "Time to find a detected Scripture reference in the workspace", "expectedResult": "Recorded honestly", "observedResult": null, "status": "BLOCKED", "evidenceRef": null, "operatorNotes": null },
+    { "testId": "OP-05", "environment": "real_hardware", "procedure": "Time to review and act on a suggestion", "expectedResult": "Recorded honestly", "observedResult": null, "status": "BLOCKED", "evidenceRef": null, "operatorNotes": null },
+    { "testId": "OP-06", "environment": "real_hardware", "procedure": "Time to prepare and display a Scripture item on the projector", "expectedResult": "Recorded honestly", "observedResult": null, "status": "BLOCKED", "evidenceRef": null, "operatorNotes": null },
+    { "testId": "OP-07", "environment": "real_hardware", "procedure": "Time to change the displayed Scripture to a different reference", "expectedResult": "Recorded honestly", "observedResult": null, "status": "BLOCKED", "evidenceRef": null, "operatorNotes": null },
+    { "testId": "OP-08", "environment": "real_hardware", "procedure": "Time to stop the presentation", "expectedResult": "Recorded honestly", "observedResult": null, "status": "BLOCKED", "evidenceRef": null, "operatorNotes": null },
+    { "testId": "OP-09", "environment": "real_hardware", "procedure": "Time for the operator to recover from an intentionally introduced error (e.g. a disconnected microphone) unaided", "expectedResult": "Recorded honestly - confusion points and blockers noted, not smoothed over", "observedResult": null, "status": "BLOCKED", "evidenceRef": null, "operatorNotes": null },
+    { "testId": "OP-10", "environment": "real_hardware", "procedure": "Time to run a database backup via the operator-facing command", "expectedResult": "Recorded honestly", "observedResult": null, "status": "BLOCKED", "evidenceRef": null, "operatorNotes": null }
+  ]
+}
