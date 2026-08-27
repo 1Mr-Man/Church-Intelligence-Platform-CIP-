@@ -416,4 +416,40 @@ mod tests {
         assert!(text.contains("one and only"));
         assert!(slide.body_lines.join(" ").contains("one and only"));
     }
+
+    /// Phase 3.1 failure-injection gap #10: a dataset that imported
+    /// successfully but was later corrupted on disk (a partial write, bit
+    /// rot, a stray manual edit - never something CIP's own import path
+    /// could produce) must be caught by the exact same integrity check
+    /// `commands::check_bible_dataset_integrity` runs, against the real
+    /// `SqliteBibleProvider` - not just the synthetic `FakeBibleProvider`
+    /// scenarios `core/bible/src/integrity.rs`'s own unit tests already
+    /// cover exhaustively for `Invalid` detection.
+    #[test]
+    fn a_dataset_corrupted_after_import_is_detected_by_the_real_startup_integrity_check() {
+        use cip_core_bible::{check_bible_integrity, IntegrityStatus};
+        use cip_integrations_bible::SqliteBibleProvider;
+
+        let conn = migrated_conn();
+        cip_database::seed::apply_dev_seed(&conn).unwrap();
+
+        // Simulate real on-disk corruption of an already-imported dataset.
+        conn.execute(
+            "UPDATE bible_verses SET text = '' \
+             WHERE translation_id = 'KJV' AND book_code = 'ROM' \
+               AND chapter_number = 8 AND verse_number = 28",
+            [],
+        )
+        .unwrap();
+
+        let provider = SqliteBibleProvider::new(conn);
+        let report = check_bible_integrity(&provider, "KJV").unwrap();
+        assert_eq!(
+            report.status,
+            IntegrityStatus::Invalid,
+            "corrupted (empty-text) verse data must never be reported as a healthy dataset, issues: {:?}",
+            report.issues
+        );
+        assert!(!report.issues.is_empty());
+    }
 }

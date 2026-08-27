@@ -173,4 +173,29 @@ mod tests {
         let result = WhisperSpeechEngine::load(&PathBuf::from("/nonexistent/ggml-tiny.en.bin"));
         assert!(matches!(result, Err(SpeechEngineError::ModelNotFound(_))));
     }
+
+    /// Phase 3.1 failure-injection gap #5: a model path that exists but is
+    /// not a real ggml/gguf model (a corrupt download, a truncated
+    /// transfer, or a file of the wrong type pointed at by
+    /// `CIP_WHISPER_MODEL_PATH`) must be reported as a clean, actionable
+    /// error - never a panic or a silent hang - distinct from the
+    /// "no file at all" case above.
+    #[test]
+    fn corrupt_model_file_is_reported_as_transcription_failed_not_a_panic() {
+        let path =
+            std::env::temp_dir().join(format!("cip-corrupt-model-test-{}.bin", std::process::id()));
+        std::fs::write(&path, b"this is not a real ggml/gguf whisper model file").unwrap();
+
+        let result = WhisperSpeechEngine::load(&path);
+
+        let _ = std::fs::remove_file(&path);
+
+        match result {
+            Err(SpeechEngineError::TranscriptionFailed(_)) => {}
+            Err(other) => panic!(
+                "a corrupt-but-present model file must fail with TranscriptionFailed, got {other:?}"
+            ),
+            Ok(_) => panic!("a corrupt-but-present model file must never load successfully"),
+        }
+    }
 }

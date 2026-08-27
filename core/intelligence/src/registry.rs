@@ -231,6 +231,28 @@ mod tests {
         }
     }
 
+    struct PanickingServiceEngine;
+
+    impl IntelligenceEngine for PanickingServiceEngine {
+        fn identity(&self) -> EngineIdentity {
+            EngineIdentity {
+                domain: IntelligenceDomain::Service,
+                engine_id: "service".to_string(),
+                engine_version: "0.1".to_string(),
+            }
+        }
+        fn capability(&self) -> EngineCapability {
+            EngineCapability::Available
+        }
+        fn analyze(
+            &self,
+            _input: &IntelligenceInput,
+            _context: &IntelligenceContext,
+        ) -> Result<IntelligenceResult, IntelligenceError> {
+            panic!("simulated engine panic");
+        }
+    }
+
     fn working(domain: IntelligenceDomain) -> Box<dyn IntelligenceEngine> {
         Box::new(WorkingEngine {
             domain,
@@ -371,6 +393,39 @@ mod tests {
         assert!(bible.result.is_ok());
         assert!(matches!(
             sermon.result,
+            Err(IntelligenceError::EngineFailed { .. })
+        ));
+    }
+
+    /// Phase 3.1 failure-injection gap #13: the same panic-isolation
+    /// guarantee proven above for Music (`a_failing_engine_...`) and
+    /// Sermon (`a_panicking_engine_...`) also holds when the *Service*
+    /// domain is the one that fails - the registry's isolation mechanism
+    /// is domain-agnostic, but until now no test exercised a failing
+    /// engine specifically registered under `IntelligenceDomain::Service`.
+    #[test]
+    fn a_panicking_service_engine_is_isolated_and_never_propagates() {
+        let mut registry = IntelligenceEngineRegistry::new();
+        registry
+            .register(working(IntelligenceDomain::Bible))
+            .unwrap();
+        registry.register(Box::new(PanickingServiceEngine)).unwrap();
+        let service_id = Uuid::new_v4();
+
+        // This call itself must not panic - that's the assertion.
+        let outcomes = registry.analyze_all(&input(), &context(service_id));
+
+        let bible = outcomes
+            .iter()
+            .find(|o| o.identity.domain == IntelligenceDomain::Bible)
+            .unwrap();
+        let service = outcomes
+            .iter()
+            .find(|o| o.identity.domain == IntelligenceDomain::Service)
+            .unwrap();
+        assert!(bible.result.is_ok(), "Bible result must remain available");
+        assert!(matches!(
+            service.result,
             Err(IntelligenceError::EngineFailed { .. })
         ));
     }

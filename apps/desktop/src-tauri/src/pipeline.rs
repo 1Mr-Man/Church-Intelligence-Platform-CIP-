@@ -1800,4 +1800,429 @@ mod tests {
     ) -> bool {
         matches!(content, cip_core_presentation::PresentationContent::Scripture { text, .. } if text.contains(needle))
     }
+
+    // --- Phase 3.1: full pilot service simulation ---------------------------
+    //
+    // The Phase 3.1 spec's "full-service simulation": chains every domain
+    // this app ships - Bible (Suggestion path AND the separate Finding-path
+    // bridge `analyze_bible_transcript` uses), Sermon (foundation lifecycle
+    // AND semantic taxonomy), Music, Content Intelligence, Cross-Domain
+    // correlation, Presentation activation, and a real file-backed restart -
+    // through the exact same production orchestration functions
+    // `commands.rs` calls, without the `AppHandle`/`State` machinery this
+    // codebase has no test harness for (see `sermon_foundation.rs`'s
+    // canonical acceptance test for the established precedent this follows).
+    // Fictional service, fictional sermon, synthetic project-authored
+    // transcript text only.
+    #[test]
+    fn phase_3_1_pilot_full_service_simulation() {
+        use cip_core_content::ContentRegistry;
+        use cip_core_intelligence::{
+            BibleIntelligenceEngine, ContentCandidateQueue, ContentIntelligenceEngine,
+            ContextBounds, CorrelationKind, CorrelationQueue, CrossDomainCorrelationEngine,
+            FindingQueue, IntelligenceContext, IntelligenceDomain, IntelligenceEngine,
+            IntelligenceInput, MusicIntelligenceEngine, SermonIntelligenceEngine,
+        };
+        use cip_core_sermon::foundation::{
+            SectionOrigin, Sermon, SermonSection, SermonSectionKind, SermonSegment, Speaker,
+            SpeakerRole,
+        };
+        use cip_integrations_content::SqliteContentRegistry;
+        use cip_integrations_music::SqliteMusicProvider;
+
+        fn fresh_seeded_conn() -> Connection {
+            let mut conn = open_in_memory().unwrap();
+            run_migrations(&mut conn).unwrap();
+            apply_dev_seed(&conn).unwrap();
+            conn
+        }
+
+        // A real, file-backed main app database - so the restart step at
+        // the end is a genuine close/reopen, matching
+        // `service_history_survives_a_simulated_application_restart` -
+        // plus one independent in-memory connection per provider/registry,
+        // exactly this codebase's established convention (each provider
+        // owns its own connection; only the main `conn` is ever shared
+        // with `persistence.rs`).
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("cip-phase-3-1-pilot-simulation.sqlite3");
+        let session_id;
+        let sermon_id;
+        let romans_828_item_id;
+
+        {
+            let mut conn = cip_database::open(&db_path).unwrap();
+            run_migrations(&mut conn).unwrap();
+            apply_dev_seed(&conn).unwrap();
+            let conn = conn;
+
+            let bible_provider = SqliteBibleProvider::new(fresh_seeded_conn());
+            let bible_provider_for_pipeline = SqliteBibleProvider::new(fresh_seeded_conn());
+            let music_provider = SqliteMusicProvider::new(fresh_seeded_conn());
+            let content_registry = SqliteContentRegistry::new({
+                let mut c = open_in_memory().unwrap();
+                run_migrations(&mut c).unwrap();
+                c
+            });
+            crate::music::register_dev_seed_music_content_if_missing(&content_registry).unwrap();
+            let content_metadata = content_registry.list(None).unwrap();
+
+            let bible_engine = BibleIntelligenceEngine::new(Box::new(bible_provider), "KJV");
+            let music_engine = MusicIntelligenceEngine::new(Box::new(music_provider));
+            let sermon_engine = SermonIntelligenceEngine::new();
+            let content_engine = ContentIntelligenceEngine::new();
+            let cross_domain_engine = CrossDomainCorrelationEngine::new();
+
+            let mut findings = FindingQueue::new();
+            let mut candidates = ContentCandidateQueue::new();
+            let mut correlations = CorrelationQueue::new();
+            let mut seq = 0u64;
+
+            // SERVICE START
+            let session = ServiceSession::start("Phase 3.1 Pilot Simulation");
+            session_id = session.id;
+            persist_service(&conn, &session).unwrap();
+
+            // SERMON START: title, speaker, and an explicit Main Message
+            // section (mirrors `sermon_foundation.rs`'s canonical scenario).
+            let mut sermon =
+                Sermon::start(session.id, Some("Trusting God in Uncertainty".to_string()));
+            sermon_id = sermon.id;
+            crate::persistence::persist_sermon(&conn, &sermon).unwrap();
+            let main_message = SermonSection::open(
+                sermon.id,
+                SermonSectionKind::MainMessage,
+                SectionOrigin::OperatorAssigned,
+                None,
+            );
+            crate::persistence::persist_sermon_section(&conn, &main_message).unwrap();
+            let speaker = Speaker::new("Pastor Jane Doe", SpeakerRole::Primary);
+            sermon.assign_speaker(speaker);
+            crate::persistence::update_sermon(&conn, &sermon).unwrap();
+
+            // A. BIBLE REFERENCE - the real operator-facing Suggestion path
+            // (`handle_final_transcript`, unchanged production code):
+            // detect, approve, and prepare Romans 8:28 for presentation.
+            let mut scripture_context_manager = DefaultScriptureContextManager::new("KJV");
+            let s1 = segment(
+                "Good morning church. Turn with me to Romans chapter eight",
+                seq,
+            );
+            seq += 1;
+            handle_final_transcript(
+                &conn,
+                &bible_provider_for_pipeline,
+                &mut scripture_context_manager,
+                session.id,
+                "KJV",
+                s1,
+            )
+            .unwrap();
+            let s2 = segment("Look at verse twenty-eight", seq);
+            seq += 1;
+            let processed = handle_final_transcript(
+                &conn,
+                &bible_provider_for_pipeline,
+                &mut scripture_context_manager,
+                session.id,
+                "KJV",
+                s2,
+            )
+            .unwrap();
+            assert_eq!(
+                processed.detections[0]
+                    .reference
+                    .as_ref()
+                    .unwrap()
+                    .to_string(),
+                "ROM 8:28"
+            );
+            let romans_828_suggestion = processed.suggestions[0].id;
+            crate::persistence::update_suggestion_status(
+                &conn,
+                romans_828_suggestion,
+                cip_core_ai::SuggestionStatus::Approved,
+                None,
+            )
+            .unwrap();
+            let (romans_828_content, _) = crate::presentation::build_scripture_slide(
+                &bible_provider_for_pipeline,
+                "KJV",
+                "ROM 8:28",
+            )
+            .unwrap();
+            let romans_828_item = crate::presentation::persist_prepared_item(
+                &conn,
+                session.id,
+                romans_828_content,
+                "SCRIPTURE_DEFAULT",
+                Some(romans_828_suggestion),
+            )
+            .unwrap();
+            romans_828_item_id = romans_828_item.id;
+
+            // B. BIBLE INTELLIGENCE FINDING - the separate, real Finding-path
+            // bridge (`commands::analyze_bible_transcript`'s own engine
+            // call) so a Bible-domain `IntelligenceFinding` exists for
+            // cross-domain correlation, exactly mirroring how that command
+            // is the only way a Bible finding ever reaches
+            // `context.recent_findings`.
+            let scripture_context_snapshot = cip_core_bible::ScriptureContext {
+                translation_id: "KJV".to_string(),
+                book: "ROM".to_string(),
+                chapter: 8,
+                last_verse: Some(28),
+                confidence: ConfidenceResult::new(0.9, ConfidenceSource::Heuristic, None),
+                established_at: chrono::Utc::now(),
+                valid: true,
+            };
+            let bible_finding_context = IntelligenceContext::build(
+                session.id,
+                None,
+                None,
+                Vec::new(),
+                None,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                ContextBounds::default(),
+            );
+            for text in ["Turn with me to Romans chapter eight", "Verse twenty-eight"] {
+                let seg = segment(text, seq);
+                seq += 1;
+                let input = IntelligenceInput::new(session.id, seg);
+                let result = bible_engine
+                    .analyze(&input, &bible_finding_context)
+                    .unwrap();
+                for f in result.findings {
+                    findings.add(f);
+                }
+            }
+            assert!(
+                findings
+                    .all()
+                    .iter()
+                    .any(|f| f.domain == IntelligenceDomain::Bible && f.summary == "ROM 8:28"),
+                "the real Bible engine must have produced a Bible finding for ROM 8:28"
+            );
+
+            // C. SERMON SEMANTIC TAXONOMY - the same nine-segment scripted
+            // walkthrough `sermon_adapter.rs`'s own canonical acceptance
+            // test uses, run through the real orchestration function
+            // (`sermon::analyze_and_queue`) against a context carrying both
+            // the active Scripture context (for the "Supporting Scripture"
+            // cross-link) and this sermon's real foundation state - proving
+            // the foundation (who/what section) and the semantic taxonomy
+            // (what was said) share the same live sermon, not two
+            // disconnected copies. Every transcript segment is persisted
+            // and linked via a real `SermonSegment` row.
+            let sermon_segments_text = [
+                "Today I want to talk about trusting God when life becomes uncertain.",
+                "My first point is that faith grows when it is tested.",
+                "I remember when I faced total uncertainty myself.",
+                "Romans chapter eight verse twenty eight reminds us that all things work together for good.",
+                "What does this mean for us?",
+                "We must trust God even when we cannot see the outcome.",
+                "Never forget: faith is not the absence of uncertainty.",
+                "What are you trusting when everything around you is uncertain?",
+                "If you remember one thing today, remember that God is faithful.",
+            ];
+            let mut recent_segments = Vec::new();
+            for (i, text) in sermon_segments_text.iter().enumerate() {
+                let seg = segment(text, seq);
+                seq += 1;
+                persist_transcript_segment(&conn, session.id, &seg).unwrap();
+                let link = SermonSegment::new(sermon.id, seg.id, i as u32, Some(main_message.id));
+                crate::persistence::persist_sermon_segment(&conn, &link).unwrap();
+                recent_segments.push(seg.clone());
+
+                let recent_sermon_segments =
+                    crate::persistence::list_sermon_segments(&conn, sermon.id).unwrap();
+                let context = IntelligenceContext::build(
+                    session.id,
+                    Some(cip_core_service::ServiceStatus::Started),
+                    Some(seg.clone()),
+                    recent_segments.clone(),
+                    Some(scripture_context_snapshot.clone()),
+                    findings.all().into_iter().cloned().collect(),
+                    Vec::new(),
+                    content_metadata.clone(),
+                    ContextBounds::default(),
+                )
+                .with_sermon_context(
+                    Some(sermon.clone()),
+                    Some(main_message.clone()),
+                    recent_sermon_segments,
+                );
+
+                let input = IntelligenceInput::new(session.id, seg);
+                crate::sermon::analyze_and_queue(&sermon_engine, &input, &context, &mut findings)
+                    .unwrap();
+            }
+            let has_finding =
+                |prefix: &str| findings.all().iter().any(|f| f.summary.starts_with(prefix));
+            assert!(has_finding("Main Point:"), "expected a main point");
+            assert!(has_finding("Story:"), "expected an illustration/story");
+            assert!(has_finding("Application:"), "expected an application");
+            assert!(has_finding("Takeaway:"), "expected a takeaway");
+            assert!(
+                has_finding("Food for Thought:"),
+                "expected a food-for-thought prompt"
+            );
+            assert!(
+                has_finding("Supporting Scripture:"),
+                "expected the sermon to cross-link the active Scripture context"
+            );
+
+            let reloaded_sermon_segments =
+                crate::persistence::list_sermon_segments(&conn, sermon.id).unwrap();
+            assert_eq!(
+                reloaded_sermon_segments.len(),
+                sermon_segments_text.len(),
+                "every sermon transcript segment must be linked and persisted"
+            );
+
+            // D. MUSIC - a real dev-seed hymnbook exact-title match, via the
+            // real orchestration function (`music::analyze_and_queue`).
+            let music_seg = segment("Test Fixture Hymn One", seq);
+            let music_context = IntelligenceContext::build(
+                session.id,
+                None,
+                Some(music_seg.clone()),
+                vec![music_seg.clone()],
+                None,
+                Vec::new(),
+                Vec::new(),
+                content_metadata.clone(),
+                ContextBounds::default(),
+            );
+            let music_input = IntelligenceInput::new(session.id, music_seg);
+            let music_queued = crate::music::analyze_and_queue(
+                &music_engine,
+                &music_input,
+                &music_context,
+                &mut findings,
+            )
+            .unwrap();
+            assert_eq!(
+                music_queued.len(),
+                1,
+                "the real dev-seed hymnbook must recognize an exact title match"
+            );
+
+            // E. CONTENT CANDIDATES - the real orchestration function
+            // (`content_intelligence::analyze_and_queue`), reading the
+            // sermon taxonomy findings already queued above.
+            let content_context = IntelligenceContext::build(
+                session.id,
+                None,
+                None,
+                Vec::new(),
+                None,
+                findings.all().into_iter().cloned().collect(),
+                Vec::new(),
+                content_metadata.clone(),
+                ContextBounds::default(),
+            );
+            let queued_candidates = crate::content_intelligence::analyze_and_queue(
+                &content_engine,
+                &content_context,
+                &mut candidates,
+            );
+            assert!(
+                !queued_candidates.is_empty(),
+                "sermon taxonomy findings must yield at least one content candidate"
+            );
+
+            // F. CROSS-DOMAIN CORRELATION - the real orchestration function
+            // (`cross_domain::analyze_and_queue`): the shared Romans 8:28
+            // reference between the Bible finding (B) and the sermon's
+            // "Supporting Scripture" cross-link (C) must correlate.
+            let cross_domain_context = IntelligenceContext::build(
+                session.id,
+                None,
+                None,
+                Vec::new(),
+                Some(scripture_context_snapshot.clone()),
+                findings.all().into_iter().cloned().collect(),
+                Vec::new(),
+                content_metadata.clone(),
+                ContextBounds::default(),
+            )
+            .with_content_candidates(candidates.all().into_iter().cloned().collect());
+            let queued_correlations = crate::cross_domain::analyze_and_queue(
+                &cross_domain_engine,
+                &cross_domain_context,
+                &mut correlations,
+            );
+            assert!(
+                queued_correlations
+                    .iter()
+                    .any(|c| c.kind == CorrelationKind::ScriptureSermon),
+                "expected a Scripture<->Sermon correlation from the shared Romans 8:28 reference"
+            );
+
+            // G. PRESENTATION ACTIVATION - the real Prepared -> Active
+            // transition (`prepare_to_activate` + `commit_activation`),
+            // left Active on purpose: the block below drops this
+            // connection with the item still Active, deliberately
+            // simulating "app closed mid-service"
+            // (`docs/first-use.md`'s Troubleshooting table) for step H.
+            let (to_activate, _slide) =
+                crate::presentation::prepare_to_activate(&conn, romans_828_item.id).unwrap();
+            assert_eq!(
+                to_activate.status,
+                cip_core_presentation::PresentationItemStatus::Prepared
+            );
+            let active_item =
+                crate::presentation::commit_activation(&conn, romans_828_item.id).unwrap();
+            assert_eq!(
+                active_item.status,
+                cip_core_presentation::PresentationItemStatus::Active,
+                "the display command must have actually taken effect"
+            );
+
+            // "Close/restart the application": drop the connection at the
+            // end of this block with the presentation item still Active.
+        }
+
+        // H. SIMULATED RESTART - reopen the real file-backed database
+        // exactly as a fresh application launch would, and run the same
+        // startup reconciliation `lib.rs`'s real setup path always runs
+        // unconditionally.
+        let reopened = cip_database::open(&db_path).unwrap();
+        let reconciled_count =
+            crate::persistence::reconcile_stale_active_presentation_items(&reopened).unwrap();
+        assert_eq!(
+            reconciled_count, 1,
+            "the stale Active presentation item must be reconciled on restart"
+        );
+        let reloaded_item =
+            crate::persistence::get_presentation_item(&reopened, romans_828_item_id).unwrap();
+        assert_eq!(
+            reloaded_item.status,
+            cip_core_presentation::PresentationItemStatus::Stopped,
+            "restart must never leave a stale item claiming to still be on screen"
+        );
+
+        // Sermon and service history must also survive the restart intact.
+        let reloaded_sermon = crate::persistence::get_sermon(&reopened, sermon_id).unwrap();
+        assert_eq!(
+            reloaded_sermon.title.as_deref(),
+            Some("Trusting God in Uncertainty")
+        );
+        let reloaded_segments =
+            crate::persistence::list_sermon_segments(&reopened, sermon_id).unwrap();
+        assert_eq!(
+            reloaded_segments.len(),
+            9,
+            "every sermon segment link must survive the restart"
+        );
+        let reloaded_transcript =
+            crate::persistence::list_transcript_segments(&reopened, session_id, 100).unwrap();
+        assert!(
+            reloaded_transcript.len() >= 11,
+            "bible and sermon transcript segments must all survive the restart"
+        );
+    }
 }

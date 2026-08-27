@@ -48,6 +48,19 @@ guide, and troubleshooting table written for a non-developer. See
 [`docs/phase-3-first-use.md`](docs/phase-3-first-use.md) for the
 engineering record of what changed and why.
 
+**Phase 3.1** asked a narrower question than any prior phase: not "does
+the code pass its tests," but "can a real church install CIP, connect
+real hardware, and run a real service without a developer in the room?"
+It closed four genuine failure-injection test gaps, added the one
+end-to-end proof still missing since Phase 2 (all nine domains chained
+through a single transcript against real SQLite), and built and launched
+a real installable `.deb` package for the first time. Live microphone
+capture, real Whisper transcription, and physical projector/monitor
+output remain **NOT AVAILABLE** in every development environment used so
+far - honestly reported, never fabricated. Verdict: **PILOT READY —
+CONDITIONAL**. See [`docs/phase-3-1-pilot.md`](docs/phase-3-1-pilot.md)
+for the full readiness matrix and hardware results.
+
 > **Roadmap note.** This repository's authoritative Phase 2 roadmap is:
 > 2.0 Intelligence Architecture -> 2.1 Unified Intelligence Event/Context
 > Layer -> 2.2 Music Content Foundation -> 2.3 Music Intelligence -> **2.4
