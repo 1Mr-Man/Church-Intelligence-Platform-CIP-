@@ -3,7 +3,9 @@
 //! `Mutex`-guarded for interior mutability behind a shared `&self`.
 
 use chrono::{DateTime, Utc};
-use cip_core_content::{ContentMetadata, ContentRegistry, ContentRegistryError, ContentStatus};
+use cip_core_content::{
+    ContentMetadata, ContentRegistry, ContentRegistryError, ContentStatus, LicensingStatus,
+};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::sync::Mutex;
 
@@ -49,12 +51,36 @@ fn status_str(value: ContentStatus) -> &'static str {
     }
 }
 
+fn licensing_status_str(value: LicensingStatus) -> &'static str {
+    match value {
+        LicensingStatus::VerifiedPublicDomain => "verified_public_domain",
+        LicensingStatus::VerifiedRedistributable => "verified_redistributable",
+        LicensingStatus::LicensedForCip => "licensed_for_cip",
+        LicensingStatus::Unknown => "unknown",
+        LicensingStatus::Restricted => "restricted",
+    }
+}
+
+fn licensing_status_from_str(value: &str) -> LicensingStatus {
+    match value {
+        "verified_public_domain" => LicensingStatus::VerifiedPublicDomain,
+        "verified_redistributable" => LicensingStatus::VerifiedRedistributable,
+        "licensed_for_cip" => LicensingStatus::LicensedForCip,
+        "restricted" => LicensingStatus::Restricted,
+        // Unrecognized/absent values fail closed to `Unknown`, never a
+        // permissive status - a row this crate cannot positively identify
+        // as verified must never be treated as verified.
+        _ => LicensingStatus::Unknown,
+    }
+}
+
 const ROW_COLUMNS: &str = "id, content_type, name, version, language, source, publisher, \
-     copyright, license, distribution, imported_at, checksum, status";
+     copyright, license, distribution, imported_at, checksum, status, licensing_status";
 
 fn row_to_metadata(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContentMetadata> {
     let content_type_raw: String = row.get(1)?;
     let status_raw: String = row.get(12)?;
+    let licensing_status_raw: String = row.get(13)?;
     let imported_at_raw: String = row.get(10)?;
     Ok(ContentMetadata {
         id: row.get(0)?,
@@ -77,6 +103,7 @@ fn row_to_metadata(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContentMetadata>
         } else {
             ContentStatus::Enabled
         },
+        licensing_status: licensing_status_from_str(&licensing_status_raw),
     })
 }
 
@@ -131,8 +158,8 @@ impl ContentRegistry for SqliteContentRegistry {
         conn.execute(
             "INSERT INTO content_registry
                 (id, content_type, name, version, language, source, publisher, copyright,
-                 license, distribution, imported_at, checksum, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                 license, distribution, imported_at, checksum, status, licensing_status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT(id) DO UPDATE SET
                 content_type = excluded.content_type,
                 name = excluded.name,
@@ -145,7 +172,8 @@ impl ContentRegistry for SqliteContentRegistry {
                 distribution = excluded.distribution,
                 imported_at = excluded.imported_at,
                 checksum = excluded.checksum,
-                status = excluded.status",
+                status = excluded.status,
+                licensing_status = excluded.licensing_status",
             params![
                 metadata.id,
                 content_type_str(metadata.content_type),
@@ -160,6 +188,7 @@ impl ContentRegistry for SqliteContentRegistry {
                 metadata.imported_at.to_rfc3339(),
                 metadata.checksum,
                 status_str(metadata.status),
+                licensing_status_str(metadata.licensing_status),
             ],
         )
         .map_err(|e| ContentRegistryError::Storage(e.to_string()))?;
@@ -217,6 +246,7 @@ mod tests {
             imported_at: Utc::now(),
             checksum: None,
             status: ContentStatus::Enabled,
+            licensing_status: LicensingStatus::Unknown,
         }
     }
 
@@ -229,6 +259,27 @@ mod tests {
         assert_eq!(loaded.name, "King James Version");
         assert_eq!(loaded.publisher, None);
         assert_eq!(loaded.status, ContentStatus::Enabled);
+        assert_eq!(loaded.licensing_status, LicensingStatus::Unknown);
+    }
+
+    #[test]
+    fn licensing_status_round_trips_through_every_variant() {
+        let registry = migrated_registry();
+        let variants = [
+            LicensingStatus::VerifiedPublicDomain,
+            LicensingStatus::VerifiedRedistributable,
+            LicensingStatus::LicensedForCip,
+            LicensingStatus::Unknown,
+            LicensingStatus::Restricted,
+        ];
+        for (i, variant) in variants.iter().enumerate() {
+            let mut metadata = unknown_kjv();
+            metadata.id = format!("bible:TEST{i}");
+            metadata.licensing_status = *variant;
+            registry.register(&metadata).unwrap();
+            let loaded = registry.get(&metadata.id).unwrap().unwrap();
+            assert_eq!(loaded.licensing_status, *variant);
+        }
     }
 
     #[test]

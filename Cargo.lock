@@ -625,6 +625,7 @@ name = "cip-integrations-bible"
 version = "0.1.0"
 dependencies = [
  "cip-core-bible",
+ "cip-core-content",
  "cip-database",
  "rusqlite",
  "serde",

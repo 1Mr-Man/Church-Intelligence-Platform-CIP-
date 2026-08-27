@@ -44,6 +44,61 @@ pub enum ContentStatus {
     Disabled,
 }
 
+/// What CIP actually knows about a content item's right to be stored and
+/// redistributed - the hard safety gate a bulk text importer (the Bible
+/// production dataset milestone) checks before writing anything, so a
+/// translation with uncertain rights (NIV, ESV, NASB, ...) can never enter
+/// the production dataset by accident. Distinct from the free-text
+/// `license`/`distribution` fields below, which record *what the source
+/// said*; this field records *what CIP has concluded from that*, and only
+/// ever moves away from [`LicensingStatus::Unknown`] on deliberate,
+/// evidence-backed classification at the call site that registers the
+/// content - never inferred, never guessed, never silently upgraded from
+/// `Unknown` to a permissive status. See `docs/bible-production-dataset.md`
+/// for the evidence standard applied to the first dataset that used this
+/// gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LicensingStatus {
+    /// Independently verified to be in the public domain (e.g. an
+    /// explicit, dated public-domain dedication from the source/publisher).
+    VerifiedPublicDomain,
+    /// Independently verified to carry an explicit, permissive
+    /// redistribution license (e.g. CC0, a stated "free to copy and
+    /// distribute" grant) that is not itself a public-domain dedication.
+    VerifiedRedistributable,
+    /// CIP (or its operator/church) holds an explicit license/agreement
+    /// with the rights holder permitting this specific distribution -
+    /// reserved for a future real licensing agreement; nothing in this
+    /// milestone sets it.
+    LicensedForCip,
+    /// The default, honest starting point for every content item: no
+    /// redistribution determination has been made. A bulk importer MUST
+    /// refuse to write production content while this is the status.
+    Unknown,
+    /// Explicitly known to be under restrictive/unclear copyright that
+    /// does not permit CIP's redistribution (e.g. a mainstream commercial
+    /// translation with no license on file) - stronger than `Unknown`:
+    /// this is a deliberate "never import this" marker, not just "not yet
+    /// checked."
+    Restricted,
+}
+
+impl LicensingStatus {
+    /// Whether a bulk importer may write content carrying this status into
+    /// a production dataset table. Only a status backed by actual evidence
+    /// clears the gate - `Unknown` and `Restricted` never do, regardless of
+    /// how confident the caller feels.
+    pub fn permits_bulk_import(self) -> bool {
+        matches!(
+            self,
+            LicensingStatus::VerifiedPublicDomain
+                | LicensingStatus::VerifiedRedistributable
+                | LicensingStatus::LicensedForCip
+        )
+    }
+}
+
 /// Provenance/licensing metadata for one locally-installed content item.
 ///
 /// Every field that describes a real-world fact CIP cannot independently
@@ -81,6 +136,13 @@ pub struct ContentMetadata {
     /// identical content is detectable. `None` when not computed.
     pub checksum: Option<String>,
     pub status: ContentStatus,
+    /// What CIP has independently concluded about this item's right to be
+    /// stored/redistributed - see [`LicensingStatus`]'s docs. Defaults to
+    /// `Unknown` at every call site that has no real evidence; a bulk
+    /// importer gates on this, never on the free-text `license` field
+    /// above (which only records what a source *said*, not what CIP has
+    /// verified).
+    pub licensing_status: LicensingStatus,
 }
 
 #[derive(Debug, Error)]
@@ -189,7 +251,17 @@ mod tests {
             imported_at: Utc::now(),
             checksum: None,
             status: ContentStatus::Enabled,
+            licensing_status: LicensingStatus::Unknown,
         }
+    }
+
+    #[test]
+    fn only_evidence_backed_licensing_statuses_permit_bulk_import() {
+        assert!(LicensingStatus::VerifiedPublicDomain.permits_bulk_import());
+        assert!(LicensingStatus::VerifiedRedistributable.permits_bulk_import());
+        assert!(LicensingStatus::LicensedForCip.permits_bulk_import());
+        assert!(!LicensingStatus::Unknown.permits_bulk_import());
+        assert!(!LicensingStatus::Restricted.permits_bulk_import());
     }
 
     #[test]

@@ -231,14 +231,21 @@ that metadata gets there in the first place.
 
 ### Translations
 
-Only `KJV` is seeded in this development environment
-(`database/seeds/dev_seed.sql`), so translation handling is validated
-against that one translation; broader multi-translation validation awaits
-a fuller Bible dataset - no additional translations were invented for
-testing, per the phase's own constraint. `DEFAULT_TRANSLATION_ID`
-(`state.rs`) is still `"KJV"` and is applied consistently by every
-presentation command; nothing here assumes or silently substitutes a
-different translation than the one requested.
+Only `KJV` (the tiny development fixture) was seeded when this section
+was originally written; the real Bible dataset production import
+milestone (see [`docs/bible-production-dataset.md`](bible-production-dataset.md))
+subsequently installed a second, complete translation - the Berean
+Standard Bible (`BSB`) - so both now exist side by side. `DEFAULT_TRANSLATION_ID`
+(`state.rs`) remains `"KJV"` (unchanged, to keep every earlier phase's
+existing test assumptions intact); every presentation command
+(`preview_scripture`, `preview_presentation`, `prepare_presentation`,
+`create_manual_presentation`) accepts an optional `translationId`
+parameter that defaults to `DEFAULT_TRANSLATION_ID` when omitted, and
+now also checks the Content Registry's enabled/disabled status before
+resolving any translation (`ensure_translation_selectable` in
+`commands.rs`) - nothing here assumes or silently substitutes a
+different translation than the one requested, and a disabled translation
+is rejected explicitly rather than silently falling back.
 
 ## Renderer & template
 

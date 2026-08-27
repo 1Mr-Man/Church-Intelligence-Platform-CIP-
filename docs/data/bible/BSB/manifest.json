@@ -1,0 +1,22 @@
+{
+  "translation_id": "BSB",
+  "title": "Berean Standard Bible",
+  "language": "en",
+  "edition": "Standard text (no interlinear alignment, no Strong's numbers), 66 books",
+  "source": "lyteword/bsb (GitHub repository, per-chapter Markdown transcription of the Berean Standard Bible; repository content dedicated to CC0 1.0 Universal)",
+  "source_reference": "https://github.com/lyteword/bsb",
+  "source_commit": "808caa61129a5fcd72623cd4b097aab972f5341b",
+  "source_commit_date": "2026-03-14",
+  "underlying_text_source": "bereanbible.com / berean.bible (the Berean Standard Bible project)",
+  "underlying_text_rights_statement": "\"The Berean Bible and Majority Bible texts are officially placed into the public domain as of April 30, 2023 ... Licensing is not required for any use.\" (quoted in the source repository's README, citing berean.bible/licensing.htm)",
+  "licensing_status": "verified_public_domain",
+  "license": "Public Domain",
+  "dataset_version": "bsb-1.0",
+  "checksum": "d4335582ff26a3ac",
+  "checksum_algorithm": "FNV-1a 64-bit over translation_id + every (book, chapter, verse, text) row, sorted, joined with '|' and newline-separated - see cip_integrations_bible::importer::compute_checksum",
+  "total_books": 66,
+  "total_chapters": 1189,
+  "total_verses": 31086,
+  "importer": "cip_integrations_bible::import_bible_dataset (transactional, licensing-gated)",
+  "note_on_imported_at": "The actual per-installation import timestamp is recorded dynamically in content_registry.imported_at at install time - this manifest is a static description of the dataset asset itself, not a record of any one installation."
+}

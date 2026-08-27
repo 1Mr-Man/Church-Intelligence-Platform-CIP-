@@ -1109,7 +1109,7 @@ export function LiveChurchBrain() {
                   <p className="live-brain__hint">
                     {item.contentType} &middot; {item.language} &middot; version {item.version} &middot; publisher:{" "}
                     {item.publisher ?? "UNKNOWN"} &middot; license: {item.license ?? "UNKNOWN"} &middot; distribution:{" "}
-                    {item.distribution ?? "UNKNOWN"}
+                    {item.distribution ?? "UNKNOWN"} &middot; licensing status: {item.licensingStatus}
                   </p>
                   {integrity && (
                     <p className="live-brain__hint">

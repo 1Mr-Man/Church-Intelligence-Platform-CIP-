@@ -58,6 +58,7 @@ pub fn register_dev_seed_content_if_missing(
         imported_at: Utc::now(),
         checksum: None,
         status: ContentStatus::Enabled,
+        licensing_status: cip_core_content::LicensingStatus::Unknown,
     })
 }
 
@@ -70,6 +71,12 @@ pub fn import_and_register(
     registry: &dyn ContentRegistry,
     dataset: &BibleDatasetInput,
 ) -> Result<ImportReport, ContentError> {
+    // Bulk-import validation (including the licensing safety gate) has
+    // already happened inside `import_bible_dataset` by the time this
+    // returns `Ok` - a rejected dataset never reaches this line at all,
+    // so the registry is only ever asked to register content that has
+    // already cleared the gate (section 19: "do not mark enabled before
+    // successful validation/import").
     let report = import_bible_dataset(conn, dataset)?;
 
     let id = bible_content_id(&report.translation_id);
@@ -92,6 +99,7 @@ pub fn import_and_register(
         imported_at: Utc::now(),
         checksum: Some(report.checksum.clone()),
         status,
+        licensing_status: report.licensing_status,
     })?;
 
     Ok(report)
@@ -153,6 +161,7 @@ mod tests {
                 license: Some("public domain".to_string()),
                 distribution: Some("public domain".to_string()),
                 dataset_version: "1.0".to_string(),
+                licensing_status: "verified_public_domain".to_string(),
             },
             verses: vec![VerseInput {
                 book: "Romans".to_string(),
@@ -178,6 +187,24 @@ mod tests {
         assert_eq!(metadata.publisher.as_deref(), Some("Test Publisher"));
         assert_eq!(metadata.checksum.as_deref(), Some(report.checksum.as_str()));
         assert_eq!(metadata.status, ContentStatus::Enabled);
+        assert_eq!(
+            metadata.licensing_status,
+            cip_core_content::LicensingStatus::VerifiedPublicDomain
+        );
+    }
+
+    #[test]
+    fn an_unverified_licensing_status_is_never_registered_and_never_enabled() {
+        let conn = migrated_conn();
+        let reg = SqliteContentRegistry::new(migrated_conn());
+        let mut dataset = small_dataset();
+        dataset.translation.licensing_status = "unknown".to_string();
+
+        assert!(import_and_register(&conn, &reg, &dataset).is_err());
+        assert!(
+            reg.get("bible:TEST").unwrap().is_none(),
+            "a rejected import must never reach the content registry at all"
+        );
     }
 
     #[test]
@@ -193,5 +220,200 @@ mod tests {
             reg.get("bible:TEST").unwrap().unwrap().status,
             ContentStatus::Disabled
         );
+    }
+
+    /// The primary milestone test (spec section 44): the real, complete,
+    /// checked-in BSB production dataset, imported through the exact same
+    /// path the real app uses at startup, proves every acceptance
+    /// criterion in one place - 66 books, valid structure, deterministic
+    /// checksum, correct registry metadata, idempotent re-import,
+    /// real-text search, translation isolation, presentation-ready - all
+    /// against the real SQLite-backed provider, never a fixture.
+    #[test]
+    fn phase_real_bible_dataset_full_validation() {
+        use cip_core_bible::{check_bible_integrity, search_bible, IntegrityStatus};
+        use cip_integrations_bible::SqliteBibleProvider;
+
+        let conn = migrated_conn();
+        let reg = SqliteContentRegistry::new(migrated_conn());
+        let dataset = crate::bible_production_dataset::bsb_dataset();
+
+        // --- import + registry -------------------------------------------------
+        let first = import_and_register(&conn, &reg, &dataset).unwrap();
+        assert_eq!(
+            first.translation_id,
+            crate::bible_production_dataset::BSB_TRANSLATION_ID
+        );
+        assert_eq!(
+            first.books, 66,
+            "the real dataset must cover the complete 66-book canon"
+        );
+        assert_eq!(
+            first.invalid, 0,
+            "no row in the checked-in production dataset should be rejected"
+        );
+        assert!(
+            first.imported > 30_000,
+            "expected tens of thousands of real verses, got {}",
+            first.imported
+        );
+        assert_eq!(first.already_present, 0);
+
+        let metadata = reg.get("bible:BSB").unwrap().unwrap();
+        assert_eq!(
+            metadata.status,
+            ContentStatus::Enabled,
+            "dataset enabled only after successful validation/import"
+        );
+        assert_eq!(
+            metadata.licensing_status,
+            cip_core_content::LicensingStatus::VerifiedPublicDomain
+        );
+        assert_eq!(metadata.checksum.as_deref(), Some(first.checksum.as_str()));
+
+        // --- idempotent re-import -----------------------------------------------
+        let second = import_and_register(&conn, &reg, &dataset).unwrap();
+        assert_eq!(
+            second.imported, 0,
+            "a second import of the same dataset must insert nothing new"
+        );
+        assert_eq!(second.already_present, first.imported);
+        assert_eq!(
+            second.checksum, first.checksum,
+            "identical content must produce an identical checksum"
+        );
+
+        // --- a second translation, imported into the same database, for the
+        //     translation-isolation check below - done here, on `conn`
+        //     directly, before `conn` moves into the provider below.
+        let mut kjv_dataset = dataset.clone();
+        kjv_dataset.translation.id = "KJV".to_string();
+        kjv_dataset.translation.abbreviation = "KJV".to_string();
+        kjv_dataset.verses = vec![cip_integrations_bible::VerseInput {
+            book: "JHN".to_string(),
+            chapter: 3,
+            verse: 16,
+            text: "KJV WORDING - for testing isolation only".to_string(),
+        }];
+        cip_integrations_bible::import_bible_dataset(&conn, &kjv_dataset).unwrap();
+
+        // --- 66-book structural integrity, against the real provider ------------
+        let provider = SqliteBibleProvider::new(conn);
+        let report = check_bible_integrity(&provider, "BSB").unwrap();
+        assert_eq!(
+            report.status,
+            IntegrityStatus::Valid,
+            "issues: {:?}",
+            report.issues
+        );
+        assert_eq!(report.books_present, 66);
+        assert_eq!(report.books_expected, 66);
+        assert!(report.issues.is_empty());
+
+        // --- exact verse lookup, using the real imported text --------------------
+        let provider: &dyn cip_core_bible::BibleProvider = &provider;
+        for (book, chapter, verse, expected_substring) in [
+            ("GEN", 1, 1, "In the beginning"),
+            ("JHN", 3, 16, "God so loved the world"),
+            ("ROM", 8, 28, "God works all things together for the good"),
+            ("ROM", 8, 31, "who can be against us"),
+            ("PSA", 23, 1, "my shepherd"),
+            ("REV", 22, 21, "grace of the Lord Jesus"),
+            ("MAT", 1, 1, "genealogy of Jesus Christ"),
+        ] {
+            let reference = cip_core_bible::ScriptureReference::single("BSB", book, chapter, verse);
+            let found = provider.get_verse(&reference).unwrap().unwrap_or_else(|| {
+                panic!("{book} {chapter}:{verse} missing from the real imported dataset")
+            });
+            assert!(
+                found.text.contains(expected_substring),
+                "{book} {chapter}:{verse} = {:?}, expected it to contain {:?}",
+                found.text,
+                expected_substring
+            );
+        }
+
+        // --- chapter, range, and free-text search --------------------------------
+        let chapter_results = search_bible(provider, "BSB", "1 Corinthians 13").unwrap();
+        assert_eq!(chapter_results.len(), 13, "1 Corinthians 13 has 13 verses");
+        assert_eq!(chapter_results[0].verse, 1);
+
+        let range_results = search_bible(provider, "BSB", "Romans 8:28-31").unwrap();
+        assert_eq!(
+            range_results.iter().map(|r| r.verse).collect::<Vec<_>>(),
+            vec![28, 29, 30, 31]
+        );
+        assert!(
+            search_bible(provider, "BSB", "Romans 8:31-28").is_err(),
+            "an inverted range must be rejected, not silently reordered"
+        );
+
+        let free_text = search_bible(provider, "BSB", "shepherd").unwrap();
+        assert!(free_text
+            .iter()
+            .any(|r| r.book == "PSA" && r.chapter == 23 && r.verse == 1));
+
+        // invalid references never produce results
+        assert!(search_bible(provider, "BSB", "Romans 8:999")
+            .unwrap()
+            .is_empty());
+        assert!(search_bible(provider, "BSB", "Fakebook 1:1")
+            .unwrap()
+            .is_empty());
+
+        // --- translation isolation: requesting BSB never returns KJV, and
+        //     vice versa, even though both exist in the same database
+        //     (the second translation was imported into `conn` above,
+        //     before it moved into the provider) -----------------------------
+        let bsb_john = provider
+            .get_verse(&cip_core_bible::ScriptureReference::single(
+                "BSB", "JHN", 3, 16,
+            ))
+            .unwrap()
+            .unwrap();
+        assert!(
+            bsb_john.text.contains("one and only"),
+            "BSB text must stay BSB text, not KJV's"
+        );
+        let kjv_john = provider
+            .get_verse(&cip_core_bible::ScriptureReference::single(
+                "KJV", "JHN", 3, 16,
+            ))
+            .unwrap()
+            .unwrap();
+        assert_eq!(kjv_john.text, "KJV WORDING - for testing isolation only");
+
+        // --- disabled-dataset safety: is_translation_selectable is the real
+        //     gate `search_bible`/presentation commands check -------------------
+        let enabled_lookup = reg.get("bible:BSB").unwrap();
+        assert!(crate::commands::is_translation_selectable(Ok(
+            enabled_lookup.as_ref()
+        )));
+        reg.set_enabled("bible:BSB", false).unwrap();
+        let disabled_lookup = reg.get("bible:BSB").unwrap();
+        assert!(!crate::commands::is_translation_selectable(Ok(
+            disabled_lookup.as_ref()
+        )));
+        reg.set_enabled("bible:BSB", true).unwrap();
+        let reenabled_lookup = reg.get("bible:BSB").unwrap();
+        assert!(crate::commands::is_translation_selectable(Ok(
+            reenabled_lookup.as_ref()
+        )));
+
+        // --- presentation-ready: the real imported text survives unchanged
+        //     through build_scripture_slide -----------------------------------
+        let (content, slide) =
+            crate::presentation::build_scripture_slide(provider, "BSB", "JHN 3:16").unwrap();
+        let cip_core_presentation::PresentationContent::Scripture {
+            translation_id,
+            text,
+            ..
+        } = &content
+        else {
+            panic!("expected Scripture content");
+        };
+        assert_eq!(translation_id, "BSB");
+        assert!(text.contains("one and only"));
+        assert!(slide.body_lines.join(" ").contains("one and only"));
     }
 }

@@ -9,6 +9,21 @@ export type ContentType = "bible" | "music" | "service" | "media" | "reference";
 export type ContentStatus = "enabled" | "disabled";
 
 /**
+ * What CIP has independently concluded about a content item's right to be
+ * stored/redistributed (real Bible dataset production import milestone) -
+ * distinct from `license`/`distribution` below, which only record what a
+ * source *said*. A bulk importer refuses to write anything while this
+ * would be `"unknown"` or `"restricted"`. See
+ * `docs/bible-production-dataset.md`.
+ */
+export type LicensingStatus =
+  | "verified_public_domain"
+  | "verified_redistributable"
+  | "licensed_for_cip"
+  | "unknown"
+  | "restricted";
+
+/**
  * Provenance/licensing metadata for one locally-installed content item.
  * Every field describing a real-world fact CIP cannot independently
  * verify is `string | null` - `null` means *unknown*, recorded honestly
@@ -28,6 +43,7 @@ export interface ContentMetadata {
   importedAt: string; // ISO-8601
   checksum: string | null;
   status: ContentStatus;
+  licensingStatus: LicensingStatus;
 }
 
 /** A deterministic report of one dataset import call - every number is
@@ -43,6 +59,7 @@ export interface ImportReport {
   invalid: number;
   errors: string[];
   checksum: string;
+  licensingStatus: LicensingStatus;
 }
 
 export type IntegrityStatus = "valid" | "incomplete" | "invalid";
@@ -78,6 +95,10 @@ export interface BibleDatasetTranslationInput {
   license?: string | null;
   distribution?: string | null;
   datasetVersion: string;
+  /** Required - the production safety gate rejects the whole import
+   * (writing nothing) unless this is `"verified_public_domain"`,
+   * `"verified_redistributable"`, or `"licensed_for_cip"`. */
+  licensingStatus: LicensingStatus;
 }
 
 export interface BibleDatasetVerseInput {

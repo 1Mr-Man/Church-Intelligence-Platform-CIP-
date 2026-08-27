@@ -5,6 +5,13 @@ importer, the dataset file format, validation, idempotency, versioning,
 and the integrity checker - and, first and most importantly, the
 licensing policy that governs all of it.
 
+**For CIP's first complete, production 66-book translation (Berean
+Standard Bible) - the exact selection/licensing decision record, dataset
+statistics, and end-to-end validation results - see
+[`docs/bible-production-dataset.md`](bible-production-dataset.md).**
+This document (`bible-datasets.md`) still describes the general-purpose
+importer/format/validation architecture that milestone reuses unchanged.
+
 ## Licensing policy - read this first
 
 **CIP does not bulk-download or scrape Bible translations from the
@@ -28,6 +35,21 @@ data a user supplies locally: nothing here validates *license terms*
 licensing metadata is not known, it is recorded as `null`/`UNKNOWN` (see
 [`docs/content-registry.md`](content-registry.md)) rather than guessed -
 never assume permissive licensing just because a field was left blank.
+
+**Hard production safety gate (added by the real Bible dataset
+milestone):** every `BibleDatasetInput` now carries a required
+`translation.licensingStatus` field
+(`cip_core_content::LicensingStatus` - `VerifiedPublicDomain`/
+`VerifiedRedistributable`/`LicensedForCip`/`Unknown`/`Restricted`), and
+`import_bible_dataset` refuses to write anything at all - zero database
+mutation - unless it is one of the first three. This applies to every
+import through this path, not just the production BSB dataset: a
+translation whose rights are unverified (`Unknown`) or explicitly
+restricted (`Restricted`, e.g. a mainstream commercial translation with
+no license on file) can never enter the database via this importer,
+regardless of who invokes it. See
+[`docs/bible-production-dataset.md`](bible-production-dataset.md#licensing-safety-gate)
+for the full design and test coverage.
 
 ## The importer
 
@@ -282,14 +304,22 @@ dependency with any network capability - verified structurally via
 
 ## What's actually installed
 
-In this development environment, the only installed content is the tiny
-`database/seeds/dev_seed.sql` fixture (KJV, 2 books, 6 verses),
-auto-registered in the Content Registry with every licensing field
-`UNKNOWN` (the dev seed never recorded real provenance - see
-[`docs/content-registry.md`](content-registry.md)). No production-scale
-Bible dataset was imported or is claimed to be installed - the importer,
-integrity checker, and search dispatcher are validated against both this
-real fixture and a larger synthetic dataset built purely for performance
-measurement (see [`docs/full-service-validation.md`](full-service-validation.md)'s
-performance section) - never against invented "real" translation
-content.
+As of the real Bible dataset production import milestone, two
+translations install into every non-Production launch's database (and
+one - the production dataset - into every launch including Production):
+
+- `database/seeds/dev_seed.sql`'s tiny KJV fixture (2 books, 6 verses),
+  auto-registered with every licensing field `UNKNOWN` (never applied in
+  Production; the dev seed never recorded real provenance) - unchanged
+  by this milestone, see [`docs/content-registry.md`](content-registry.md).
+- The complete, 66-book Berean Standard Bible (`bible:BSB`, `licensingStatus`
+  `verified_public_domain`), installed idempotently at every launch in
+  every environment via `content::import_and_register` - see
+  [`docs/bible-production-dataset.md`](bible-production-dataset.md) for
+  the full selection/licensing/validation record.
+
+The importer, integrity checker, and search dispatcher are validated
+against the real dev fixture, the real complete BSB dataset, and a
+larger synthetic dataset built purely for performance measurement (see
+[`docs/full-service-validation.md`](full-service-validation.md)'s
+performance section).

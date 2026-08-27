@@ -1,4 +1,5 @@
 mod acoustic;
+mod bible_production_dataset;
 mod commands;
 mod config;
 mod content;
@@ -148,6 +149,32 @@ pub fn run() {
             if config.environment != config::AppEnvironment::Production {
                 content::register_dev_seed_content_if_missing(content_registry.as_ref())?;
             }
+
+            // Real Bible dataset production import milestone: the complete
+            // 66-book Berean Standard Bible (docs/bible-production-dataset.md)
+            // installs here, idempotently, in every environment including
+            // Production - unlike the dev fixture above, this is real
+            // product content the app always needs, not test data.
+            // `import_and_register`'s licensing gate and transactional
+            // writes make this safe to call on every launch: the first
+            // launch inserts everything, every later launch finds it all
+            // already present and writes nothing (see
+            // `bible_production_dataset.rs`'s module docs).
+            let bsb_report = content::import_and_register(
+                &db,
+                content_registry.as_ref(),
+                &bible_production_dataset::bsb_dataset(),
+            )?;
+            log::info!(
+                target: LogCategory::Database.target(),
+                "{} production Bible dataset: {} book(s), {} chapter(s), {} verse(s) total ({} imported, {} already present)",
+                bible_production_dataset::BSB_TRANSLATION_ID,
+                bsb_report.books,
+                bsb_report.chapters,
+                bsb_report.verses_total,
+                bsb_report.imported,
+                bsb_report.already_present
+            );
 
             // Phase 2.0: the intelligence engine registry gets its own
             // BibleProvider connection too, mirroring `bible_conn`/

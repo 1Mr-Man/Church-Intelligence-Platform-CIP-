@@ -18,6 +18,7 @@
 //! conflicts (see the module docs' rationale in `docs/bible-datasets.md`).
 
 use cip_core_bible::book_alias::canonicalize_book;
+use cip_core_content::LicensingStatus;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -39,6 +40,26 @@ pub struct TranslationInput {
     #[serde(default)]
     pub distribution: Option<String>,
     pub dataset_version: String,
+    /// What CIP has independently concluded about this dataset's right to
+    /// be redistributed (`cip_core_content::LicensingStatus`, serialized
+    /// as its snake_case variant name, e.g. `"verified_public_domain"`) -
+    /// required, never inferred from the free-text `license`/`distribution`
+    /// fields above. The hard production safety gate (section 5/16):
+    /// [`import_bible_dataset`] refuses to write anything at all unless
+    /// this parses to a status [`LicensingStatus::permits_bulk_import`]
+    /// accepts.
+    pub licensing_status: String,
+}
+
+fn parse_licensing_status(value: &str) -> Option<LicensingStatus> {
+    match value {
+        "verified_public_domain" => Some(LicensingStatus::VerifiedPublicDomain),
+        "verified_redistributable" => Some(LicensingStatus::VerifiedRedistributable),
+        "licensed_for_cip" => Some(LicensingStatus::LicensedForCip),
+        "unknown" => Some(LicensingStatus::Unknown),
+        "restricted" => Some(LicensingStatus::Restricted),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -65,6 +86,11 @@ pub struct BibleDatasetInput {
 pub enum ImportError {
     #[error("invalid translation metadata: {0}")]
     InvalidTranslationMetadata(String),
+    /// The production safety gate (section 5): `licensing_status` was
+    /// missing/unparseable, or parsed to a status that does not permit
+    /// bulk import (`Unknown`/`Restricted`). No database write occurs.
+    #[error("licensing status not verified for redistribution: {0}")]
+    LicensingNotVerified(String),
     #[error("database error: {0}")]
     Database(String),
 }
@@ -101,6 +127,10 @@ pub struct ImportReport {
     /// same checksum, so a re-import of unchanged content is detectable
     /// without depending on row insertion order.
     pub checksum: String,
+    /// The licensing status this import was gated on - always one that
+    /// [`LicensingStatus::permits_bulk_import`] accepts, since any other
+    /// value would have already returned `Err` before any write.
+    pub licensing_status: LicensingStatus,
 }
 
 fn fnv1a_hash(bytes: &[u8]) -> u64 {
@@ -151,6 +181,24 @@ pub fn import_bible_dataset(
             "dataset_version must not be empty".to_string(),
         ));
     }
+    // The hard production safety gate (section 5): a translation whose
+    // redistribution rights are unknown or not explicitly verified must
+    // never be importable. Checked before any row is even validated, let
+    // alone written - a rejected dataset leaves the database completely
+    // unchanged.
+    let licensing_status =
+        parse_licensing_status(&translation.licensing_status).ok_or_else(|| {
+            ImportError::LicensingNotVerified(format!(
+                "unrecognized licensingStatus {:?} - refusing import",
+                translation.licensing_status
+            ))
+        })?;
+    if !licensing_status.permits_bulk_import() {
+        return Err(ImportError::LicensingNotVerified(format!(
+            "translation {:?} has licensing status {:?}, which does not permit bulk import",
+            translation.id, licensing_status
+        )));
+    }
 
     let mut errors = Vec::new();
     let mut valid_rows: Vec<(String, u32, u32, String)> = Vec::new();
@@ -197,7 +245,16 @@ pub fn import_bible_dataset(
 
     let checksum = compute_checksum(&translation.id, &valid_rows);
 
-    conn.execute(
+    // Every write below happens in one transaction: atomic (a mid-import
+    // failure leaves the database exactly as it was before this call, per
+    // section 16), and - for a complete production dataset's tens of
+    // thousands of verse rows - far faster than one autocommit per
+    // `INSERT` (section 42/43). `unchecked_transaction` only needs `&self`,
+    // so this function's signature (and every existing caller) is
+    // unchanged.
+    let tx = conn.unchecked_transaction()?;
+
+    tx.execute(
         "INSERT OR IGNORE INTO bible_translations (id, name, abbreviation, language, is_local)
          VALUES (?1, ?2, ?3, ?4, 1)",
         params![
@@ -227,7 +284,7 @@ pub fn import_bible_dataset(
             cip_core_bible::Testament::Old => "old",
             cip_core_bible::Testament::New => "new",
         };
-        conn.execute(
+        tx.execute(
             "INSERT OR IGNORE INTO bible_books
                 (translation_id, code, name, testament, chapter_count, book_order)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -251,7 +308,7 @@ pub fn import_bible_dataset(
             .iter()
             .filter(|(b, c, ..)| b == book_code && c == chapter)
             .count() as u32;
-        conn.execute(
+        tx.execute(
             "INSERT OR IGNORE INTO bible_chapters
                 (translation_id, book_code, chapter_number, verse_count)
              VALUES (?1, ?2, ?3, ?4)",
@@ -262,7 +319,7 @@ pub fn import_bible_dataset(
     let mut imported = 0usize;
     let mut already_present = 0usize;
     for (book_code, chapter, verse, text) in &valid_rows {
-        let changed = conn.execute(
+        let changed = tx.execute(
             "INSERT OR IGNORE INTO bible_verses
                 (translation_id, book_code, chapter_number, verse_number, text)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -275,6 +332,8 @@ pub fn import_bible_dataset(
         }
     }
 
+    tx.commit()?;
+
     Ok(ImportReport {
         translation_id: translation.id.clone(),
         dataset_version: translation.dataset_version.clone(),
@@ -286,6 +345,7 @@ pub fn import_bible_dataset(
         invalid: errors.len(),
         errors,
         checksum,
+        licensing_status,
     })
 }
 
@@ -312,6 +372,7 @@ mod tests {
                 license: Some("public domain".to_string()),
                 distribution: Some("public domain".to_string()),
                 dataset_version: "1.0".to_string(),
+                licensing_status: "verified_public_domain".to_string(),
             },
             verses: vec![
                 VerseInput {
@@ -485,6 +546,69 @@ mod tests {
             .query_row("SELECT count(*) FROM bible_verses", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn refuses_import_when_licensing_status_is_unknown_and_writes_nothing() {
+        let conn = migrated_conn();
+        let mut dataset = small_dataset();
+        dataset.translation.licensing_status = "unknown".to_string();
+
+        let err = import_bible_dataset(&conn, &dataset).unwrap_err();
+        assert!(matches!(err, ImportError::LicensingNotVerified(_)));
+
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM bible_verses", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "an unverified translation must write nothing at all"
+        );
+    }
+
+    #[test]
+    fn refuses_import_when_licensing_status_is_restricted_and_writes_nothing() {
+        let conn = migrated_conn();
+        let mut dataset = small_dataset();
+        dataset.translation.licensing_status = "restricted".to_string();
+
+        let err = import_bible_dataset(&conn, &dataset).unwrap_err();
+        assert!(matches!(err, ImportError::LicensingNotVerified(_)));
+
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM bible_verses", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn refuses_import_when_licensing_status_is_unrecognized_text() {
+        let conn = migrated_conn();
+        let mut dataset = small_dataset();
+        dataset.translation.licensing_status = "trust me bro".to_string();
+
+        let err = import_bible_dataset(&conn, &dataset).unwrap_err();
+        assert!(matches!(err, ImportError::LicensingNotVerified(_)));
+    }
+
+    #[test]
+    fn permits_import_for_every_evidence_backed_licensing_status() {
+        for (i, status) in [
+            "verified_public_domain",
+            "verified_redistributable",
+            "licensed_for_cip",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let conn = migrated_conn();
+            let mut dataset = small_dataset();
+            dataset.translation.id = format!("TEST{i}");
+            dataset.translation.licensing_status = status.to_string();
+
+            let report = import_bible_dataset(&conn, &dataset).unwrap();
+            assert_eq!(report.imported, 3);
+        }
     }
 
     #[test]

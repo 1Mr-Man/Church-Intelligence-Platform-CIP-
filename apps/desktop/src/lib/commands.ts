@@ -173,26 +173,43 @@ export function rejectSuggestion(suggestionId: string): Promise<Suggestion> {
 // `preparePresentation` remains strictly gated on an approved suggestion -
 // see `docs/presentation.md`.
 
-/** Previews a suggestion's scripture reference - works on a still-`pending`
- * suggestion, unlike `preparePresentation`. */
-export function previewPresentation(suggestionId: string): Promise<PresentationPreview> {
-  return invokeCommand("preview_presentation", { suggestionId });
+/** `translationId` defaults to the app's default translation
+ * (`DEFAULT_TRANSLATION_ID` on the Rust side) when omitted - same
+ * reasoning as `searchBible`. Previews a suggestion's scripture
+ * reference - works on a still-`pending` suggestion, unlike
+ * `preparePresentation`. */
+export function previewPresentation(
+  suggestionId: string,
+  translationId?: string,
+): Promise<PresentationPreview> {
+  return invokeCommand("preview_presentation", { suggestionId, translationId: translationId ?? null });
 }
 
 /** Previews an arbitrary reference (e.g. from manual Bible search) with no
- * suggestion involved. */
-export function previewScripture(reference: string): Promise<PresentationPreview> {
-  return invokeCommand("preview_scripture", { reference });
+ * suggestion involved. `translationId` defaults as above. */
+export function previewScripture(
+  reference: string,
+  translationId?: string,
+): Promise<PresentationPreview> {
+  return invokeCommand("preview_scripture", { reference, translationId: translationId ?? null });
 }
 
-export function preparePresentation(suggestionId: string): Promise<PresentationItem> {
-  return invokeCommand("prepare_presentation", { suggestionId });
+/** `translationId` defaults as above. */
+export function preparePresentation(
+  suggestionId: string,
+  translationId?: string,
+): Promise<PresentationItem> {
+  return invokeCommand("prepare_presentation", { suggestionId, translationId: translationId ?? null });
 }
 
 /** Creates a prepared presentation item directly from a reference, with no
- * suggestion or speech recognition involved - the manual fallback. */
-export function createManualPresentation(reference: string): Promise<PresentationItem> {
-  return invokeCommand("create_manual_presentation", { reference });
+ * suggestion or speech recognition involved - the manual fallback.
+ * `translationId` defaults as above. */
+export function createManualPresentation(
+  reference: string,
+  translationId?: string,
+): Promise<PresentationItem> {
+  return invokeCommand("create_manual_presentation", { reference, translationId: translationId ?? null });
 }
 
 /** What's currently prepared for the active service (never includes

@@ -125,7 +125,10 @@ describe("commands.ts Tauri IPC guard", () => {
 
     await previewPresentation("suggestion-1");
 
-    expect(invokeMock).toHaveBeenCalledWith("preview_presentation", { suggestionId: "suggestion-1" });
+    expect(invokeMock).toHaveBeenCalledWith("preview_presentation", {
+      suggestionId: "suggestion-1",
+      translationId: null,
+    });
   });
 
   it("previewScripture calls preview_scripture with the raw reference", async () => {
@@ -134,7 +137,10 @@ describe("commands.ts Tauri IPC guard", () => {
 
     await previewScripture("ROM 8:28");
 
-    expect(invokeMock).toHaveBeenCalledWith("preview_scripture", { reference: "ROM 8:28" });
+    expect(invokeMock).toHaveBeenCalledWith("preview_scripture", {
+      reference: "ROM 8:28",
+      translationId: null,
+    });
   });
 
   it("createManualPresentation calls create_manual_presentation, not prepare_presentation", async () => {
@@ -143,7 +149,22 @@ describe("commands.ts Tauri IPC guard", () => {
 
     await createManualPresentation("JHN 3:16");
 
-    expect(invokeMock).toHaveBeenCalledWith("create_manual_presentation", { reference: "JHN 3:16" });
+    expect(invokeMock).toHaveBeenCalledWith("create_manual_presentation", {
+      reference: "JHN 3:16",
+      translationId: null,
+    });
+  });
+
+  it("createManualPresentation passes an explicit translationId through when given (real Bible dataset milestone)", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await createManualPresentation("JHN 3:16", "BSB");
+
+    expect(invokeMock).toHaveBeenCalledWith("create_manual_presentation", {
+      reference: "JHN 3:16",
+      translationId: "BSB",
+    });
   });
 
   it("openPresentationDisplay calls open_presentation_display with no arguments", async () => {

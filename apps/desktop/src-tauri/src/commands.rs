@@ -211,7 +211,7 @@ pub fn app_health_check(state: State<'_, AppState>) -> Result<HealthReport, AppE
 /// hides one. Pulled out as a plain function (same reasoning as this
 /// module's other guards) so the decision is directly unit-testable
 /// without a full `AppState`.
-fn is_translation_selectable(
+pub(crate) fn is_translation_selectable(
     registry_lookup: Result<Option<&ContentMetadata>, &ContentRegistryError>,
 ) -> bool {
     !matches!(registry_lookup, Ok(Some(metadata)) if metadata.status == ContentStatus::Disabled)
@@ -1196,12 +1196,14 @@ pub struct PresentationDisplayPayload {
 
 fn preview_reference(
     reference: &str,
+    translation_id: &str,
     app: &AppHandle,
     state: &State<'_, AppState>,
 ) -> Result<PresentationPreview, AppError> {
+    ensure_translation_selectable(state, translation_id).map_err(log_and_return)?;
     let (content, slide) = presentation::build_scripture_slide(
         state.bible_provider.as_ref(),
-        DEFAULT_TRANSLATION_ID,
+        translation_id,
         reference,
     )
     .map_err(AppError::from)
@@ -1215,10 +1217,16 @@ fn preview_reference(
 /// approval, unlike `prepare_presentation` (section 14: "Preview and
 /// Prepare are separate actions"). This is the fix for the pre-1.4 UI bug
 /// where the operator's "Preview" button called the approval-gated
-/// prepare command directly.
+/// prepare command directly. `translationId` is optional and defaults to
+/// `DEFAULT_TRANSLATION_ID` (unchanged behavior for every existing
+/// caller); passing one explicitly lets the operator preview against a
+/// different installed, enabled translation (e.g. the real production
+/// dataset) without CIP ever silently substituting one translation for
+/// another (section 21).
 #[tauri::command]
 pub fn preview_presentation(
     suggestion_id: String,
+    translation_id: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<PresentationPreview, AppError> {
@@ -1234,20 +1242,24 @@ pub fn preview_presentation(
             "suggestion is not a scripture reference".to_string(),
         )));
     };
-    preview_reference(reference, &app, &state)
+    let translation_id = translation_id.unwrap_or_else(|| DEFAULT_TRANSLATION_ID.to_string());
+    preview_reference(reference, &translation_id, &app, &state)
 }
 
 /// Previews an arbitrary scripture reference with no suggestion involved -
 /// the manual Bible search path's preview (section 5/20: manual creation
-/// must work independently of speech recognition).
+/// must work independently of speech recognition). `translationId` is
+/// optional; see `preview_presentation`'s docs.
 #[tauri::command]
 pub fn preview_scripture(
     reference: String,
+    translation_id: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<PresentationPreview, AppError> {
     let reference = require_non_empty(&reference, "reference").map_err(log_and_return)?;
-    preview_reference(&reference, &app, &state)
+    let translation_id = translation_id.unwrap_or_else(|| DEFAULT_TRANSLATION_ID.to_string());
+    preview_reference(&reference, &translation_id, &app, &state)
 }
 
 /// Prepares (never projects) a presentation item from an approved
@@ -1257,10 +1269,13 @@ pub fn preview_scripture(
 #[tauri::command]
 pub fn prepare_presentation(
     suggestion_id: String,
+    translation_id: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<PresentationItem, AppError> {
     let id = parse_uuid(&suggestion_id).map_err(log_and_return)?;
+    let translation_id = translation_id.unwrap_or_else(|| DEFAULT_TRANSLATION_ID.to_string());
+    ensure_translation_selectable(&state, &translation_id).map_err(log_and_return)?;
     let db = state.db.lock().expect("db connection poisoned");
     let suggestion = persistence::get_suggestion(&db, id)
         .map_err(AppError::from)
@@ -1277,7 +1292,7 @@ pub fn prepare_presentation(
 
     let (content, _slide) = presentation::build_scripture_slide(
         state.bible_provider.as_ref(),
-        DEFAULT_TRANSLATION_ID,
+        &translation_id,
         reference,
     )
     .map_err(AppError::from)
@@ -1319,15 +1334,18 @@ pub fn prepare_presentation(
 #[tauri::command]
 pub fn create_manual_presentation(
     reference: String,
+    translation_id: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<PresentationItem, AppError> {
     let reference = require_non_empty(&reference, "reference").map_err(log_and_return)?;
+    let translation_id = translation_id.unwrap_or_else(|| DEFAULT_TRANSLATION_ID.to_string());
+    ensure_translation_selectable(&state, &translation_id).map_err(log_and_return)?;
     let service_id = current_service_id(&state).map_err(log_and_return)?;
 
     let (content, _slide) = presentation::build_scripture_slide(
         state.bible_provider.as_ref(),
-        DEFAULT_TRANSLATION_ID,
+        &translation_id,
         &reference,
     )
     .map_err(AppError::from)
@@ -1768,6 +1786,31 @@ pub fn correct_scripture_context(
     Ok(new_context)
 }
 
+/// Rejects an explicitly-disabled translation for any Bible operation that
+/// resolves one by id (search, preview, prepare, manual creation) - the
+/// real dataset-milestone counterpart to `is_translation_selectable`,
+/// which only ever filtered a *list*. Fails open the same way
+/// `is_translation_selectable` does: a translation with no registry entry
+/// at all, or a registry read error, is never blocked just because this
+/// bookkeeping hasn't caught up to it - only an explicit `Disabled` record
+/// blocks anything (section 20/21: no silent fallback, an explicit
+/// "unavailable" signal instead).
+fn ensure_translation_selectable(
+    state: &State<'_, AppState>,
+    translation_id: &str,
+) -> Result<(), AppError> {
+    let lookup = state
+        .content_registry
+        .get(&content::bible_content_id(translation_id));
+    if is_translation_selectable(lookup.as_ref().map(|opt| opt.as_ref())) {
+        Ok(())
+    } else {
+        Err(AppError::InvalidInput(format!(
+            "translation {translation_id:?} is disabled"
+        )))
+    }
+}
+
 // --- manual Bible search (works with no audio/speech/network) -------------
 
 #[tauri::command]
@@ -1778,6 +1821,7 @@ pub fn search_bible(
 ) -> Result<Vec<BibleSearchResult>, AppError> {
     let query = require_non_empty(&query, "query").map_err(log_and_return)?;
     let translation_id = translation_id.unwrap_or_else(|| DEFAULT_TRANSLATION_ID.to_string());
+    ensure_translation_selectable(&state, &translation_id).map_err(log_and_return)?;
     dispatch_bible_search(state.bible_provider.as_ref(), &translation_id, &query)
         .map_err(AppError::from)
         .map_err(log_and_return)
@@ -4261,6 +4305,7 @@ mod tests {
             imported_at: chrono::Utc::now(),
             checksum: None,
             status: ContentStatus::Enabled,
+            licensing_status: cip_core_content::LicensingStatus::Unknown,
         };
         assert!(is_translation_selectable(Ok(Some(&enabled))));
 

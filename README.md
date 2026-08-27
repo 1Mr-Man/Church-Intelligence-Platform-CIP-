@@ -17,7 +17,12 @@ Intelligence & Live Message Understanding**, **Phase 2.4 -
 Cross-Domain Intelligence & Correlation**, **Phase 2.4 - Service
 Intelligence**, **Phase 2.5 - Sermon Intelligence Foundation**,
 **Phase 2.6 - Sermon Intelligence**, and **Phase 2.7 - Content
-Intelligence**.
+Intelligence**. A separate release-readiness milestone (not a new
+intelligence phase) subsequently replaced the tiny development Bible
+fixture with a real, complete, legally-documented 66-book production
+translation - see [`docs/bible-production-dataset.md`](docs/bible-production-dataset.md) -
+and a local presentation display window (a second Tauri window under
+explicit operator control) - see [`docs/presentation.md`](docs/presentation.md).
 
 > **Roadmap note.** This repository's authoritative Phase 2 roadmap is:
 > 2.0 Intelligence Architecture -> 2.1 Unified Intelligence Event/Context

@@ -287,9 +287,31 @@ describe("domain contracts", () => {
       importedAt: new Date().toISOString(),
       checksum: null,
       status: "enabled",
+      licensingStatus: "unknown",
     };
     expect(metadata.publisher).toBeNull();
     expect(metadata.status).toBe("enabled");
+    expect(metadata.licensingStatus).toBe("unknown");
+  });
+
+  it("constructs a ContentMetadata for a verified-public-domain production dataset (real Bible dataset milestone)", () => {
+    const metadata: ContentMetadata = {
+      id: "bible:BSB",
+      contentType: "bible",
+      name: "Berean Standard Bible",
+      version: "bsb-1.0",
+      language: "en",
+      source: "user-provided import",
+      publisher: null,
+      copyright: null,
+      license: "Public Domain",
+      distribution: "Public domain dedication effective April 30, 2023",
+      importedAt: new Date().toISOString(),
+      checksum: "abc123",
+      status: "enabled",
+      licensingStatus: "verified_public_domain",
+    };
+    expect(metadata.licensingStatus).toBe("verified_public_domain");
   });
 
   it("constructs an ImportReport reflecting an actual dataset import", () => {
@@ -304,6 +326,7 @@ describe("domain contracts", () => {
       invalid: 0,
       errors: [],
       checksum: "abc123",
+      licensingStatus: "verified_public_domain",
     };
     expect(report.imported).toBe(report.versesTotal);
     expect(report.errors).toHaveLength(0);

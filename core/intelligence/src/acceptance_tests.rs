@@ -457,6 +457,7 @@ fn enabled_music_content() -> ContentMetadata {
         imported_at: Utc::now(),
         checksum: None,
         status: ContentStatus::Enabled,
+        licensing_status: cip_core_content::LicensingStatus::Unknown,
     }
 }
 

@@ -74,6 +74,7 @@ pub fn register_dev_seed_music_content_if_missing(
             imported_at: Utc::now(),
             checksum: None,
             status,
+            licensing_status: cip_core_content::LicensingStatus::Unknown,
         })?;
     }
     Ok(())
@@ -90,10 +91,14 @@ pub fn import_and_register_music(
 ) -> Result<ImportReport, MusicError> {
     let report = import_music_dataset(conn, dataset)?;
 
-    let status = registry
-        .get(&dataset.content_id)?
+    let existing = registry.get(&dataset.content_id)?;
+    let status = existing
+        .as_ref()
         .map(|existing| existing.status)
         .unwrap_or(ContentStatus::Enabled);
+    let licensing_status = existing
+        .map(|existing| existing.licensing_status)
+        .unwrap_or(cip_core_content::LicensingStatus::Unknown);
 
     registry.register(&ContentMetadata {
         id: dataset.content_id.clone(),
@@ -109,6 +114,7 @@ pub fn import_and_register_music(
         imported_at: Utc::now(),
         checksum: Some(report.checksum.clone()),
         status,
+        licensing_status,
     })?;
 
     Ok(report)
