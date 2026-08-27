@@ -3,6 +3,7 @@
  * its component enums (Rust) - the Live Church Brain's status header reads
  * directly from these, via `get_live_status`.
  */
+import type { ContentMetadata } from "./content";
 import type { AcousticEngineStatus, CurrentSong } from "./music";
 import type { AudioEngineStatus, ServiceSession } from "./service";
 
@@ -45,6 +46,11 @@ export interface LiveStatus {
   /** Phase 2.2: the operator-confirmed current song, if any - `null`
    * until an operator accepts a Music finding. */
   currentSong: CurrentSong | null;
+  /** Phase 3.0: the real production Bible dataset's own Content Registry
+   * row (name/version/licensing status/checksum), read fresh on every
+   * poll - reuses `ContentMetadata` unmodified. `null` means BSB has not
+   * (yet, or successfully) been imported/registered. */
+  bible: ContentMetadata | null;
 }
 
 /**

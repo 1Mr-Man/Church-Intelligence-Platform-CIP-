@@ -29,8 +29,8 @@ use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
 use cip_core_content::{ContentMetadata, ContentRegistryError, ContentStatus, ContentType};
 use cip_core_intelligence::{
     ContentCandidate, ContentIntelligenceEngine, ContextBounds, CrossDomainCorrelationEngine,
-    EngineCapability, IntelligenceContext, IntelligenceCorrelation, IntelligenceDomain,
-    IntelligenceFinding, IntelligenceInput, QueueAddOutcome, ServicePhase,
+    EngineCapability, FindingStatus, IntelligenceContext, IntelligenceCorrelation,
+    IntelligenceDomain, IntelligenceFinding, IntelligenceInput, QueueAddOutcome, ServicePhase,
 };
 use cip_core_music::{search_songs, MatchThresholds, MusicQuery, SongRecognitionCandidate};
 use cip_core_presentation::{PresentationContent, PresentationItem, PresentationItemStatus};
@@ -3579,6 +3579,35 @@ pub fn list_content_candidates(
         .collect())
 }
 
+/// Phase 3.0: content candidates the operator has already accepted, for
+/// the active service - the "Saved Content" view's read-only data source.
+/// Before this command existed, `accept_content_candidate` was a genuine
+/// dead end: the candidate's text (`working_concept`) became permanently
+/// unreachable in the running UI the moment it was accepted, since
+/// `list_content_candidates` only ever returns `pending()`
+/// (`Detected`/`Reviewed`). `ContentCandidateQueue::all()` already
+/// retained every candidate regardless of status - this only exposes that
+/// existing data over IPC, exactly the "smallest useful downstream
+/// action" a saved-content list needs; it still has no code path into
+/// `presentation::persist_prepared_item` or anything that could
+/// publish/schedule/project it.
+#[tauri::command]
+pub fn list_accepted_content_candidates(
+    state: State<'_, AppState>,
+) -> Result<Vec<ContentCandidate>, AppError> {
+    let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let candidates = state
+        .content_candidate_queue
+        .lock()
+        .expect("content_candidate_queue mutex poisoned");
+    Ok(candidates
+        .all()
+        .into_iter()
+        .filter(|c| c.service_id == service_id && c.status == FindingStatus::Accepted)
+        .cloned()
+        .collect())
+}
+
 /// Explicit operator acceptance of a content opportunity (spec section
 /// 11/35) - changes only the candidate's own status; has no code path into
 /// `presentation::persist_prepared_item` or anything else that could
@@ -4058,6 +4087,15 @@ pub struct LiveStatus {
     /// until an operator accepts a Music finding. See
     /// `cip_core_music::CurrentSong`'s docs.
     pub current_song: Option<cip_core_music::CurrentSong>,
+    /// Phase 3.0: the real production Bible dataset's own registry row
+    /// (name, version, licensing status, checksum), read fresh on every
+    /// poll - reuses `ContentMetadata` unmodified rather than inventing a
+    /// second Bible-readiness type. `None` means the dataset has not
+    /// (yet, or successfully) been imported/registered; a genuine
+    /// first-run condition every other domain in this struct already
+    /// models the same way (`Unavailable`/`Error`), now extended to
+    /// Bible/BSB, which `LiveStatus` never surfaced before this phase.
+    pub bible: Option<ContentMetadata>,
 }
 
 fn check_network_online() -> bool {
@@ -4162,6 +4200,18 @@ pub fn get_live_status(state: State<'_, AppState>) -> LiveStatus {
         .expect("current_song mutex poisoned")
         .clone();
 
+    // Phase 3.0: real Bible dataset readiness, alongside every other
+    // domain this function already reports. A registry lookup failure is
+    // treated the same as "not found" - `None` - never a panic, matching
+    // this whole function's "always returns a status, never fails"
+    // contract.
+    let bible = state
+        .content_registry
+        .get(&content::bible_content_id(
+            crate::bible_production_dataset::BSB_TRANSLATION_ID,
+        ))
+        .unwrap_or(None);
+
     LiveStatus {
         service,
         service_status,
@@ -4173,6 +4223,7 @@ pub fn get_live_status(state: State<'_, AppState>) -> LiveStatus {
         database_status,
         acoustic_status,
         current_song,
+        bible,
     }
 }
 
@@ -4436,6 +4487,7 @@ mod tests {
                 reason: Some("no acoustic recognizer configured".to_string()),
             },
             current_song: None,
+            bible: None,
         };
         let value = serde_json::to_value(&status).unwrap();
         assert!(value.get("serviceStatus").is_some());

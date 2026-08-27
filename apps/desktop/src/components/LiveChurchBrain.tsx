@@ -27,6 +27,7 @@ import type {
   TimelineEntry,
   TranscriptSegment,
 } from "../domain";
+import type { AppConfig } from "../config/appConfig";
 import * as commands from "../lib/commands";
 import * as liveEvents from "../lib/liveEvents";
 import { formatClockTime } from "../lib/format";
@@ -136,6 +137,10 @@ export function LiveChurchBrain() {
   const [error, setError] = useState<string | null>(null);
   const [serviceTitle, setServiceTitle] = useState("Sunday Morning Service");
   const [devices, setDevices] = useState<AudioDevice[]>([]);
+  // Phase 3.0: fetched once so "SPEECH UNAVAILABLE" can name the exact
+  // path CIP looked for a model at, instead of leaving the operator to
+  // guess. `getAppConfig` already existed (Phase 1) but no panel called it.
+  const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const [selectedDevice, setSelectedDevice] = useState("");
   const [manualText, setManualText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -191,6 +196,10 @@ export function LiveChurchBrain() {
   // final copy; candidates only ever appear from an explicit "Run
   // analysis" action or the accept/reject operator actions below.
   const [contentCandidates, setContentCandidates] = useState<ContentCandidate[]>([]);
+  // Phase 3.0: candidates the operator has already accepted, so accepting
+  // one is never a dead end - see docs/phase-3-first-use.md's "Saved
+  // Content" section.
+  const [savedContent, setSavedContent] = useState<ContentCandidate[]>([]);
   // Service Intelligence (Phase 2.4, per the authoritative Phase 2
   // roadmap - distinct from the correlation work above) - `serviceIntel`
   // is the read-only phase/freshness summary, polled alongside status;
@@ -251,6 +260,10 @@ export function LiveChurchBrain() {
     commands.getIntelligenceCapabilities().then(setIntelligenceCapabilities).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    commands.getAppConfig().then(setAppConfig).catch(() => {});
+  }, []);
+
   const activeServiceId = status?.service?.id;
   useEffect(() => {
     if (activeServiceId) {
@@ -275,6 +288,7 @@ export function LiveChurchBrain() {
       commands.getSermonFoundationState().then(setSermonFoundation).catch(() => {});
       commands.listSermonSegments().then(setSermonSegments).catch(() => {});
       commands.listContentCandidates().then(setContentCandidates).catch(() => {});
+      commands.listAcceptedContentCandidates().then(setSavedContent).catch(() => {});
     } else {
       setSuggestions([]);
       setApprovedSuggestions([]);
@@ -298,6 +312,7 @@ export function LiveChurchBrain() {
       setSermonFoundation(null);
       setSermonSegments([]);
       setContentCandidates([]);
+      setSavedContent([]);
     }
   }, [activeServiceId]);
 
@@ -398,9 +413,11 @@ export function LiveChurchBrain() {
       liveEvents.onContentCandidateDetected((candidate) =>
         setContentCandidates((prev) => [candidate, ...prev]),
       ),
-      liveEvents.onContentCandidateAccepted((candidate) =>
-        setContentCandidates((prev) => prev.filter((c) => c.id !== candidate.id)),
-      ),
+      liveEvents.onContentCandidateAccepted((candidate) => {
+        setContentCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
+        // Phase 3.0: an accepted candidate moves here, never disappears.
+        setSavedContent((prev) => [candidate, ...prev.filter((c) => c.id !== candidate.id)]);
+      }),
       liveEvents.onContentCandidateRejected((candidate) =>
         setContentCandidates((prev) => prev.filter((c) => c.id !== candidate.id)),
       ),
@@ -680,6 +697,14 @@ export function LiveChurchBrain() {
         {status?.speechStatus === "unavailable" && (
           <p className="live-brain__notice">
             SPEECH UNAVAILABLE &mdash; manual operation remains available (search, prepare, approve below).
+            {appConfig?.whisperModelPath && (
+              <>
+                {" "}
+                To enable live transcription, place a local Whisper model at{" "}
+                <code>{appConfig.whisperModelPath}</code> (or set the <code>CIP_WHISPER_MODEL_PATH</code>{" "}
+                environment variable to point elsewhere) and restart CIP.
+              </>
+            )}
           </p>
         )}
         {status?.audioStatus === "error" && (
@@ -1949,6 +1974,31 @@ export function LiveChurchBrain() {
             ))}
           </ul>
         )}
+
+        <details className="live-brain__panel">
+          <summary>Saved Content ({savedContent.length})</summary>
+          <p className="live-brain__hint">
+            Content candidates you have accepted, kept here so accepting one is never a dead end - copy the text you
+            need from below. Still never published, scheduled, or projected automatically.
+          </p>
+          {savedContent.length === 0 ? (
+            <p className="live-brain__hint">No accepted content yet.</p>
+          ) : (
+            <ul className="live-brain__suggestions">
+              {savedContent.map((candidate) => (
+                <li key={candidate.id} className="live-brain__suggestion-card">
+                  <div className="live-brain__suggestion-header">
+                    <strong>{candidate.titleOrLabel}</strong>
+                    <span className="live-brain__confidence">
+                      {candidate.candidateType.replace(/_/g, " ").toUpperCase()}
+                    </span>
+                  </div>
+                  <p className="live-brain__hint">{candidate.workingConcept}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </details>
       </section>
 
       <section className="live-brain__panel">

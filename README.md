@@ -18,11 +18,12 @@ Cross-Domain Intelligence & Correlation**, **Phase 2.4 - Service
 Intelligence**, **Phase 2.5 - Sermon Intelligence Foundation**,
 **Phase 2.6 - Sermon Intelligence**, **Phase 2.7 - Content
 Intelligence**, **Phase 2.8 - Cross-Domain Intelligence**, and **Phase
-2.9 - Unified Operator Workspace**, and **Phase 2.10 - Full Phase 2
-Validation & First-Use Readiness**. A separate release-readiness
-milestone (not a new intelligence phase) subsequently replaced the tiny
-development Bible fixture with a real, complete, legally-documented
-66-book production translation - see [`docs/bible-production-dataset.md`](docs/bible-production-dataset.md) -
+2.9 - Unified Operator Workspace**, **Phase 2.10 - Full Phase 2
+Validation & First-Use Readiness**, and **Phase 3.0 - First-Use
+Hardening**. A separate release-readiness milestone (not a new
+intelligence phase) subsequently replaced the tiny development Bible
+fixture with a real, complete, legally-documented 66-book production
+translation - see [`docs/bible-production-dataset.md`](docs/bible-production-dataset.md) -
 and a local presentation display window (a second Tauri window under
 explicit operator control) - see [`docs/presentation.md`](docs/presentation.md).
 
@@ -30,11 +31,22 @@ explicit operator control) - see [`docs/presentation.md`](docs/presentation.md).
 real running codebase - not just its documentation - and closed the one
 real gap it found (Bible detection/context/suggestion had never been
 tested against the real BSB dataset, only the dev fixture). Verdict:
-**first-use ready under documented conditions** (live speech requires an
-operator-supplied Whisper model or manual transcript entry; acoustic
-music recognition is not available, text/lyric matching is). See
+**first-use ready under documented conditions**. See
 [`docs/phase-2-validation.md`](docs/phase-2-validation.md) for the full
 readiness matrix, evidence, and conditions.
+
+**Phase 3.0** hardened the four genuine first-use gaps that validation
+found: the speech model path is now configurable
+(`CIP_WHISPER_MODEL_PATH`) and the "speech unavailable" notice now names
+the exact fix; accepting a Content Candidate is no longer a dead end
+(a "Saved Content" view); and Bible/BSB readiness is now visible in the
+always-visible header, with a dataset-import failure degrading
+gracefully instead of crashing the app. **If you are a church operator
+setting CIP up for a real service, start with
+[`docs/first-use.md`](docs/first-use.md)** - a Quick Start, configuration
+guide, and troubleshooting table written for a non-developer. See
+[`docs/phase-3-first-use.md`](docs/phase-3-first-use.md) for the
+engineering record of what changed and why.
 
 > **Roadmap note.** This repository's authoritative Phase 2 roadmap is:
 > 2.0 Intelligence Architecture -> 2.1 Unified Intelligence Event/Context

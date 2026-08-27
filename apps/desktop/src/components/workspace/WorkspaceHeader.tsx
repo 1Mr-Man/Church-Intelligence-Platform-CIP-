@@ -67,6 +67,14 @@ export function WorkspaceHeader({
           <dd>{status?.currentSong ? status.currentSong.songId : "None confirmed"}</dd>
         </div>
         <div>
+          <dt>Bible</dt>
+          <dd>
+            {status?.bible
+              ? `${status.bible.name} — ${status.bible.status.toUpperCase()} (${status.bible.licensingStatus.replace(/_/g, " ").toUpperCase()})`
+              : "NOT AVAILABLE"}
+          </dd>
+        </div>
+        <div>
           <dt>Scripture</dt>
           <dd>
             {lastReference

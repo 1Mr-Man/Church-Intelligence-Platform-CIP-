@@ -11,5 +11,10 @@ export interface AppConfig {
   dataDir: string;
   databasePath: string;
   modelDir: string;
+  /** Phase 3.0: exact file path the speech engine looks for a local
+   * Whisper model at - overridable via CIP_WHISPER_MODEL_PATH. Surfaced in
+   * the UI so "speech unavailable" names where to put a model, not just
+   * that one is missing. */
+  whisperModelPath: string;
   logDir: string;
 }

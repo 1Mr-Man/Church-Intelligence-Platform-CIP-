@@ -1165,6 +1165,47 @@ mod tests {
         assert_eq!(queue2.get(rid).unwrap().status, FindingStatus::Rejected);
     }
 
+    /// Phase 3.0: before `list_accepted_content_candidates` existed
+    /// (`apps/desktop/src-tauri/src/commands.rs`), an accepted candidate's
+    /// text was reachable only through `pending()` (which deliberately
+    /// excludes it) - `all()` was the one accessor that could ever surface
+    /// it again, but had no test proving it actually still carries the
+    /// original working text after acceptance. This is the invariant that
+    /// command depends on.
+    #[test]
+    fn an_accepted_candidate_remains_retrievable_via_all_with_its_text_intact() {
+        let mut queue = ContentCandidateQueue::new();
+        let c = ContentCandidate::new(
+            Uuid::new_v4(),
+            None,
+            vec![Uuid::new_v4()],
+            ContentCandidateType::Quote,
+            "Quote: grace upon grace",
+            "grace upon grace",
+            AssertionLevel::Observed,
+            CR::new(0.9, CS::Heuristic, None),
+            0.6,
+            CONTENT_ENGINE_ID,
+            CONTENT_ENGINE_VERSION,
+        );
+        let id = c.id;
+        queue.add(c);
+        queue.accept(id).unwrap();
+
+        assert!(
+            queue.pending().is_empty(),
+            "accepted candidates must leave the pending queue"
+        );
+        let saved = queue
+            .all()
+            .into_iter()
+            .find(|candidate| candidate.id == id)
+            .expect("an accepted candidate must remain findable via all()");
+        assert_eq!(saved.status, FindingStatus::Accepted);
+        assert_eq!(saved.working_concept, "grace upon grace");
+        assert_eq!(saved.title_or_label, "Quote: grace upon grace");
+    }
+
     #[test]
     fn queue_unknown_id_reports_not_found() {
         let mut queue = ContentCandidateQueue::new();

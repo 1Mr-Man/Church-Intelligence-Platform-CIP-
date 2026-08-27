@@ -601,6 +601,14 @@ export function listContentCandidates(): Promise<ContentCandidate[]> {
   return invokeCommand("list_content_candidates");
 }
 
+/** Phase 3.0: content candidates the operator has already accepted, for
+ * the active service - the "Saved Content" view's data source. Before this
+ * existed, accepting a candidate made its text permanently unreachable in
+ * the running UI (see docs/phase-3-first-use.md). */
+export function listAcceptedContentCandidates(): Promise<ContentCandidate[]> {
+  return invokeCommand("list_accepted_content_candidates");
+}
+
 /** Explicit operator acceptance of a content opportunity - changes only
  * the candidate's own status; never publishes, schedules, or projects it. */
 export function acceptContentCandidate(candidateId: string): Promise<ContentCandidate> {

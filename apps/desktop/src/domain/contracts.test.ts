@@ -194,6 +194,7 @@ describe("domain contracts", () => {
       databaseStatus: "connected",
       acousticStatus: { status: "unavailable", method: "none", reason: "no acoustic recognizer configured" },
       currentSong: null,
+      bible: null,
     };
     expect(status.serviceStatus).toBe("live");
     expect(status.networkStatus).toBe("offline");

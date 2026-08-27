@@ -35,8 +35,8 @@ use tauri::Manager;
 fn create_speech_engine(config: &AppConfig) -> Box<dyn SpeechEngine> {
     #[cfg(feature = "whisper")]
     {
-        let model_path = config.model_dir.join(config::WHISPER_MODEL_FILENAME);
-        match cip_ai_speech::WhisperSpeechEngine::load(&model_path) {
+        let model_path = &config.whisper_model_path;
+        match cip_ai_speech::WhisperSpeechEngine::load(model_path) {
             Ok(engine) => {
                 log::info!(target: LogCategory::Speech.target(), "loaded local speech model from {}", model_path.display());
                 return Box::new(engine);
@@ -160,21 +160,38 @@ pub fn run() {
             // launch inserts everything, every later launch finds it all
             // already present and writes nothing (see
             // `bible_production_dataset.rs`'s module docs).
-            let bsb_report = content::import_and_register(
+            // Phase 3.0: a BSB import failure is no longer allowed to crash
+            // the entire application before any window renders. Every
+            // other domain in this function already degrades on its own
+            // failure (a missing speech model, an absent audio device, no
+            // acoustic recognizer) without taking the rest of CIP down -
+            // Bible readiness now follows the same discipline. The
+            // operator sees this as `LiveStatus.bible == null` (via
+            // `get_live_status`) and the "Bible: NOT AVAILABLE" header,
+            // never a silent crash with no explanation. A real database or
+            // migration failure above remains fatal, since nothing in CIP
+            // can function without a database at all - this is narrower:
+            // one dataset failing to import, not the storage layer itself.
+            match content::import_and_register(
                 &db,
                 content_registry.as_ref(),
                 &bible_production_dataset::bsb_dataset(),
-            )?;
-            log::info!(
-                target: LogCategory::Database.target(),
-                "{} production Bible dataset: {} book(s), {} chapter(s), {} verse(s) total ({} imported, {} already present)",
-                bible_production_dataset::BSB_TRANSLATION_ID,
-                bsb_report.books,
-                bsb_report.chapters,
-                bsb_report.verses_total,
-                bsb_report.imported,
-                bsb_report.already_present
-            );
+            ) {
+                Ok(bsb_report) => log::info!(
+                    target: LogCategory::Database.target(),
+                    "{} production Bible dataset: {} book(s), {} chapter(s), {} verse(s) total ({} imported, {} already present)",
+                    bible_production_dataset::BSB_TRANSLATION_ID,
+                    bsb_report.books,
+                    bsb_report.chapters,
+                    bsb_report.verses_total,
+                    bsb_report.imported,
+                    bsb_report.already_present
+                ),
+                Err(e) => log::error!(
+                    target: LogCategory::Database.target(),
+                    "production Bible dataset import failed: {e} - CIP will start, but Bible search/detection/presentation will be unavailable until this is resolved and CIP is restarted"
+                ),
+            }
 
             // Phase 2.0: the intelligence engine registry gets its own
             // BibleProvider connection too, mirroring `bible_conn`/
@@ -369,6 +386,7 @@ pub fn run() {
             commands::dismiss_cross_domain_correlation,
             commands::analyze_content_intelligence,
             commands::list_content_candidates,
+            commands::list_accepted_content_candidates,
             commands::accept_content_candidate,
             commands::reject_content_candidate,
             commands::analyze_service_transcript,

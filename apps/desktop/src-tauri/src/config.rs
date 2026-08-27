@@ -16,7 +16,6 @@ use thiserror::Error;
 /// CIP and never downloaded automatically - see `docs/live-speech.md` for
 /// where to get one, its license, and why this environment could not
 /// verify one end to end.
-#[allow(dead_code)] // only read when built with the `whisper` feature
 pub const WHISPER_MODEL_FILENAME: &str = "ggml-tiny.en.bin";
 
 /// Expected subdirectory of `AppConfig::model_dir` a local acoustic
@@ -135,6 +134,17 @@ pub struct AppConfig {
     pub data_dir: PathBuf,
     pub database_path: PathBuf,
     pub model_dir: PathBuf,
+    /// Phase 3.0: the exact file `create_speech_engine` will try to load a
+    /// local Whisper model from. Defaults to
+    /// `model_dir/WHISPER_MODEL_FILENAME`, but - mirroring
+    /// `AcousticConfig::model_dir`'s existing `CIP_ACOUSTIC_MODEL_DIR`
+    /// precedent - is overridable via `CIP_WHISPER_MODEL_PATH` so an
+    /// operator can point CIP at a model stored anywhere (a different
+    /// filename, a shared/read-only location, a differently-quantized
+    /// build) without rebuilding from source. Serialized to the frontend
+    /// (via `get_app_config`) so a "speech unavailable" notice can name the
+    /// exact path it looked for, never a vague "not configured."
+    pub whisper_model_path: PathBuf,
     pub log_dir: PathBuf,
     pub acoustic: AcousticConfig,
 }
@@ -157,10 +167,14 @@ impl AppConfig {
     pub fn from_data_dir(data_dir: PathBuf) -> Self {
         let model_dir = data_dir.join("models");
         let acoustic = AcousticConfig::resolve(model_dir.join(ACOUSTIC_MODEL_DIR_NAME));
+        let whisper_model_path = std::env::var("CIP_WHISPER_MODEL_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| model_dir.join(WHISPER_MODEL_FILENAME));
         Self {
             environment: AppEnvironment::resolve(),
             database_path: data_dir.join("cip.sqlite3"),
             model_dir,
+            whisper_model_path,
             log_dir: data_dir.join("logs"),
             acoustic,
             data_dir,
@@ -198,6 +212,46 @@ mod tests {
         assert_eq!(config.acoustic.minimum_audio_ms, defaults.min_duration_ms);
         assert_eq!(config.acoustic.analysis_window_ms, defaults.window_ms);
         assert_eq!(config.acoustic.overlap_ms, defaults.overlap_ms);
+    }
+
+    /// Phase 3.0: `CIP_WHISPER_MODEL_PATH` must be able to point the
+    /// speech engine at a model stored anywhere, not just
+    /// `model_dir/WHISPER_MODEL_FILENAME` - the same override capability
+    /// `CIP_ACOUSTIC_MODEL_DIR` already gives the acoustic recognizer.
+    /// Serialized via `std::env::set_var`/`remove_var` around the call so
+    /// this test cannot leak state into any other test in this binary
+    /// (`cargo test` runs a crate's tests in one process, potentially in
+    /// parallel threads, but never this one concurrently with itself).
+    #[test]
+    fn whisper_model_path_defaults_under_model_dir_when_unset() {
+        // SAFETY: no other test in this crate reads or writes
+        // CIP_WHISPER_MODEL_PATH, so removing it here cannot race.
+        unsafe {
+            std::env::remove_var("CIP_WHISPER_MODEL_PATH");
+        }
+        let config = AppConfig::from_data_dir(PathBuf::from("/tmp/cip-test-default-whisper"));
+        assert_eq!(
+            config.whisper_model_path,
+            PathBuf::from("/tmp/cip-test-default-whisper/models/ggml-tiny.en.bin")
+        );
+    }
+
+    #[test]
+    fn whisper_model_path_honors_the_env_override() {
+        // SAFETY: this test sets then immediately removes the var within
+        // its own body, and no other test in this crate touches it.
+        unsafe {
+            std::env::set_var("CIP_WHISPER_MODEL_PATH", "/opt/models/my-whisper.bin");
+        }
+        let config = AppConfig::from_data_dir(PathBuf::from("/tmp/cip-test-override-whisper"));
+        unsafe {
+            std::env::remove_var("CIP_WHISPER_MODEL_PATH");
+        }
+        assert_eq!(
+            config.whisper_model_path,
+            PathBuf::from("/opt/models/my-whisper.bin"),
+            "an operator-supplied path must be used verbatim, never merged with model_dir"
+        );
     }
 
     #[test]
