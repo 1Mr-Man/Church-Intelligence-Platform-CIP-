@@ -558,9 +558,10 @@ architecture-wide guarantee this phase inherits unchanged.
   candidates to other domains.
 - No Unified Operator Workspace, dashboard, or any Phase 2.9 surface -
   Phase 2.8 prepared no new contract beyond the two `CorrelationKind`
-  values themselves (which the existing generic panel already renders);
-  what, if anything, Phase 2.9 needs beyond that is Phase 2.9's own
-  decision to make.
+  values themselves (which the existing generic panel already renders).
+  Phase 2.9 has since built that workspace and confirmed exactly this: no
+  cross-domain-specific change was needed beyond what Phase 2.8 already
+  provided - see [`docs/operator-workspace.md`](operator-workspace.md).
 - No end-to-end Tauri-command-level test for `build_music_context`'s new
   content-candidate attachment specifically (this codebase's established
   testing convention stops short of standing up `tauri::test::mock_builder()`

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AudioDevice,
   BibleSearchResult,
@@ -32,7 +32,14 @@ import * as liveEvents from "../lib/liveEvents";
 import { formatClockTime } from "../lib/format";
 import { describeTimelineEntry } from "../lib/timelineFormat";
 import { shouldHandleShortcut } from "../lib/keyboardShortcuts";
+import { buildAttentionQueue } from "../lib/attentionQueue";
+import { buildUnifiedFeed, type UnifiedIntelligenceItem } from "../lib/unifiedFeed";
+import { WorkspaceHeader } from "./workspace/WorkspaceHeader";
+import { AttentionQueue } from "./workspace/AttentionQueue";
+import { IntelligenceFeed } from "./workspace/IntelligenceFeed";
+import type { UnifiedItemAction } from "./workspace/actions";
 import "./LiveChurchBrain.css";
+import "./workspace/workspace.css";
 
 const STATUS_POLL_MS = 3000;
 const TRANSCRIPT_LIMIT = 20;
@@ -515,6 +522,62 @@ export function LiveChurchBrain() {
       .catch((e) => setError(String(e)));
   };
 
+  // Unified Operator Workspace (Phase 2.9, per the authoritative Phase 2
+  // roadmap): a pure frontend projection over exactly the state already
+  // fetched above - no new command, no new event, no new intelligence
+  // context. See `lib/unifiedFeed.ts`/`lib/attentionQueue.ts` for why
+  // each mapping/ordering decision was made.
+  const unifiedFeed = useMemo(
+    () =>
+      buildUnifiedFeed({
+        suggestions,
+        musicFindings,
+        sermonFindings,
+        serviceTransitions,
+        serviceAnomalies,
+        contentCandidates,
+        correlations: crossDomainCorrelations,
+      }),
+    [suggestions, musicFindings, sermonFindings, serviceTransitions, serviceAnomalies, contentCandidates, crossDomainCorrelations],
+  );
+  const attentionQueue = useMemo(() => buildAttentionQueue(unifiedFeed), [unifiedFeed]);
+
+  // Every action here calls exactly the same command the matching
+  // per-domain panel below already calls - this dispatcher only decides
+  // *which* existing command to call, based on `item.domain`; it never
+  // introduces a new one (spec rule 10).
+  const handleUnifiedAction = useCallback(
+    (item: UnifiedIntelligenceItem, action: UnifiedItemAction) => {
+      const busyKey = `${item.domain}-${action}-${item.id}`;
+      switch (item.domain) {
+        case "bible":
+          if (action === "approve") void withBusy(busyKey, async () => { await commands.approveSuggestion(item.id); });
+          else if (action === "reject") void withBusy(busyKey, async () => { await commands.rejectSuggestion(item.id); });
+          return;
+        case "music":
+          if (action === "accept") void withBusy(busyKey, async () => { await commands.acceptMusicFinding(item.id); });
+          else if (action === "reject") void withBusy(busyKey, async () => { await commands.rejectMusicFinding(item.id); });
+          return;
+        case "sermon":
+          if (action === "accept") void withBusy(busyKey, async () => { await commands.acceptSermonFinding(item.id); });
+          else if (action === "reject") void withBusy(busyKey, async () => { await commands.rejectSermonFinding(item.id); });
+          return;
+        case "service":
+          if (action === "acknowledge") void withBusy(busyKey, async () => { await commands.acknowledgeServiceAnomaly(item.id); });
+          return;
+        case "content":
+          if (action === "accept") void withBusy(busyKey, async () => { await commands.acceptContentCandidate(item.id); });
+          else if (action === "reject") void withBusy(busyKey, async () => { await commands.rejectContentCandidate(item.id); });
+          return;
+        case "correlation":
+          if (action === "review") void withBusy(busyKey, async () => { await commands.reviewCrossDomainCorrelation(item.id); });
+          else if (action === "dismiss") void withBusy(busyKey, async () => { await commands.dismissCrossDomainCorrelation(item.id); });
+          return;
+      }
+    },
+    [withBusy],
+  );
+
   return (
     <div className="live-brain">
       <header className="live-brain__header">
@@ -527,6 +590,18 @@ export function LiveChurchBrain() {
       </header>
 
       <StatusBar status={status} />
+
+      <WorkspaceHeader
+        status={status}
+        sermonFoundation={sermonFoundation}
+        serviceIntel={serviceIntel}
+        activeContext={activeContext}
+        lastReference={lastReference}
+        activeDisplayItem={activeDisplayItem}
+        displayWindowOpen={displayWindowOpen}
+      />
+      <AttentionQueue items={attentionQueue} busy={busy} onAction={handleUnifiedAction} />
+      <IntelligenceFeed items={unifiedFeed} />
 
       <section className="live-brain__panel">
         <h2>Service</h2>
@@ -1080,13 +1155,13 @@ export function LiveChurchBrain() {
         )}
       </section>
 
-      <section className="live-brain__panel">
-        <h2>
-          Content Registry{" "}
-          <button type="button" onClick={refreshContentRegistry}>
-            Refresh
-          </button>
-        </h2>
+      <details className="live-brain__panel">
+        <summary>
+          Diagnostics: Content Registry{" "}
+        </summary>
+        <button type="button" onClick={refreshContentRegistry}>
+          Refresh
+        </button>
         <p className="live-brain__hint">
           Installed local content. Copyrighted Bible datasets are never downloaded automatically - only content the
           user explicitly imports, with honestly-recorded (or UNKNOWN) licensing.
@@ -1207,10 +1282,10 @@ export function LiveChurchBrain() {
             </div>
           )}
         </details>
-      </section>
+      </details>
 
-      <section className="live-brain__panel">
-        <h2>Intelligence Status</h2>
+      <details className="live-brain__panel">
+        <summary>Diagnostics: Intelligence Status</summary>
         <p className="live-brain__hint">
           The Phase 2.0 shared intelligence architecture. Only Bible has a real engine behind it - the rest reserve
           the shape future phases will fill in, and are honestly reported as not installed rather than faked.
@@ -1230,7 +1305,7 @@ export function LiveChurchBrain() {
             </li>
           ))}
         </ul>
-      </section>
+      </details>
 
       <section className="live-brain__panel">
         <h2>Music Intelligence</h2>

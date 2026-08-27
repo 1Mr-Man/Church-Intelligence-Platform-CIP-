@@ -407,15 +407,19 @@ anything. No correlation rule reads or produces `ContentCandidate`s in
 this phase; that decision (if ever made) remains exclusively Phase 2.8's
 responsibility.
 
-## Phase 2.9 handoff (Unified Operator Workspace)
+## Phase 2.9 handoff (Unified Operator Workspace) - fulfilled
 
-This phase's "Content Intelligence" panel is a minimal diagnostic list -
-deliberately not the unified cross-domain operator workspace the
-authoritative roadmap places at Phase 2.9. `ContentCandidate`'s stable
-shape (`id`, `titleOrLabel`, `workingConcept`, `candidateType`,
-`contentPotential`, `status`, `evidence`, `provenance`) is what a future
-unified workspace would consume; nothing about this phase's data model
-needs to change for that to become possible.
+`ContentCandidate`'s stable shape (`id`, `titleOrLabel`, `workingConcept`,
+`candidateType`, `contentPotential`, `status`, `evidence`, `provenance`)
+needed no changes for Phase 2.9's unified workspace to consume it: content
+candidates now additionally appear in the unified intelligence
+feed/attention queue as the `content` domain, alongside every other
+domain, with a `content-accept`/`content-reject` action calling exactly
+`accept_content_candidate`/`reject_content_candidate` - the same commands
+this panel already used. See
+[`docs/operator-workspace.md`](operator-workspace.md). This phase's own
+"Content Intelligence" panel is unchanged and still fully present, moved
+nowhere.
 
 ## Phase 2.10 handoff (Full Validation)
 
@@ -468,10 +472,13 @@ other domain's equivalent commands within one real service session.
   `Summary:`, `Reflection:`, `Transition:`, `Possible Conclusion:`,
   `Structural Transition (section):`, and Sermon Foundation structural
   findings).
-- Cross-domain correlation involving content candidates - reserved for
-  Phase 2.8 (see "Phase 2.8 handoff" above).
-- A unified operator workspace - reserved for Phase 2.9 (see "Phase 2.9
-  handoff" above); this phase's panel is a minimal diagnostic list only.
+- Cross-domain correlation involving content candidates - implemented in
+  Phase 2.8 (see [`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md)'s
+  `SermonContent` rule).
+- This phase's own "Content Intelligence" panel remains a minimal
+  diagnostic list, unchanged - the unified operator workspace (Phase 2.9,
+  see "Phase 2.9 handoff" above) surfaces content candidates elsewhere,
+  additively.
 - Live-pipeline auto-dispatch - Content Intelligence remains manual-
   command-only (`analyze_content_intelligence`), mirroring Cross-Domain/
   Sermon Intelligence's own established pattern;

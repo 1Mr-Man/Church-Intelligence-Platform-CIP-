@@ -516,7 +516,13 @@ findings themselves are produced or reviewed. See
 this repository's authoritative Phase 2 roadmap, this engine was extended
 as the roadmap's actual Phase 2.8; the roadmap's actual Phase 2.4 is
 Service Intelligence - see
-[`docs/service-intelligence.md`](service-intelligence.md).
+[`docs/service-intelligence.md`](service-intelligence.md). The roadmap's
+actual Phase 2.9, Unified Operator Workspace, subsequently consolidated
+this panel and every other panel described in this document into one
+glance-able header plus a bounded, prioritized "needs attention" queue and
+cross-domain feed - every workflow described below is unchanged, still
+fully present, and still individually accessible; see
+[`docs/operator-workspace.md`](operator-workspace.md).
 
 ## Sermon Foundation (Phase 2.5, per the authoritative Phase 2 roadmap)
 

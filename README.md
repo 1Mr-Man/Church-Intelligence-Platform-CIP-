@@ -16,11 +16,12 @@ Music Recognition & Live Song Detection**, **Phase 2.3 - Sermon
 Intelligence & Live Message Understanding**, **Phase 2.4 -
 Cross-Domain Intelligence & Correlation**, **Phase 2.4 - Service
 Intelligence**, **Phase 2.5 - Sermon Intelligence Foundation**,
-**Phase 2.6 - Sermon Intelligence**, and **Phase 2.7 - Content
-Intelligence**. A separate release-readiness milestone (not a new
-intelligence phase) subsequently replaced the tiny development Bible
-fixture with a real, complete, legally-documented 66-book production
-translation - see [`docs/bible-production-dataset.md`](docs/bible-production-dataset.md) -
+**Phase 2.6 - Sermon Intelligence**, **Phase 2.7 - Content
+Intelligence**, **Phase 2.8 - Cross-Domain Intelligence**, and **Phase
+2.9 - Unified Operator Workspace**. A separate release-readiness
+milestone (not a new intelligence phase) subsequently replaced the tiny
+development Bible fixture with a real, complete, legally-documented
+66-book production translation - see [`docs/bible-production-dataset.md`](docs/bible-production-dataset.md) -
 and a local presentation display window (a second Tauri window under
 explicit operator control) - see [`docs/presentation.md`](docs/presentation.md).
 
@@ -37,8 +38,11 @@ explicit operator control) - see [`docs/presentation.md`](docs/presentation.md).
 > `sermon_adapter.rs`/`sermon.rs`), were both built and committed under
 > earlier, internal phase labels before this roadmap was adopted; those
 > labels are historical artifacts and are not rewritten. The cross-domain
-> work is reserved for formal validation under the roadmap's actual Phase
-> 2.8. The semantic sermon work, understood as Phase 2.6-equivalent, was
+> work was subsequently extended in place as the roadmap's actual Phase
+> 2.8 (see [`docs/cross-domain-intelligence.md`](docs/cross-domain-intelligence.md)),
+> and the roadmap's actual Phase 2.9, Unified Operator Workspace, is built
+> on top of it - see [`docs/operator-workspace.md`](docs/operator-workspace.md).
+> The semantic sermon work, understood as Phase 2.6-equivalent, was
 > subsequently extended *in place* under the real Phase 2.6 label - adding
 > Takeaway/FoodForThought detection, a logistics-question false-positive
 > fix, and Phase 2.5 Sermon Foundation awareness (`sermonId`, section
@@ -306,6 +310,30 @@ dimensions can diverge or invert. Only Sermon-domain findings are mapped
 in this initial phase, via an explicit, documented summary-prefix table -
 nothing is guessed from free text. See
 [`docs/content-intelligence.md`](docs/content-intelligence.md).
+
+**Phase 2.8 (Cross-Domain Intelligence)** extended the existing
+correlation engine above - rather than building a second one - once
+Service Intelligence, Sermon Foundation, and Content Intelligence existed
+to correlate against. An audit found the engine already satisfied nearly
+every formal requirement; the two genuine gaps closed were
+`IntelligenceContext` gaining a `ContentCandidate`-aware builder (mirroring
+`with_sermon_context`'s own additive discipline) and the `Service` domain
+being included in the weakest temporal-proximity fallback rule for the
+first time. Two new `CorrelationKind` variants (`SermonContent`,
+`MultiDomainConvergence`) and two new rules were added; every Phase 2.4
+rule and confidence value is unchanged. See
+[`docs/cross-domain-intelligence.md`](docs/cross-domain-intelligence.md).
+
+**Phase 2.9 (Unified Operator Workspace)** turned the eight independently
+real capabilities above into one coherent operator screen, without adding
+a ninth. A new glance-able header, a bounded/prioritized "needs attention"
+queue, and a bounded/filterable cross-domain feed are all pure, frontend-
+only projections (`lib/unifiedFeed.ts`/`lib/attentionQueue.ts`) over state
+every existing panel already fetches - zero new Tauri commands, events, or
+database migrations. Every existing panel remains fully present and
+functional; only two purely diagnostic ones (Content Registry,
+Intelligence Status) were collapsed by default. See
+[`docs/operator-workspace.md`](docs/operator-workspace.md).
 
 Still deliberately **not** implemented: a chosen/trained acoustic model
 (so real-world acoustic recognition accuracy remains unverified in this

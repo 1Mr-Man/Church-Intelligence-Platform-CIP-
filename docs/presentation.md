@@ -391,7 +391,11 @@ end/title/speaker/section/segment-link action can create, activate, or otherwise
 > roadmap's actual Phase 2.8; the roadmap's actual Phase 2.4 is Service
 > Intelligence. The "Phase 2.4" label on the correlation engine's original
 > build is a historical artifact from before this roadmap was adopted and
-> is not rewritten.
+> is not rewritten. The roadmap's actual Phase 2.9, Unified Operator
+> Workspace, added a header summary of the presentation state described
+> here (`CLOSED`/`OPEN, NOTHING DISPLAYED`/`ACTIVE — ON SCREEN`) but reuses
+> this exact `PresentationItem`/display-window system unchanged - see
+> [`docs/operator-workspace.md`](operator-workspace.md).
 Phase 2.2's acoustic-sourced findings are the exact same
 `IntelligenceFinding`/`FindingQueue` types, so this guarantee extends to
 them automatically - accepting an acoustic finding only ever sets

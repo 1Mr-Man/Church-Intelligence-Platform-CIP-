@@ -70,6 +70,10 @@ not replace the operator's judgment.
 > `CorrelationKind` variants, `SermonContent` and `MultiDomainConvergence`,
 > and `IntelligenceContext` gaining a `ContentCandidate`-aware builder) -
 > see [`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md).
+> The roadmap's actual Phase 2.9, Unified Operator Workspace, is a
+> frontend-only consolidation layer over every engine above - no new
+> engine, context, or backend surface - see
+> [`docs/operator-workspace.md`](operator-workspace.md).
 
 `core/confidence` is the one crate every other domain may depend on; the
 rest do not depend on each other except through two documented
