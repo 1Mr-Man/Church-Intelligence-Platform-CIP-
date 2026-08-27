@@ -10,7 +10,7 @@ pub struct AudioDevice {
     pub is_default: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioEngineStatus {
     pub is_capturing: bool,
@@ -20,6 +20,16 @@ pub struct AudioEngineStatus {
     /// ("reporting input level where practical" - never fabricated when it
     /// can't).
     pub input_level: Option<f32>,
+    /// Phase 3.2 hardware-pilot hardening: the most recent mid-capture
+    /// stream failure reported by the backend (e.g. a device physically
+    /// unplugged while listening) - `None` when capture has never failed,
+    /// or has been cleared by a subsequent successful `start()`. This is
+    /// distinct from `AudioEngineError` (a synchronous failure returned
+    /// from a command call): a real cpal stream error arrives later, on
+    /// the audio backend's own callback thread, with no `Result` to
+    /// return it through - see `integrations/audio`'s `CpalAudioEngine`
+    /// for where this is actually set.
+    pub stream_error: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -131,6 +141,7 @@ mod tests {
                 is_paused: false,
                 sample_rate_hz: 16_000,
                 input_level: None,
+                stream_error: None,
             }
         }
     }

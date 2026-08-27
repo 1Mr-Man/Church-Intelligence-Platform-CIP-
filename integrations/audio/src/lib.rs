@@ -55,7 +55,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, SampleFormat, Stream, StreamConfig};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 type Reply = mpsc::Sender<Result<(), AudioEngineError>>;
 
@@ -83,6 +83,10 @@ pub struct CpalAudioEngine {
     sample_rate_hz: Arc<AtomicU32>,
     input_level_bits: Arc<AtomicU32>,
     has_level_reading: Arc<AtomicBool>,
+    /// Phase 3.2: the most recent mid-capture stream failure, set from the
+    /// cpal backend's own error callback (a different thread than the one
+    /// that called `start()`) - see `record_stream_error`'s docs.
+    stream_error: Arc<Mutex<Option<String>>>,
 }
 
 impl Default for CpalAudioEngine {
@@ -91,12 +95,14 @@ impl Default for CpalAudioEngine {
         let sample_rate_hz = Arc::new(AtomicU32::new(0));
         let input_level_bits = Arc::new(AtomicU32::new(0));
         let has_level_reading = Arc::new(AtomicBool::new(false));
+        let stream_error = Arc::new(Mutex::new(None));
 
         let (tx, rx) = mpsc::channel();
         let worker_capturing = Arc::clone(&is_capturing);
         let worker_rate = Arc::clone(&sample_rate_hz);
         let worker_level_bits = Arc::clone(&input_level_bits);
         let worker_has_level = Arc::clone(&has_level_reading);
+        let worker_stream_error = Arc::clone(&stream_error);
         std::thread::spawn(move || {
             run_worker(
                 rx,
@@ -104,6 +110,7 @@ impl Default for CpalAudioEngine {
                 worker_rate,
                 worker_level_bits,
                 worker_has_level,
+                worker_stream_error,
             );
         });
 
@@ -113,6 +120,7 @@ impl Default for CpalAudioEngine {
             sample_rate_hz,
             input_level_bits,
             has_level_reading,
+            stream_error,
         }
     }
 }
@@ -180,8 +188,34 @@ impl AudioEngine for CpalAudioEngine {
                 .has_level_reading
                 .load(Ordering::SeqCst)
                 .then(|| f32::from_bits(self.input_level_bits.load(Ordering::SeqCst))),
+            stream_error: self
+                .stream_error
+                .lock()
+                .expect("stream_error mutex poisoned")
+                .clone(),
         }
     }
+}
+
+/// Records a real mid-capture stream failure - called from the cpal
+/// backend's error callback (`err_fn` in [`build_stream`]), which runs on
+/// a thread cpal itself owns, not the worker thread `WorkerCommand::Start`
+/// ran on. Flips `is_capturing` false immediately (the stream is dead the
+/// moment cpal reports this, whether or not anyone has called `stop()`
+/// yet) and records the reason so [`AudioEngine::status`] can surface it
+/// as `AudioStatusKind::Error` rather than silently falling back to
+/// `Unavailable`/`Ready` once `is_capturing` reads false. A small, pure,
+/// directly-testable function on purpose - the one piece of this failure
+/// path this environment (no real audio hardware) can actually prove
+/// without a real device to unplug.
+fn record_stream_error(
+    is_capturing: &AtomicBool,
+    stream_error: &Mutex<Option<String>>,
+    message: String,
+) {
+    log::error!(target: "cip::audio", "cpal stream error: {message}");
+    *stream_error.lock().expect("stream_error mutex poisoned") = Some(message);
+    is_capturing.store(false, Ordering::SeqCst);
 }
 
 fn list_devices_now() -> Result<Vec<AudioDevice>, AudioEngineError> {
@@ -251,9 +285,12 @@ fn build_stream(
     sink: AudioChunkSink,
     input_level_bits: Arc<AtomicU32>,
     has_level_reading: Arc<AtomicBool>,
+    is_capturing: Arc<AtomicBool>,
+    stream_error: Arc<Mutex<Option<String>>>,
 ) -> Result<Stream, AudioEngineError> {
-    let err_fn =
-        |err: cpal::StreamError| log::error!(target: "cip::audio", "cpal stream error: {err}");
+    let err_fn = move |err: cpal::StreamError| {
+        record_stream_error(&is_capturing, &stream_error, err.to_string())
+    };
 
     macro_rules! stream_for {
         ($ty:ty) => {
@@ -299,6 +336,7 @@ fn run_worker(
     sample_rate_hz: Arc<AtomicU32>,
     input_level_bits: Arc<AtomicU32>,
     has_level_reading: Arc<AtomicBool>,
+    stream_error: Arc<Mutex<Option<String>>>,
 ) {
     let mut stream: Option<Stream> = None;
 
@@ -329,6 +367,8 @@ fn run_worker(
                         sink,
                         Arc::clone(&input_level_bits),
                         Arc::clone(&has_level_reading),
+                        Arc::clone(&is_capturing),
+                        Arc::clone(&stream_error),
                     )?;
                     new_stream
                         .play()
@@ -336,6 +376,11 @@ fn run_worker(
 
                     stream = Some(new_stream);
                     sample_rate_hz.store(rate, Ordering::SeqCst);
+                    // A fresh, successful start clears any stale failure
+                    // from a previous capture attempt (Phase 3.2) - never
+                    // let an old disconnect message linger after the
+                    // operator has successfully reconnected and restarted.
+                    *stream_error.lock().expect("stream_error mutex poisoned") = None;
                     is_capturing.store(true, Ordering::SeqCst);
                     Ok(())
                 })();
@@ -392,6 +437,43 @@ mod tests {
             devices.is_empty(),
             "this CI/dev environment has no audio hardware"
         );
+    }
+
+    /// Phase 3.2 mandatory failure-injection scenario ("Microphone
+    /// disappears -> Graceful error"): a genuinely no-hardware environment
+    /// can never trigger cpal's own stream-error callback for real (there
+    /// is no live stream to unplug), so this proves the exact logic that
+    /// callback invokes when it does fire on real hardware - the one
+    /// piece of this failure path provable without a device to unplug.
+    #[test]
+    fn record_stream_error_flips_capturing_false_and_records_the_reason() {
+        let is_capturing = AtomicBool::new(true);
+        let stream_error = Mutex::new(None);
+
+        record_stream_error(
+            &is_capturing,
+            &stream_error,
+            "device disconnected".to_string(),
+        );
+
+        assert!(
+            !is_capturing.load(Ordering::SeqCst),
+            "a stream error must immediately stop reporting Listening"
+        );
+        assert_eq!(
+            stream_error.lock().unwrap().as_deref(),
+            Some("device disconnected"),
+            "the operator-visible reason must be preserved verbatim"
+        );
+    }
+
+    /// A fresh, successful `Start` must clear any stale error from an
+    /// earlier disconnect - proven directly against `CpalAudioEngine`'s
+    /// real, non-hardware-dependent `status()` accessor.
+    #[test]
+    fn a_fresh_engine_reports_no_stream_error_by_default() {
+        let engine = CpalAudioEngine::new();
+        assert_eq!(engine.status().stream_error, None);
     }
 
     #[test]

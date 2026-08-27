@@ -203,6 +203,198 @@ pub fn app_health_check(state: State<'_, AppState>) -> Result<HealthReport, AppE
     })
 }
 
+// --- Phase 3.2 pilot hardware diagnostics -----------------------------------
+//
+// A single, honest place for an operator (or whoever is setting CIP up for
+// a pilot) to see exactly what CIP can currently detect about the
+// hardware/model it depends on - never collapsed into one generic
+// "unavailable" (spec: distinguish missing hardware, inaccessible
+// hardware, configuration error, model missing/corrupt, runtime failure).
+// Composes only already-existing state (`AppState.audio_engine`,
+// `AppState.config.whisper_model_path`, Tauri's own monitor API) - no new
+// engine, no new persisted state, no new dependency.
+
+/// Which of four honestly-distinguishable states the configured Whisper
+/// model path is currently in. Never claims more than a filesystem check
+/// can prove: `Present` means a readable file exists at the path, not
+/// that its *content* is a valid ggml/gguf model - only
+/// `WhisperSpeechEngine::load` (called at real startup, when the
+/// `whisper` feature is enabled) can prove that, since doing so requires
+/// actually parsing the file.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", tag = "status")]
+pub enum WhisperModelDiagnostic {
+    /// No file exists at the configured path at all.
+    #[serde(rename_all = "camelCase")]
+    Missing { expected_path: String },
+    /// A path exists but this process could not open it for reading (a
+    /// directory, a permissions error, or similar).
+    #[serde(rename_all = "camelCase")]
+    Unreadable { path: String, reason: String },
+    /// A readable file exists at the configured path.
+    #[serde(rename_all = "camelCase")]
+    Present { path: String, size_bytes: u64 },
+}
+
+/// Pure, directly-testable classification - the part of
+/// [`get_pilot_diagnostics`] worth testing without a real Tauri runtime.
+fn diagnose_whisper_model(path: &std::path::Path) -> WhisperModelDiagnostic {
+    let metadata = match std::fs::metadata(path) {
+        Ok(m) => m,
+        Err(_) => {
+            return WhisperModelDiagnostic::Missing {
+                expected_path: path.display().to_string(),
+            }
+        }
+    };
+    if !metadata.is_file() {
+        return WhisperModelDiagnostic::Unreadable {
+            path: path.display().to_string(),
+            reason: "not a regular file".to_string(),
+        };
+    }
+    match std::fs::File::open(path) {
+        Ok(_) => WhisperModelDiagnostic::Present {
+            path: path.display().to_string(),
+            size_bytes: metadata.len(),
+        },
+        Err(e) => WhisperModelDiagnostic::Unreadable {
+            path: path.display().to_string(),
+            reason: e.to_string(),
+        },
+    }
+}
+
+/// One physical (or virtual, e.g. Xvfb) display this process can detect -
+/// via Tauri's own `AppHandle::available_monitors`, not a new dependency.
+/// Software display-window logic and physical display *readability* are
+/// two different things (spec section 11/29): this only ever reports
+/// what the OS/windowing layer reports exists, never whether a human
+/// could actually read text on it.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisplayDiagnostic {
+    pub name: Option<String>,
+    pub width_px: u32,
+    pub height_px: u32,
+    pub is_primary: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PilotDiagnostics {
+    pub whisper_model: WhisperModelDiagnostic,
+    pub audio_devices: Vec<AudioDevice>,
+    pub audio: AudioEngineStatus,
+    /// Every display this process can detect. `len() >= 2` is a necessary
+    /// (not sufficient) condition for "a second display/projector is
+    /// actually connected" - see `docs/phase-3-2-hardware-pilot.md` for
+    /// why this alone can never be treated as VERIFIED physical-projector
+    /// readiness.
+    pub displays: Vec<DisplayDiagnostic>,
+}
+
+#[tauri::command]
+pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> PilotDiagnostics {
+    let whisper_model = diagnose_whisper_model(&state.config.whisper_model_path);
+
+    let audio_engine = state
+        .audio_engine
+        .lock()
+        .expect("audio_engine mutex poisoned");
+    let audio_devices = audio_engine.list_devices().unwrap_or_default();
+    let audio = audio_engine.status();
+    drop(audio_engine);
+
+    let primary_position = app.primary_monitor().ok().flatten().map(|m| *m.position());
+    let displays = app
+        .available_monitors()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| DisplayDiagnostic {
+            name: m.name().cloned(),
+            width_px: m.size().width,
+            height_px: m.size().height,
+            is_primary: primary_position == Some(*m.position()),
+        })
+        .collect();
+
+    PilotDiagnostics {
+        whisper_model,
+        audio_devices,
+        audio,
+        displays,
+    }
+}
+
+// --- Phase 3.2 backup ---------------------------------------------------
+//
+// A pilot church's only realistic recovery story for "the laptop died" or
+// "the disk got corrupted" is a copy of the SQLite file taken while
+// everything was healthy. The database runs in WAL mode
+// (`database/src/connection.rs`), so a raw `fs::copy` of just
+// `cip.sqlite3` while CIP is running would miss whatever is still only in
+// the `-wal`/`-shm` sidecar files - `VACUUM INTO` is SQLite's own
+// documented way to produce a single, complete, consistent snapshot file
+// regardless of journal mode, taken directly through the live connection,
+// with no need to pause or lock out normal use. Restoring is deliberately
+// NOT a live in-app command: swapping out an actively-open database
+// connection's backing file out from under it is a real corruption risk
+// this phase's "minimal scope, no unnecessary risk" principle rules out.
+// The safe restore procedure - close CIP, copy the backup file over
+// `cip.sqlite3` (and delete any stale `-wal`/`-shm` sidecars), reopen -
+// is documented in `docs/phase-3-2-hardware-pilot.md` and needs no new
+// code: `cip_database::open` already runs the normal startup path
+// (migrations no-op on an up-to-date schema, stale-Active reconciliation)
+// against whatever file it finds there.
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupReport {
+    pub backup_path: String,
+    pub size_bytes: u64,
+}
+
+#[tauri::command]
+pub fn backup_database(
+    destination_dir: String,
+    state: State<'_, AppState>,
+) -> Result<BackupReport, AppError> {
+    let destination_dir = require_non_empty(&destination_dir, "destinationDir")
+        .map_err(log_and_return)?
+        .to_string();
+    let dest_dir = std::path::PathBuf::from(&destination_dir);
+    std::fs::create_dir_all(&dest_dir)
+        .map_err(|e| {
+            AppError::InvalidInput(format!(
+                "cannot create backup directory {}: {e}",
+                dest_dir.display()
+            ))
+        })
+        .map_err(log_and_return)?;
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let backup_path = dest_dir.join(format!("cip-backup-{timestamp}.sqlite3"));
+
+    {
+        let db = state.db.lock().expect("db connection poisoned");
+        db.execute(
+            "VACUUM INTO ?1",
+            rusqlite::params![backup_path.to_string_lossy()],
+        )
+        .map_err(|e| AppError::from(cip_database::DatabaseError::Connection(e.to_string())))
+        .map_err(log_and_return)?;
+    }
+
+    let size_bytes = std::fs::metadata(&backup_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    Ok(BackupReport {
+        backup_path: backup_path.display().to_string(),
+        size_bytes,
+    })
+}
+
 /// `list_bible_translations`'s selection guard (Phase 1.5 section 10):
 /// disabled content never appears in normal selection - but fails *open*.
 /// A translation with no registry entry at all (`Ok(None)`) or a registry
@@ -4131,12 +4323,22 @@ pub fn get_live_status(state: State<'_, AppState>) -> LiveStatus {
         .status();
     let audio_status = if audio.is_capturing {
         AudioStatusKind::Listening
-    } else if state
-        .audio_error
-        .lock()
-        .expect("audio_error mutex poisoned")
-        .is_some()
+    } else if audio.stream_error.is_some()
+        || state
+            .audio_error
+            .lock()
+            .expect("audio_error mutex poisoned")
+            .is_some()
     {
+        // Phase 3.2: `audio.stream_error` is a real mid-capture hardware
+        // failure (e.g. a microphone physically unplugged while
+        // listening), reported by the backend's own stream-error
+        // callback - see `AudioEngineStatus::stream_error`'s docs. Without
+        // this check, `is_capturing` would already be false (the backend
+        // flips it the moment the stream dies) and this branch would fall
+        // through to the generic `Ready`/`Unavailable` device-enumeration
+        // check below, silently hiding a real failure the operator needs
+        // to see.
         AudioStatusKind::Error
     } else {
         match state
@@ -4475,6 +4677,7 @@ mod tests {
                 is_paused: false,
                 sample_rate_hz: 0,
                 input_level: None,
+                stream_error: None,
             },
             audio_status: AudioStatusKind::Unavailable,
             speech_status: SpeechStatusKind::Unavailable,
@@ -4501,6 +4704,138 @@ mod tests {
         assert_eq!(value["serviceStatus"], "planned");
         assert_eq!(value["audio"]["isCapturing"], false);
         assert_eq!(value["acousticStatus"]["status"], "unavailable");
+    }
+
+    // --- Phase 3.2 pilot hardware diagnostics -------------------------
+
+    #[test]
+    fn diagnose_whisper_model_reports_missing_for_a_nonexistent_path() {
+        let diagnostic =
+            diagnose_whisper_model(std::path::Path::new("/nonexistent/ggml-tiny.en.bin"));
+        assert!(matches!(diagnostic, WhisperModelDiagnostic::Missing { .. }));
+    }
+
+    #[test]
+    fn diagnose_whisper_model_reports_unreadable_for_a_directory() {
+        let dir = std::env::temp_dir().join(format!(
+            "cip-diagnose-whisper-dir-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let diagnostic = diagnose_whisper_model(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(matches!(
+            diagnostic,
+            WhisperModelDiagnostic::Unreadable { .. }
+        ));
+    }
+
+    #[test]
+    fn diagnose_whisper_model_reports_present_with_the_real_size_for_a_readable_file() {
+        let path = std::env::temp_dir().join(format!(
+            "cip-diagnose-whisper-present-test-{}.bin",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"not a real model, just a readable file").unwrap();
+        let diagnostic = diagnose_whisper_model(&path);
+        let _ = std::fs::remove_file(&path);
+        match diagnostic {
+            WhisperModelDiagnostic::Present { size_bytes, .. } => {
+                assert_eq!(
+                    size_bytes,
+                    "not a real model, just a readable file".len() as u64
+                );
+            }
+            other => panic!("expected Present, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pilot_diagnostics_serializes_camel_case() {
+        let diagnostics = PilotDiagnostics {
+            whisper_model: WhisperModelDiagnostic::Missing {
+                expected_path: "/tmp/ggml-tiny.en.bin".to_string(),
+            },
+            audio_devices: Vec::new(),
+            audio: AudioEngineStatus {
+                is_capturing: false,
+                is_paused: false,
+                sample_rate_hz: 0,
+                input_level: None,
+                stream_error: None,
+            },
+            displays: vec![DisplayDiagnostic {
+                name: Some("Virtual-1".to_string()),
+                width_px: 1280,
+                height_px: 800,
+                is_primary: true,
+            }],
+        };
+        let value = serde_json::to_value(&diagnostics).unwrap();
+        assert_eq!(value["whisperModel"]["status"], "missing");
+        assert_eq!(
+            value["whisperModel"]["expectedPath"],
+            "/tmp/ggml-tiny.en.bin"
+        );
+        assert_eq!(value["displays"][0]["widthPx"], 1280);
+        assert_eq!(value["displays"][0]["isPrimary"], true);
+    }
+
+    /// Phase 3.2 backup/recovery validation (spec section 18): create real
+    /// data, back it up via the exact mechanism `backup_database` uses
+    /// (`VACUUM INTO` through a live connection), corrupt/replace the
+    /// *working copy* only (never a real operator database - this is a
+    /// throwaway temp file created and destroyed entirely within this
+    /// test), restore by copying the backup over it, reopen, and verify
+    /// the data survived intact.
+    #[test]
+    fn a_vacuum_into_backup_survives_a_simulated_working_database_loss() {
+        use cip_core_service::ServiceSession;
+        use cip_database::{open, run_migrations};
+
+        let dir =
+            std::env::temp_dir().join(format!("cip-backup-restore-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let working_path = dir.join("cip.sqlite3");
+        let backup_path = dir.join("cip-backup.sqlite3");
+
+        // --- create real data in the "working" database -------------------
+        let session_id;
+        {
+            let mut conn = open(&working_path).unwrap();
+            run_migrations(&mut conn).unwrap();
+            let session = ServiceSession::start("Backup Restore Test Service");
+            session_id = session.id;
+            crate::persistence::persist_service(&conn, &session).unwrap();
+
+            // --- back it up exactly as `backup_database` does -------------
+            conn.execute(
+                "VACUUM INTO ?1",
+                rusqlite::params![backup_path.to_string_lossy()],
+            )
+            .unwrap();
+        }
+        assert!(backup_path.exists(), "the backup file must actually exist");
+
+        // --- simulate total loss of the working database -------------------
+        std::fs::remove_file(&working_path).unwrap();
+        for sidecar in ["-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{sidecar}", working_path.display()));
+        }
+        assert!(
+            !working_path.exists(),
+            "the working database must genuinely be gone before restoring"
+        );
+
+        // --- restore: copy the backup over the (now-missing) working path -
+        std::fs::copy(&backup_path, &working_path).unwrap();
+
+        // --- reopen exactly as a fresh CIP launch would, and verify --------
+        let restored = open(&working_path).unwrap();
+        let reloaded = crate::persistence::get_service(&restored, session_id).unwrap();
+        assert_eq!(reloaded.title, "Backup Restore Test Service");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

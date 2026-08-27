@@ -86,8 +86,9 @@ export function WorkspaceHeader({
         </div>
         <div>
           <dt>Audio / Speech</dt>
-          <dd>
+          <dd title={status?.audio.streamError ?? undefined}>
             {(status?.audioStatus ?? "unknown").toUpperCase()} / {(status?.speechStatus ?? "unknown").toUpperCase()}
+            {status?.audio.streamError ? ` — ${status.audio.streamError}` : ""}
           </dd>
         </div>
         <div>

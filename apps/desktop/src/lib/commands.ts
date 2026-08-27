@@ -13,7 +13,7 @@
  * raw `TypeError` from a missing `window.__TAURI_INTERNALS__`.
  */
 import { invoke } from "@tauri-apps/api/core";
-import type { AppConfig, AppEnvironment } from "../config/appConfig";
+import type { AppConfig, AppEnvironment, BackupReport, PilotDiagnostics } from "../config/appConfig";
 import type { ContentCandidate } from "../domain/contentIntelligence";
 import type {
   AudioDevice,
@@ -79,6 +79,21 @@ export function getAppConfig(): Promise<AppConfig> {
 
 export function appHealthCheck(): Promise<HealthReport> {
   return invokeCommand("app_health_check");
+}
+
+/** Phase 3.2: hardware/model diagnostics for pilot setup - see `PilotDiagnostics`. */
+export function getPilotDiagnostics(): Promise<PilotDiagnostics> {
+  return invokeCommand("get_pilot_diagnostics");
+}
+
+/**
+ * Phase 3.2: a consistent, point-in-time database backup written to
+ * `destinationDir` (created if needed) via SQLite's own `VACUUM INTO` -
+ * safe to call while CIP is running. Restoring is a manual, CIP-closed
+ * procedure (see `docs/phase-3-2-hardware-pilot.md`), not a command.
+ */
+export function backupDatabase(destinationDir: string): Promise<BackupReport> {
+  return invokeCommand("backup_database", { destinationDir });
 }
 
 export function listBibleTranslations(): Promise<BibleTranslation[]> {

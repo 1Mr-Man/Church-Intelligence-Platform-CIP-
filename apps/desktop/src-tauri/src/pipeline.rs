@@ -2225,4 +2225,257 @@ mod tests {
             "bible and sermon transcript segments must all survive the restart"
         );
     }
+
+    // --- Phase 3.2: sixty-minute simulated service stability ---------------
+    //
+    // A SIMULATED (not real-time - this session cannot productively spend
+    // an hour of wall-clock time waiting, and nothing here is genuinely
+    // time-driven) sustained-load proof: the same real production
+    // orchestration functions as the Phase 3.1 full-service simulation,
+    // driven across a synthetic ~60-minute timeline (spec section 13's
+    // minute-by-minute outline, compressed into 20 three-"minute" cycles of
+    // sermon + Scripture + music + presentation activate/stop), checking
+    // for the specific things a real multi-hour service could go wrong in:
+    // unbounded/explosive queue growth, duplicate-finding accumulation, or
+    // a stale presentation state left behind at the end. Real multi-hour
+    // wall-clock stability (spec section 20) is explicitly NOT claimed by
+    // this test - see `docs/phase-3-2-hardware-pilot.md`'s Multi-Hour
+    // Stability section for why that remains NOT VERIFIED in this
+    // environment.
+    #[test]
+    fn phase_3_2_sixty_minute_simulated_service_remains_stable() {
+        use cip_core_intelligence::{
+            BibleIntelligenceEngine, ContentCandidateQueue, ContentIntelligenceEngine,
+            ContextBounds, CorrelationQueue, CrossDomainCorrelationEngine, FindingQueue,
+            IntelligenceContext, IntelligenceDomain, IntelligenceEngine, IntelligenceInput,
+        };
+        use cip_core_sermon::foundation::{
+            SectionOrigin, Sermon, SermonSection, SermonSectionKind, SermonSegment,
+        };
+
+        fn fresh_seeded_conn() -> Connection {
+            let mut conn = open_in_memory().unwrap();
+            run_migrations(&mut conn).unwrap();
+            apply_dev_seed(&conn).unwrap();
+            conn
+        }
+
+        let conn = seeded_db();
+        let bible_provider = SqliteBibleProvider::new(fresh_seeded_conn());
+        let bible_engine = BibleIntelligenceEngine::new(Box::new(bible_provider), "KJV");
+        let sermon_engine = cip_core_intelligence::SermonIntelligenceEngine::new();
+        let content_engine = ContentIntelligenceEngine::new();
+        let cross_domain_engine = CrossDomainCorrelationEngine::new();
+
+        let mut findings = FindingQueue::new();
+        let mut candidates = ContentCandidateQueue::new();
+        let mut correlations = CorrelationQueue::new();
+
+        let session = ServiceSession::start("Phase 3.2 Sixty Minute Simulation");
+        persist_service(&conn, &session).unwrap();
+
+        let sermon = Sermon::start(session.id, Some("A Sustained Message".to_string()));
+        crate::persistence::persist_sermon(&conn, &sermon).unwrap();
+        let main_message = SermonSection::open(
+            sermon.id,
+            SermonSectionKind::MainMessage,
+            SectionOrigin::OperatorAssigned,
+            None,
+        );
+        crate::persistence::persist_sermon_section(&conn, &main_message).unwrap();
+
+        const CYCLES: u32 = 20; // 20 cycles * 3 "minutes" each ~= 60 minutes
+        let mut seq = 0u64;
+        let mut recent_segments = Vec::new();
+        let mut findings_after_each_cycle = Vec::with_capacity(CYCLES as usize);
+        let mut active_item_id: Option<Uuid> = None;
+
+        for cycle in 0..CYCLES {
+            // One sermon-taxonomy-shaped line per cycle (varies just enough
+            // to avoid every cycle being a literal duplicate, matching how
+            // a real sermon's phrasing varies minute to minute).
+            let sermon_text = format!(
+                "My point number {cycle} is that faith remains steady through every season."
+            );
+            let seg = segment(&sermon_text, seq);
+            seq += 1;
+            persist_transcript_segment(&conn, session.id, &seg).unwrap();
+            let link = SermonSegment::new(sermon.id, seg.id, cycle, Some(main_message.id));
+            crate::persistence::persist_sermon_segment(&conn, &link).unwrap();
+            recent_segments.push(seg.clone());
+
+            let recent_sermon_segments =
+                crate::persistence::list_sermon_segments(&conn, sermon.id).unwrap();
+            let context = IntelligenceContext::build(
+                session.id,
+                Some(cip_core_service::ServiceStatus::Started),
+                Some(seg.clone()),
+                recent_segments.clone(),
+                None,
+                findings.all().into_iter().cloned().collect(),
+                Vec::new(),
+                Vec::new(),
+                ContextBounds::default(),
+            )
+            .with_sermon_context(
+                Some(sermon.clone()),
+                Some(main_message.clone()),
+                recent_sermon_segments,
+            );
+            let input = IntelligenceInput::new(session.id, seg);
+            crate::sermon::analyze_and_queue(&sermon_engine, &input, &context, &mut findings)
+                .unwrap();
+
+            // A Scripture reference every cycle, via the real Bible engine -
+            // persisted first, exactly like the real
+            // `analyze_bible_transcript` command always does.
+            let bible_seg = segment(
+                &format!("Turn with me to Romans chapter {}", 8 + (cycle % 5)),
+                seq,
+            );
+            seq += 1;
+            persist_transcript_segment(&conn, session.id, &bible_seg).unwrap();
+            let bible_context = IntelligenceContext::build(
+                session.id,
+                None,
+                None,
+                Vec::new(),
+                None,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                ContextBounds::default(),
+            );
+            let bible_input = IntelligenceInput::new(session.id, bible_seg);
+            let bible_result = bible_engine.analyze(&bible_input, &bible_context).unwrap();
+            for f in bible_result.findings {
+                findings.add(f);
+            }
+
+            // Content candidates + cross-domain, reading whatever
+            // findings have accumulated so far.
+            let content_context = IntelligenceContext::build(
+                session.id,
+                None,
+                None,
+                Vec::new(),
+                None,
+                findings.all().into_iter().cloned().collect(),
+                Vec::new(),
+                Vec::new(),
+                ContextBounds::default(),
+            );
+            crate::content_intelligence::analyze_and_queue(
+                &content_engine,
+                &content_context,
+                &mut candidates,
+            );
+            let cross_domain_context = IntelligenceContext::build(
+                session.id,
+                None,
+                None,
+                Vec::new(),
+                None,
+                findings.all().into_iter().cloned().collect(),
+                Vec::new(),
+                Vec::new(),
+                ContextBounds::default(),
+            )
+            .with_content_candidates(candidates.all().into_iter().cloned().collect());
+            crate::cross_domain::analyze_and_queue(
+                &cross_domain_engine,
+                &cross_domain_context,
+                &mut correlations,
+            );
+
+            // A presentation activate/stop cycle every third cycle - the
+            // real operator behavior a sustained service would produce
+            // repeatedly, proving no cycle leaves a stray Active item
+            // behind for the next one to trip over.
+            if cycle % 3 == 0 {
+                let content = cip_core_presentation::PresentationContent::Text {
+                    title: None,
+                    body: format!("Cycle {cycle} slide"),
+                };
+                let item = crate::presentation::persist_prepared_item(
+                    &conn,
+                    session.id,
+                    content,
+                    cip_presentation_renderer::TEXT_DEFAULT_TEMPLATE,
+                    None,
+                )
+                .unwrap();
+                let (_, _slide) = crate::presentation::prepare_to_activate(&conn, item.id).unwrap();
+                let active = crate::presentation::commit_activation(&conn, item.id).unwrap();
+                assert_eq!(
+                    active.status,
+                    cip_core_presentation::PresentationItemStatus::Active
+                );
+                let stopped = crate::presentation::stop_active_item(&conn, session.id)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    stopped.status,
+                    cip_core_presentation::PresentationItemStatus::Stopped
+                );
+                active_item_id = Some(item.id);
+            }
+
+            findings_after_each_cycle.push(findings.all().len());
+        }
+
+        // --- stability assertions -------------------------------------------
+
+        // No panic across 20 sustained cycles is itself the primary
+        // assertion (a real crash would have failed this test already).
+        // Beyond that: growth must be bounded and roughly proportional to
+        // input, never explosive/quadratic - a real symptom a duplicate-
+        // detection or dedup regression would produce.
+        let final_findings = *findings_after_each_cycle.last().unwrap();
+        assert!(
+            final_findings <= (CYCLES as usize) * 4,
+            "finding count ({final_findings}) grew far faster than the {CYCLES} cycles that \
+             produced it - possible duplicate-accumulation regression"
+        );
+        assert!(
+            final_findings > 0,
+            "a 20-cycle simulated service must have produced at least some findings"
+        );
+
+        // Every transcript segment fed in must be persisted exactly once -
+        // no silent loss, no silent duplication.
+        let persisted_transcript =
+            crate::persistence::list_transcript_segments(&conn, session.id, 1000).unwrap();
+        assert_eq!(
+            persisted_transcript.len(),
+            seq as usize,
+            "every transcript segment fed into the simulation must be persisted exactly once"
+        );
+
+        // No stray Active presentation item survives the sustained run.
+        let all_items =
+            crate::persistence::list_presentation_items(&conn, session.id, None).unwrap();
+        assert!(
+            all_items
+                .iter()
+                .all(|i| i.status != cip_core_presentation::PresentationItemStatus::Active),
+            "no presentation item may remain Active after the simulated service concludes"
+        );
+        assert!(
+            active_item_id.is_some(),
+            "the presentation activate/stop cycle must have actually run at least once"
+        );
+
+        // Bible-domain findings must have accumulated across cycles (the
+        // real engine, not a stub), and Sermon findings likewise - both
+        // domains stayed alive for the full simulated hour.
+        assert!(findings
+            .all()
+            .iter()
+            .any(|f| f.domain == IntelligenceDomain::Bible));
+        assert!(findings
+            .all()
+            .iter()
+            .any(|f| f.domain == IntelligenceDomain::Sermon));
+    }
 }

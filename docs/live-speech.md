@@ -100,6 +100,20 @@ never has to poll - chunks arrive on the engine's own capture thread and
 are pushed straight into the speech engine from there
 (`commands.rs::handle_audio_chunk`).
 
+### Mid-capture stream failure (Phase 3.2)
+
+A `start()` call succeeding does not guarantee the stream stays healthy -
+a real microphone can be physically unplugged mid-service. cpal reports
+this asynchronously, on its own callback thread, via the `err_fn`
+supplied to `build_input_stream`. `record_stream_error` (called from that
+callback) immediately flips the shared `is_capturing` flag false and
+records the failure reason in `AudioEngineStatus.stream_error` - so
+`commands::get_live_status` reports `AudioStatusKind::Error` (with the
+specific reason surfaced in the header) rather than silently falling
+through to `Ready`/`Unavailable` once capture has already stopped. Before
+this phase, a mid-capture disconnect was invisible: `is_capturing` never
+changed and nothing else observed the failure.
+
 ## SpeechEngine: three implementations, one trait
 
 | Engine | Purpose | Ready by default? |

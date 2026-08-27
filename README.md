@@ -61,6 +61,21 @@ far - honestly reported, never fabricated. Verdict: **PILOT READY —
 CONDITIONAL**. See [`docs/phase-3-1-pilot.md`](docs/phase-3-1-pilot.md)
 for the full readiness matrix and hardware results.
 
+**Phase 3.2** attempted to remove those conditions through real hardware
+validation and prepared a production release candidate. The hardware
+picture is unchanged - still **NOT AVAILABLE**, not upgraded to VERIFIED,
+in every environment this project has been built in - but a genuine
+defect was found and fixed (a disconnected microphone mid-service was
+previously invisible to the operator), a real backup mechanism was built
+and proven with an actual restore round-trip, a hardware-diagnostics
+command was added, and a real forced-process-termination (`kill -9`)
+crash-recovery test was run against the actual release binary. Software
+gate: **RELEASE CANDIDATE**. Church hardware pilot gate: **HOLD**, pending
+real microphone/Whisper/projector verification on a church's own
+hardware. See
+[`docs/phase-3-2-hardware-pilot.md`](docs/phase-3-2-hardware-pilot.md)
+and [`docs/release-manifest-3.2.json`](docs/release-manifest-3.2.json).
+
 > **Roadmap note.** This repository's authoritative Phase 2 roadmap is:
 > 2.0 Intelligence Architecture -> 2.1 Unified Intelligence Event/Context
 > Layer -> 2.2 Music Content Foundation -> 2.3 Music Intelligence -> **2.4

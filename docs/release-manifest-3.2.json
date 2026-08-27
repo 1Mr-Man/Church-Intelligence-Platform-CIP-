@@ -1,0 +1,53 @@
+{
+  "cipVersion": "0.1.0",
+  "gitBranch": "claude/cip-foundation-init-i85g87",
+  "gitBaseCommit": "1787aae7cac88f3777e737484b615a057916b6bc",
+  "gitBaseCommitLabel": "Phase 3.1 (docs/phase-3-1-pilot.md)",
+  "note": "gitBaseCommit is the Phase 3.1 commit this build was branched from; the build itself corresponds to the Phase 3.2 commit that adds this manifest file to the repository - see 'git log' for its exact hash.",
+  "buildTarget": "Linux x86_64 .deb (Debian/Ubuntu-family)",
+  "buildMode": "release",
+  "buildTimestampUtc": "2026-08-27T19:45:35Z",
+  "artifact": {
+    "filename": "Church Intelligence Platform_0.1.0_amd64.deb",
+    "sha256": "0efe6289c3c45888e5f768f7dca9b2bafe44af263708535c35c5beeb732c5552",
+    "sizeBytes": 7258632,
+    "packageDependencies": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+  },
+  "bsbDataset": {
+    "translationId": "BSB",
+    "books": 66,
+    "chapters": 1189,
+    "verses": 31086,
+    "checksum": "d4335582ff26a3ac",
+    "checksumAlgorithm": "FNV-1a",
+    "licensingStatus": "verified_public_domain"
+  },
+  "whisperModel": {
+    "bundled": false,
+    "requirement": "optional - required only for live speech transcription; manual transcript entry is fully supported without one",
+    "configuredVia": "CIP_WHISPER_MODEL_PATH environment variable (defaults to <app-data-dir>/models/ggml-tiny.en.bin)",
+    "licensingStatus": "not applicable - CIP never bundles, downloads, or redistributes a model; the operator supplies and is responsible for their own model file's license",
+    "formatsExpected": "ggml/gguf, as consumed by whisper-rs/whisper.cpp"
+  },
+  "platforms": {
+    "claimedByTauriConfig": ["deb", "rpm", "appimage", "msi", "nsis", "dmg", "app"],
+    "builtThisPhase": ["deb"],
+    "notBuildableInThisEnvironment": {
+      "rpm": "rpmbuild not installed",
+      "appimage": "appimagetool/linuxdeploy not installed and this environment has no egress to auto-download them",
+      "msi/nsis (Windows)": "cannot cross-build a Windows installer from this Linux container",
+      "dmg/app (macOS)": "cannot cross-build a macOS installer from this Linux container"
+    }
+  },
+  "knownLimitations": [
+    "Real microphone audio capture: NOT AVAILABLE in every environment this project has been built in so far (no /dev/snd)",
+    "Real Whisper transcription of real speech: NOT AVAILABLE (needs both a real model and real microphone audio)",
+    "Physical monitor/projector output: NOT AVAILABLE (no physical display in any build environment used so far; only Xvfb virtual-display software validation exists)",
+    "Acoustic (audio-fingerprint) music recognition: no real recognition backend implemented (text/lyric-based music matching is fully functional)",
+    "CSP is null in tauri.conf.json (deferred; zero fs/shell/http/dialog plugin surface limits practical exposure - see docs/phase-3-2-hardware-pilot.md Security section)",
+    "Multi-hour (2-4 real wall-clock hours) stability: NOT VERIFIED in this environment - only a compressed simulated-load equivalent was run"
+  ],
+  "requiredHardwareForFullOperation": ["a microphone (optional - manual transcript entry is a full substitute)", "a real local Whisper model file (optional)", "a second display or projector (optional - single-display/manual-preview pilot is fully supported)"],
+  "offlineStatus": "fully offline for every core capability (Bible search/detection/presentation, all six intelligence domains, the unified workspace, presentation display); one non-functional diagnostic TCP reachability probe exists and affects only a status indicator",
+  "pilotStatus": "PILOT READY - CONDITIONAL (software); CHURCH HARDWARE PILOT = HOLD pending real microphone/Whisper/projector verification on target hardware - see docs/phase-3-2-hardware-pilot.md"
+}

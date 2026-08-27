@@ -192,6 +192,7 @@ haunting a fresh launch.
 | Header shows `Bible: NOT AVAILABLE` | The one-time Bible dataset installation did not complete | Restart CIP. If it recurs, reinstall the application. |
 | "SPEECH UNAVAILABLE" notice | No local speech model configured | Use manual transcript entry (fully supported), or configure `CIP_WHISPER_MODEL_PATH` to point at a real model file. |
 | "NO_AUDIO_DEVICE" notice | No microphone detected | Connect a microphone, or use manual transcript entry. |
+| Audio/Speech header switches to `ERROR` with a specific reason during a service | The microphone was physically disconnected (or otherwise failed) mid-capture | Reconnect the microphone and click "Start Listening" again, or switch to manual transcript entry — the service itself is never interrupted. |
 | Manual transcript button is greyed out | No service is currently started | Start a service first — every intelligence action requires an active service. |
 | "Presentation won't display" / error banner appears | The display window failed to open (rare — usually a display/driver issue) | The item remains safely "Prepared." Try Display again; if it keeps failing, check your monitor/projector connection and restart CIP. |
 | Display window closed unexpectedly | Someone closed the window directly, or it crashed | CIP detects this and reconciles the state automatically — click Display again when ready. |

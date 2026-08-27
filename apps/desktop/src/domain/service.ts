@@ -29,6 +29,13 @@ export interface AudioEngineStatus {
   sampleRateHz: number;
   /** Coarse RMS input level in `0.0..=1.0`, if the backend can report one. */
   inputLevel: number | null;
+  /**
+   * Phase 3.2: the most recent mid-capture stream failure (e.g. a
+   * microphone physically unplugged while listening), reported by the
+   * backend's own stream-error callback. `null` when capture has never
+   * failed, or has been cleared by a subsequent successful `start()`.
+   */
+  streamError: string | null;
 }
 
 /**

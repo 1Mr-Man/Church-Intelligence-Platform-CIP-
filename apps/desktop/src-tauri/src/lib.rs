@@ -314,6 +314,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_app_config,
             commands::app_health_check,
+            commands::get_pilot_diagnostics,
+            commands::backup_database,
             commands::list_bible_translations,
             commands::start_service,
             commands::pause_service,
