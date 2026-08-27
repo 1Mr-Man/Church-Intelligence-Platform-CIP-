@@ -73,7 +73,11 @@ not replace the operator's judgment.
 > The roadmap's actual Phase 2.9, Unified Operator Workspace, is a
 > frontend-only consolidation layer over every engine above - no new
 > engine, context, or backend surface - see
-> [`docs/operator-workspace.md`](operator-workspace.md).
+> [`docs/operator-workspace.md`](operator-workspace.md). The roadmap's
+> actual Phase 2.10, Full Phase 2 Validation & First-Use Readiness,
+> validated this entire architecture against the real running codebase
+> (not just its documentation) and changed nothing here - see
+> [`docs/phase-2-validation.md`](phase-2-validation.md).
 
 `core/confidence` is the one crate every other domain may depend on; the
 rest do not depend on each other except through two documented

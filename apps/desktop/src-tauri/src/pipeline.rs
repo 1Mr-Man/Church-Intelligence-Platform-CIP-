@@ -1649,6 +1649,151 @@ mod tests {
             .any(|e| e.event_name == "SCRIPTURE_CONTEXT_CORRECTED"));
     }
 
+    /// Phase 2.10 validation: every other test in this module runs the live
+    /// detection -> context -> suggestion pipeline against the tiny KJV dev
+    /// fixture. That proves the pipeline logic, but not that it behaves the
+    /// same way against the real, complete production dataset. This test
+    /// re-runs the same pipeline function (`handle_final_transcript`) against
+    /// the real, complete BSB dataset (31,086 verses, imported exactly as it
+    /// is at real application startup) to close that gap.
+    #[test]
+    fn phase_2_10_bible_pipeline_against_real_production_dataset() {
+        let conn = seeded_db();
+        let session = ServiceSession::start("Phase 2.10 Real BSB Pipeline Validation");
+        persist_service(&conn, &session).unwrap();
+
+        let bsb_translation_id = crate::bible_production_dataset::BSB_TRANSLATION_ID;
+        let mut provider_conn = open_in_memory().unwrap();
+        run_migrations(&mut provider_conn).unwrap();
+        cip_integrations_bible::import_bible_dataset(
+            &provider_conn,
+            &crate::bible_production_dataset::bsb_dataset(),
+        )
+        .unwrap();
+        let provider = SqliteBibleProvider::new(provider_conn);
+        let mut context = DefaultScriptureContextManager::new(bsb_translation_id);
+        let mut seq = 0u64;
+
+        let mut process =
+            |conn: &Connection, context: &mut DefaultScriptureContextManager, text: &str| {
+                let result = handle_final_transcript(
+                    conn,
+                    &provider,
+                    context,
+                    session.id,
+                    bsb_translation_id,
+                    segment(text, seq),
+                );
+                seq += 1;
+                result.unwrap()
+            };
+
+        // Establish context against a real book/chapter, then resolve a
+        // bare verse against it - exactly the phase_1_5 scenario, but every
+        // lookup now goes through the real 66-book BSB dataset instead of
+        // the 6-verse fixture.
+        let p = process(&conn, &mut context, "Turn with me to Genesis chapter one");
+        assert!(p.suggestions.is_empty());
+        assert_eq!(context.active_context().unwrap().book, "GEN");
+        assert_eq!(context.active_context().unwrap().chapter, 1);
+
+        let p = process(&conn, &mut context, "Look at verse one");
+        assert_eq!(p.suggestions.len(), 1);
+        assert_eq!(
+            p.detections[0].reference.as_ref().unwrap().to_string(),
+            "GEN 1:1"
+        );
+        let gen_1_1 = p.suggestions[0].id;
+
+        // Context replacement to a second real book/chapter. Verse 36 is
+        // deliberately chosen (not 16, the more famous verse): Genesis 1
+        // only has 31 verses, but real Bible data densely overlaps verse
+        // numbers across chapters in a way the tiny dev fixture never did,
+        // so a bare "verse 16" immediately after this switch would
+        // genuinely and correctly resolve as Ambiguous (John 3:16 vs.
+        // Genesis 1:16, both real verses in BSB) rather than a defect -
+        // exactly the "genuinely ambiguous - a candidate list, never a
+        // guess" behavior Phase 1.1 established. Verse 36 exists only in
+        // John 3 (Genesis 1 stops at 31), so it stays unambiguous here.
+        let p = process(&conn, &mut context, "Now turn to John chapter three");
+        assert!(p.suggestions.is_empty());
+        let p = process(&conn, &mut context, "Verse thirty-six");
+        assert_eq!(p.suggestions.len(), 1);
+        assert_eq!(
+            p.detections[0].reference.as_ref().unwrap().to_string(),
+            "JHN 3:36"
+        );
+        let jhn_3_36 = p.suggestions[0].id;
+
+        // Section 35 (repeated against the real dataset): the detector may
+        // recognize the shape of a reference, but the real BibleProvider
+        // remains authoritative - Romans 8:999 is not a real verse in BSB
+        // either, so it must still produce no suggestion.
+        let p = process(&conn, &mut context, "Turn to Romans 8:999.");
+        assert!(
+            p.suggestions.is_empty(),
+            "an out-of-range verse must never produce a suggestion against the real dataset"
+        );
+
+        // Approve both real suggestions and confirm the real BSB verse text
+        // (not the fixture's KJV wording) survives all the way to the
+        // rendered presentation slide.
+        crate::persistence::update_suggestion_status(
+            &conn,
+            gen_1_1,
+            cip_core_ai::SuggestionStatus::Approved,
+            None,
+        )
+        .unwrap();
+        let (gen_content, _) =
+            crate::presentation::build_scripture_slide(&provider, bsb_translation_id, "GEN 1:1")
+                .unwrap();
+        assert!(
+            preview_content_is_scripture_text(&gen_content, "In the beginning God created"),
+            "the real BSB Genesis 1:1 text must reach the presentation content"
+        );
+        crate::presentation::persist_prepared_item(
+            &conn,
+            session.id,
+            gen_content,
+            "SCRIPTURE_DEFAULT",
+            Some(gen_1_1),
+        )
+        .unwrap();
+
+        crate::persistence::update_suggestion_status(
+            &conn,
+            jhn_3_36,
+            cip_core_ai::SuggestionStatus::Approved,
+            None,
+        )
+        .unwrap();
+        let (jhn_content, _) =
+            crate::presentation::build_scripture_slide(&provider, bsb_translation_id, "JHN 3:36")
+                .unwrap();
+        assert!(
+            preview_content_is_scripture_text(&jhn_content, "Whoever believes in the Son"),
+            "the real BSB John 3:36 text must reach the presentation content"
+        );
+        crate::presentation::persist_prepared_item(
+            &conn,
+            session.id,
+            jhn_content,
+            "SCRIPTURE_DEFAULT",
+            Some(jhn_3_36),
+        )
+        .unwrap();
+
+        // Nothing here ever reaches Active - same invariant as every other
+        // pipeline test, now proven against the real dataset too.
+        let prepared =
+            crate::persistence::list_presentation_items(&conn, session.id, None).unwrap();
+        assert_eq!(prepared.len(), 2);
+        assert!(prepared
+            .iter()
+            .all(|item| item.status == cip_core_presentation::PresentationItemStatus::Prepared));
+    }
+
     fn preview_content_is_scripture_text(
         content: &cip_core_presentation::PresentationContent,
         needle: &str,

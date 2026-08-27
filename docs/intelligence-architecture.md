@@ -50,7 +50,12 @@ The roadmap's actual Phase 2.9, Unified Operator Workspace, adds no
 seventh engine either - it is a frontend-only projection over every
 engine's existing output, built entirely from state the frontend already
 fetches/subscribes to - see
-[`docs/operator-workspace.md`](operator-workspace.md).
+[`docs/operator-workspace.md`](operator-workspace.md). The roadmap's
+actual Phase 2.10, Full Phase 2 Validation & First-Use Readiness,
+validated every engine registered here against real data (including,
+for the first time, the real production Bible dataset rather than only
+the dev fixture) and added no new engine or context - see
+[`docs/phase-2-validation.md`](phase-2-validation.md).
 
 ## 1. Phase 2 vision
 

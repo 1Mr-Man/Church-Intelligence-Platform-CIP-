@@ -18,12 +18,23 @@ Cross-Domain Intelligence & Correlation**, **Phase 2.4 - Service
 Intelligence**, **Phase 2.5 - Sermon Intelligence Foundation**,
 **Phase 2.6 - Sermon Intelligence**, **Phase 2.7 - Content
 Intelligence**, **Phase 2.8 - Cross-Domain Intelligence**, and **Phase
-2.9 - Unified Operator Workspace**. A separate release-readiness
+2.9 - Unified Operator Workspace**, and **Phase 2.10 - Full Phase 2
+Validation & First-Use Readiness**. A separate release-readiness
 milestone (not a new intelligence phase) subsequently replaced the tiny
 development Bible fixture with a real, complete, legally-documented
 66-book production translation - see [`docs/bible-production-dataset.md`](docs/bible-production-dataset.md) -
 and a local presentation display window (a second Tauri window under
 explicit operator control) - see [`docs/presentation.md`](docs/presentation.md).
+
+**Phase 2.10** validated the entire Phase 2 stack end to end against the
+real running codebase - not just its documentation - and closed the one
+real gap it found (Bible detection/context/suggestion had never been
+tested against the real BSB dataset, only the dev fixture). Verdict:
+**first-use ready under documented conditions** (live speech requires an
+operator-supplied Whisper model or manual transcript entry; acoustic
+music recognition is not available, text/lyric matching is). See
+[`docs/phase-2-validation.md`](docs/phase-2-validation.md) for the full
+readiness matrix, evidence, and conditions.
 
 > **Roadmap note.** This repository's authoritative Phase 2 roadmap is:
 > 2.0 Intelligence Architecture -> 2.1 Unified Intelligence Event/Context
