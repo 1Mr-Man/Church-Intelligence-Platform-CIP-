@@ -1,0 +1,37 @@
+{
+  "applicationName": "Church Intelligence Platform",
+  "cipVersion": "0.1.0",
+  "gitCommit": "1a7a8a4b50936e5fb4fbfdb6bde6f2074934ae30",
+  "gitCommitShort": "1a7a8a4",
+  "gitBranch": "claude/cip-foundation-init-i85g87",
+  "targetArchitecture": "x86_64 (x64)",
+  "targetPlatform": "Windows 11 x64",
+  "installer": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "installerType": "NSIS self-extracting installer (.exe)",
+    "fileSizeBytes": 7078276,
+    "sha256": "53c1bc7f3c9a36c21ed29b3d8eebb8906f8a1eb417334116a2831052e762ccb4",
+    "buildTimestampUtc": "2026-08-27T23:34:00Z",
+    "packagedIntoReleaseTimestampUtc": "2026-08-27T23:51:50Z"
+  },
+  "architectureVerification": {
+    "outerInstallerStub": "PE32 executable (GUI) Intel 80386, Nullsoft Installer self-extracting archive - a standard 32-bit NSIS bootstrapper; this is normal NSIS behavior on Windows and does NOT mean the installed application is 32-bit",
+    "installedApplicationBinary": "cip-desktop.exe: PE32+ executable (GUI) x86-64, confirmed via `file` and `objdump -f` (file format pei-x86-64, architecture i386:x86-64) - the actual application that runs after installation is genuinely x64",
+    "method": "file(1) and x86_64-w64-mingw32-objdump -f, run directly against both the installer and the embedded application binary in this build environment"
+  },
+  "provenance": {
+    "builtDuring": "Phase 3.4 (Windows Release Candidate & Physical Hardware Qualification)",
+    "buildEnvironment": "cross-compiled from Linux using rustup target x86_64-pc-windows-gnu, gcc-mingw-w64 13, and nsis 3.09 - see docs/phase-3-4-windows-pilot.md and pilot-evidence/3.4/release/release-manifest-3.4.json",
+    "sourceCodeChangedToProduceThisArtifact": false,
+    "note": "This exact artifact (identical SHA-256, identical file size) was built and recorded during Phase 3.4 at commit 1a7a8a4. It was re-verified (not rebuilt) for this task: git status showed a clean tree at the expected Phase 3.4 HEAD, so the existing build output was confirmed still present and checksummed against the value already recorded in pilot-evidence/3.4/release/release-manifest-3.4.json before being copied here. No production source code was modified to produce this release."
+  },
+  "releaseCandidateStatement": "This is the Phase 3.4 SOFTWARE RELEASE CANDIDATE for Windows x64. It is a real, verifiable build artifact - not a placeholder, not a simulation, not a fabrication.",
+  "physicalHardwareStatement": "Physical hardware qualification has NOT been performed in the build environment. This installer has not been installed, launched, or tested on any real Windows machine, including the target HP EliteBook 830 G6. No real microphone, no real Whisper transcription, no real second display/projector, and no real operator workflow has been exercised against this artifact. Xvfb, simulated audio, virtual displays, automated tests, and cross-compilation success are Environment A/B evidence only and are never substituted for Environment C (real hardware) evidence anywhere in this project's documentation.",
+  "githubReleaseStatus": "NOT CONFIGURED - no .github/workflows directory exists in this repository, and no GitHub Release has been created for this artifact. This installer is available only via this repository's working tree (release/windows/), not via GitHub Releases or any CI/CD pipeline.",
+  "obtainingWithoutDeveloperTooling": "The file at release/windows/Church Intelligence Platform_0.1.0_x64-setup.exe can be copied/transferred directly (e.g. via a git clone of this repository, a direct file download, or a USB drive) to the target Windows machine and run there. Running the installer on Windows requires none of: Claude Code, Rust, Cargo, Node.js, npm, or the CIP source tree - only the .exe file itself.",
+  "knownLimitations": [
+    "UNSIGNED release candidate - Windows SmartScreen will show an 'unknown publisher' warning on first run",
+    "Cross-compiled from Linux, never launch-tested on real Windows hardware",
+    "See docs/phase-3-4-windows-pilot.md and pilot-evidence/3.4/ for the full Environment A/B/C evidence breakdown"
+  ]
+}
