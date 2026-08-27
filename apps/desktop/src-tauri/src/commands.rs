@@ -2511,11 +2511,27 @@ fn build_music_context(
         Some(sermon) => persistence::list_sermon_segments(&db, sermon.id)?,
         None => Vec::new(),
     };
-    Ok(context.with_sermon_context(
+    let context = context.with_sermon_context(
         active_sermon,
         current_sermon_section,
         recent_sermon_segments,
-    ))
+    );
+
+    // Phase 2.8 (per the authoritative Phase 2 roadmap): additively attach
+    // whatever Content Intelligence candidates are already queued, so
+    // Cross-Domain Intelligence can read them (see
+    // `cip_core_intelligence::rule_sermon_content`) - never a reason for
+    // either layer to call the other directly (invariant 4). Mirrors the
+    // sermon-context attachment above exactly.
+    let recent_content_candidates = state
+        .content_candidate_queue
+        .lock()
+        .expect("content_candidate_queue mutex poisoned")
+        .all()
+        .into_iter()
+        .cloned()
+        .collect();
+    Ok(context.with_content_candidates(recent_content_candidates))
 }
 
 /// The deterministic acoustic-analysis harness, exposed over IPC - the
@@ -3337,20 +3353,22 @@ pub fn get_sermon(sermon_id: String, state: State<'_, AppState>) -> Result<Sermo
         .map_err(log_and_return)
 }
 
-// --- cross-domain intelligence (Phase 2.4) ----------------------------------
+// --- cross-domain intelligence (Phase 2.4, extended in Phase 2.8) -----------
 //
 // The correlation layer only ever *reads* `state.intelligence_findings`
 // (every domain, via `build_music_context` - generic despite its name, see
-// that function's own docs) and writes to its own, separate
+// that function's own docs) and, since Phase 2.8, `state.content_candidate_queue`
+// (also via `build_music_context`) - and writes to its own, separate
 // `state.correlation_queue`. It never calls another engine directly and
-// never mutates a source finding - see `cross_domain.rs`'s module docs.
+// never mutates a source finding or a content candidate - see
+// `cross_domain.rs`'s module docs.
 
-/// Run the Phase 2.4 correlation engine against this app's real,
-/// current state and queue any new correlations - an explicit operator/
-/// diagnostic action, never triggered automatically by a transcript
-/// segment arriving (spec section 24: "read-only... never automatic").
-/// Reuses `build_music_context` to see every domain's queued findings,
-/// not just Music's.
+/// Run the correlation engine (Phase 2.4, extended in Phase 2.8) against
+/// this app's real, current state and queue any new correlations - an
+/// explicit operator/diagnostic action, never triggered automatically by a
+/// transcript segment arriving (spec section 24: "read-only... never
+/// automatic"). Reuses `build_music_context` to see every domain's queued
+/// findings and (Phase 2.8) content candidates, not just Music's.
 #[tauri::command]
 pub fn analyze_cross_domain(
     app: AppHandle,

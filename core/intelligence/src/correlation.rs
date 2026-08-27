@@ -61,6 +61,21 @@ pub enum CorrelationKind {
     /// service-lifecycle event (e.g. the service pausing/ending, or the
     /// derived sermon state itself changing).
     ServiceTransition,
+    /// A Content Intelligence candidate (Phase 2.7's `ContentCandidate`)
+    /// relates to a Bible or Music finding, via the candidate's own source
+    /// Sermon finding's transcript proximity to that finding (Phase 2.8) -
+    /// never a re-derivation of the candidate, never a mutation of its
+    /// independent `content_potential` score. See `cross_domain.rs`'s
+    /// `rule_sermon_content` for the exact evidence this requires.
+    SermonContent,
+    /// Three or more distinct `IntelligenceDomain`s converge on the same
+    /// literal transcript segment (Phase 2.8) - stronger evidence than any
+    /// single pairwise correlation among the same findings, since it
+    /// requires every domain in the set to reference that exact moment.
+    /// Never claims a causal or theological connection between the
+    /// converging domains, only that they were said together. See
+    /// `cross_domain.rs`'s `rule_multi_domain_convergence`.
+    MultiDomainConvergence,
     Other(String),
 }
 
@@ -78,6 +93,8 @@ impl CorrelationKind {
             CorrelationKind::ThemeScripture => "THEME_SCRIPTURE",
             CorrelationKind::ThemeMusic => "THEME_MUSIC",
             CorrelationKind::ServiceTransition => "SERVICE_TRANSITION",
+            CorrelationKind::SermonContent => "SERMON_CONTENT",
+            CorrelationKind::MultiDomainConvergence => "MULTI_DOMAIN_CONVERGENCE",
             CorrelationKind::Other(_) => "OTHER",
         }
     }
@@ -275,6 +292,30 @@ mod tests {
         assert!(
             x.is_equivalent_to(&y),
             "same kind + same finding-id set (any order) is the same correlation"
+        );
+    }
+
+    #[test]
+    fn sermon_content_serializes_as_a_unit_variant() {
+        let c = correlation(CorrelationKind::SermonContent, vec![Uuid::new_v4()]);
+        let json = serde_json::to_value(&c).unwrap();
+        assert_eq!(json["kind"]["kind"], "sermon_content");
+        assert!(json["kind"].get("detail").is_none());
+        assert_eq!(CorrelationKind::SermonContent.label(), "SERMON_CONTENT");
+    }
+
+    #[test]
+    fn multi_domain_convergence_serializes_as_a_unit_variant() {
+        let c = correlation(
+            CorrelationKind::MultiDomainConvergence,
+            vec![Uuid::new_v4()],
+        );
+        let json = serde_json::to_value(&c).unwrap();
+        assert_eq!(json["kind"]["kind"], "multi_domain_convergence");
+        assert!(json["kind"].get("detail").is_none());
+        assert_eq!(
+            CorrelationKind::MultiDomainConvergence.label(),
+            "MULTI_DOMAIN_CONVERGENCE"
         );
     }
 

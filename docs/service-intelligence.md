@@ -317,8 +317,8 @@ test proving the same absence of unbounded growth as part of the regular suite.
 - No semantic/statistical/ML phase classification exists or is planned as part of this phase -
   see "Deterministic-first" framing throughout this document.
 - No cross-domain correlation (e.g. "the sermon phase's content matches this Bible finding") is
-  implemented here - that is explicitly out of scope for Phase 2.4 and reserved for Phase 2.8
-  (next section).
+  implemented here - that is explicitly out of scope for this phase (Phase 2.4) and belongs to
+  Phase 2.8, now implemented; see the next section.
 
 ## 22. Known limitations
 
@@ -334,15 +334,19 @@ test proving the same absence of unbounded growth as part of the regular suite.
   application resets the current phase to `Unknown`, even though the transition history remains
   in the timeline/audit log.
 
-## 23. Future integration with Phase 2.8 Cross-Domain Intelligence
+## 23. Integration with Phase 2.8 Cross-Domain Intelligence (implemented)
 
-The existing `crate::cross_domain` correlation engine (see `docs/cross-domain-intelligence.md`)
-already reads `IntelligenceContext.recent_findings` from every domain to derive correlations.
-Service Intelligence's `ServiceState` findings are ordinary findings in that same
-`recent_findings` context, so no new integration code is required for Cross-Domain
-Intelligence to eventually correlate a service phase with, e.g., a sermon point or a Bible
-reference detected in the same window - that correlation logic itself belongs to the future,
-formal Phase 2.8 validation and is intentionally not built here.
+The `crate::cross_domain` correlation engine (see `docs/cross-domain-intelligence.md`) already
+read `IntelligenceContext.recent_findings` from every domain, including Service's own
+`ServiceState` findings, before Phase 2.8 - no new integration code was required for that part.
+What Phase 2.8 actually added was narrower than this section originally anticipated: it audited
+the existing engine and found `Service` was entirely excluded from even the weakest fallback
+rule (`rule_temporal_association`) - a Service finding could not correlate with anything at all,
+not just "not yet a sermon-point/Bible correlation." That gap is now fixed: Service participates
+in `TemporalProximity` correlations at `Immediate`/`Near` proximity like every other domain. No
+dedicated `ServiceMusic`/`ServiceScripture` `CorrelationKind` was added - see
+`docs/cross-domain-intelligence.md`'s taxonomy section for why a same-strength dedicated kind
+would not have added informational value over the existing fallback.
 
 ## Note: Phase 2.5, Sermon Intelligence Foundation
 

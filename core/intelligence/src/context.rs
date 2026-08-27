@@ -11,6 +11,7 @@ use cip_core_service::ServiceStatus;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::content_candidate::ContentCandidate;
 use crate::finding::IntelligenceFinding;
 
 /// Maximum sizes for every unbounded-in-principle collection an
@@ -40,6 +41,12 @@ pub const DEFAULT_MAX_RECENT_SERVICE_EVENTS: usize = 20;
 /// to see what recently belonged to the active sermon without holding a
 /// whole sermon's segment history.
 pub const DEFAULT_MAX_RECENT_SERMON_SEGMENTS: usize = 20;
+/// Bound for `IntelligenceContext.recent_content_candidates` (Phase 2.8,
+/// per the authoritative Phase 2 roadmap) - same order of magnitude as
+/// every other "recent" bound above, for the same reason: enough for
+/// Cross-Domain Intelligence to see recently-queued content candidates
+/// without holding a whole service's candidate history.
+pub const DEFAULT_MAX_RECENT_CONTENT_CANDIDATES: usize = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,6 +55,7 @@ pub struct ContextBounds {
     pub max_recent_findings: usize,
     pub max_recent_service_events: usize,
     pub max_recent_sermon_segments: usize,
+    pub max_recent_content_candidates: usize,
 }
 
 impl Default for ContextBounds {
@@ -57,6 +65,7 @@ impl Default for ContextBounds {
             max_recent_findings: DEFAULT_MAX_RECENT_FINDINGS,
             max_recent_service_events: DEFAULT_MAX_RECENT_SERVICE_EVENTS,
             max_recent_sermon_segments: DEFAULT_MAX_RECENT_SERMON_SEGMENTS,
+            max_recent_content_candidates: DEFAULT_MAX_RECENT_CONTENT_CANDIDATES,
         }
     }
 }
@@ -125,6 +134,19 @@ pub struct IntelligenceContext {
     /// Bounded by `bounds.max_recent_sermon_segments` - see
     /// [`Self::with_sermon_context`].
     pub recent_sermon_segments: Vec<SermonSegment>,
+    /// Recently-queued Content Intelligence candidates (Phase 2.8, per the
+    /// authoritative Phase 2 roadmap), if the caller attached them - `None`
+    /// both when no candidates exist yet and when the caller never called
+    /// [`Self::with_content_candidates`] at all. Never set directly by
+    /// [`Self::build`], mirroring [`Self::active_sermon`]'s own additive
+    /// discipline exactly: every existing call site of `build` (Bible/
+    /// Music/Sermon/Service/CrossDomain adapters and their tests) remains
+    /// valid, unmodified source. Cross-Domain Intelligence is the first
+    /// reader of this field (see `cross_domain.rs::rule_sermon_content`);
+    /// it exists so a `ContentCandidate` can be correlated with findings
+    /// from other domains without Cross-Domain Intelligence re-detecting
+    /// or re-deriving anything Content Intelligence already produced.
+    pub recent_content_candidates: Vec<ContentCandidate>,
     pub bounds: ContextBounds,
 }
 
@@ -164,6 +186,7 @@ impl IntelligenceContext {
             active_sermon: None,
             current_sermon_section: None,
             recent_sermon_segments: Vec::new(),
+            recent_content_candidates: Vec::new(),
             bounds,
         }
     }
@@ -186,6 +209,24 @@ impl IntelligenceContext {
         self.recent_sermon_segments = truncate_to_most_recent(
             recent_sermon_segments,
             self.bounds.max_recent_sermon_segments,
+        );
+        self
+    }
+
+    /// Attach recently-queued Content Intelligence candidates (Phase 2.8,
+    /// per the authoritative Phase 2 roadmap) additively, after
+    /// [`Self::build`] - never a required constructor argument, mirroring
+    /// [`Self::with_sermon_context`] exactly. `recent_content_candidates`
+    /// is truncated to this context's own
+    /// `bounds.max_recent_content_candidates`, the same most-recent-first
+    /// truncation every other bounded collection here already uses.
+    pub fn with_content_candidates(
+        mut self,
+        recent_content_candidates: Vec<ContentCandidate>,
+    ) -> Self {
+        self.recent_content_candidates = truncate_to_most_recent(
+            recent_content_candidates,
+            self.bounds.max_recent_content_candidates,
         );
         self
     }
@@ -446,6 +487,92 @@ mod tests {
         );
     }
 
+    // --- Content Intelligence context extension (Phase 2.8) -----------------
+
+    fn candidate(service_id: Uuid) -> ContentCandidate {
+        use crate::content_candidate::ContentCandidateType;
+        use crate::domain::AssertionLevel;
+        use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
+
+        ContentCandidate::new(
+            service_id,
+            None,
+            vec![Uuid::new_v4()],
+            ContentCandidateType::Theme,
+            "Theme: faith",
+            "Theme: faith",
+            AssertionLevel::Suggested,
+            ConfidenceResult::new(0.8, ConfidenceSource::Heuristic, None),
+            0.5,
+            "sermon-content",
+            "1.0",
+        )
+    }
+
+    #[test]
+    fn a_plain_build_never_carries_content_candidates() {
+        let context = IntelligenceContext::build(
+            Uuid::new_v4(),
+            None,
+            None,
+            Vec::new(),
+            None,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            ContextBounds::default(),
+        );
+        assert!(context.recent_content_candidates.is_empty());
+    }
+
+    #[test]
+    fn with_content_candidates_truncates_to_bounds() {
+        let service_id = Uuid::new_v4();
+        let candidates: Vec<ContentCandidate> = (0..50).map(|_| candidate(service_id)).collect();
+        let bounds = ContextBounds {
+            max_recent_content_candidates: 5,
+            ..ContextBounds::default()
+        };
+        let context = IntelligenceContext::build(
+            service_id,
+            None,
+            None,
+            Vec::new(),
+            None,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            bounds,
+        )
+        .with_content_candidates(candidates);
+
+        assert_eq!(context.recent_content_candidates.len(), 5);
+    }
+
+    #[test]
+    fn ten_thousand_content_candidates_never_produce_an_unbounded_context() {
+        let service_id = Uuid::new_v4();
+        let candidates: Vec<ContentCandidate> =
+            (0..10_000).map(|_| candidate(service_id)).collect();
+        let context = IntelligenceContext::build(
+            service_id,
+            None,
+            None,
+            Vec::new(),
+            None,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            ContextBounds::default(),
+        )
+        .with_content_candidates(candidates);
+
+        assert_eq!(
+            context.recent_content_candidates.len(),
+            DEFAULT_MAX_RECENT_CONTENT_CANDIDATES
+        );
+    }
+
     #[test]
     fn context_serializes_with_camel_case_fields() {
         let context = IntelligenceContext::build(
@@ -466,5 +593,6 @@ mod tests {
         assert!(json.get("activeSermon").is_some());
         assert!(json.get("currentSermonSection").is_some());
         assert!(json.get("recentSermonSegments").is_some());
+        assert!(json.get("recentContentCandidates").is_some());
     }
 }

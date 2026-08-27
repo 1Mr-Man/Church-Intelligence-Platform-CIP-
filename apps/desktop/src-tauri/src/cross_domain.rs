@@ -1,17 +1,24 @@
-//! Cross-Domain Intelligence orchestration (Phase 2.4) - the correlation-layer
-//! counterpart to `music.rs`/`sermon.rs`. Deliberately Tauri-agnostic (plain
-//! functions over domain types, no `AppHandle`/`State`), matching the
-//! established per-domain orchestration-module pattern.
+//! Cross-Domain Intelligence orchestration, first built in Phase 2.4 and
+//! extended in Phase 2.8 (per the authoritative Phase 2 roadmap) - the
+//! correlation-layer counterpart to `music.rs`/`sermon.rs`. Deliberately
+//! Tauri-agnostic (plain functions over domain types, no `AppHandle`/
+//! `State`), matching the established per-domain orchestration-module
+//! pattern.
 //!
 //! `CrossDomainCorrelationEngine` (`core/intelligence::cross_domain`) is not
 //! an `IntelligenceEngine` and is never registered into
 //! `IntelligenceEngineRegistry` (see that type's own module docs) - it reads
 //! an already-built `IntelligenceContext` (in particular,
-//! `context.recent_findings`, spanning every domain) and produces
+//! `context.recent_findings`, spanning every domain, and - since Phase 2.8 -
+//! `context.recent_content_candidates`) and produces
 //! [`IntelligenceCorrelation`]s, never findings. This module's job is only
 //! to call it and queue the result into `AppState.correlation_queue`,
 //! exactly mirroring `music::analyze_and_queue`/`sermon::analyze_and_queue`'s
-//! shape for a different element type.
+//! shape for a different element type. Phase 2.8 added no new function
+//! here at all: `commands::build_music_context` now additionally attaches
+//! `state.content_candidate_queue` before calling this module's
+//! `analyze_and_queue`, so every new rule in the core engine becomes live
+//! with zero changes to this orchestration layer.
 
 use cip_core_intelligence::{
     CorrelationQueue, CorrelationQueueAddOutcome, CrossDomainCorrelationEngine,

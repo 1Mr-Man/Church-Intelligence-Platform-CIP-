@@ -630,16 +630,20 @@ now transforms eligible Sermon Intelligence findings into
   dependency on `cip_core_presentation`, and nothing here imports or
   references any content-generation type).
 
-## Phase 2.8 handoff (Cross-Domain Intelligence)
+## Phase 2.8 handoff (Cross-Domain Intelligence) - fulfilled
 
-Every Sermon finding now carries everything a future correlation rule
-needs to relate it to Bible/Music/Service findings without re-deriving
-anything: `domain`, `kind`, `serviceId`, `sermonId` (new, Phase 2.6),
-`evidence`, `confidence`, `assertionLevel`, `createdAt`, and
-`engineId`/`engineVersion`. No correlation rule is implemented here - that
-remains exclusively Phase 2.8's responsibility, per the spec's own
-instruction and this repository's `cross_domain.rs`, which is untouched by
-this phase.
+Every Sermon finding carried everything a correlation rule needs to relate
+it to Bible/Music/Service findings without re-deriving anything: `domain`,
+`kind`, `serviceId`, `sermonId` (Phase 2.6), `evidence`, `confidence`,
+`assertionLevel`, `createdAt`, and `engineId`/`engineVersion` - no field
+promised here needed to change for Phase 2.8's two new rules
+(`sermon_content_v1`, `multi_domain_convergence_v1`) to be built. No
+correlation rule is implemented in *this* file or in `sermon_adapter.rs` -
+both remain exactly as this phase left them; every new rule lives in
+`core/intelligence::cross_domain`, per the same layering this section
+originally promised. See
+[`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md) for
+what was actually built.
 
 ## PROVEN
 
@@ -699,9 +703,10 @@ this phase.
 - Multilingual intelligence beyond the implemented English rule set.
 - Polished AI-generated sermon summaries or automatic social-media
   content - reserved for Phase 2.7 (see "Phase 2.7 handoff" above).
-- Cross-domain correlation rules - reserved for Phase 2.8 (see "Phase 2.8
-  handoff" above); this phase only ensures findings carry what Phase 2.8
-  will need.
+- Cross-domain correlation rules involving Sermon findings are not
+  implemented in this file - they live in `core/intelligence::cross_domain`,
+  per Phase 2.8 (see "Phase 2.8 handoff" above and
+  [`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md)).
 - Live-pipeline auto-dispatch - Sermon Intelligence remains manual-command-
   only (`analyze_sermon_transcript`), exactly as it was before Phase 2.6;
   `pipeline.rs::handle_final_transcript` is untouched.

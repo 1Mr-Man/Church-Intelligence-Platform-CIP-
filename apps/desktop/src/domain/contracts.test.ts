@@ -436,6 +436,52 @@ describe("domain contracts", () => {
     expect(correlation.ruleId).toBe("scripture_sermon_v1");
   });
 
+  it("constructs a Phase 2.8 SermonContent correlation linking a content candidate id to a Bible finding", () => {
+    const confidence: ConfidenceResult = { score: 0.65, level: "medium", source: "heuristic", reason: "Immediate transcript proximity" };
+    const correlation: IntelligenceCorrelation = {
+      id: "88888888-8888-8888-8888-888888888888",
+      serviceId: "22222222-2222-2222-2222-222222222222",
+      sourceFindingIds: ["99999999-9999-9999-9999-999999999999", "66666666-6666-6666-6666-666666666666"],
+      domains: ["content", "bible"],
+      kind: { kind: "sermon_content" },
+      assertionLevel: "inferred",
+      status: "detected",
+      confidence,
+      summary: "Content candidate 'Theme: faith' relates to ROM 8:28",
+      evidence: [],
+      ruleId: "sermon_content_v1",
+      ruleVersion: "1.0",
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    expect(correlation.kind.kind).toBe("sermon_content");
+    expect(correlation.domains).toEqual(["content", "bible"]);
+  });
+
+  it("constructs a Phase 2.8 MultiDomainConvergence correlation spanning three or more domains", () => {
+    const confidence: ConfidenceResult = { score: 0.85, level: "high", source: "heuristic", reason: "3 distinct domains share the same transcript segment" };
+    const correlation: IntelligenceCorrelation = {
+      id: "10101010-1010-1010-1010-101010101010",
+      serviceId: "22222222-2222-2222-2222-222222222222",
+      sourceFindingIds: [
+        "11111111-1111-1111-1111-111111111111",
+        "66666666-6666-6666-6666-666666666666",
+        "33333333-3333-3333-3333-333333333333",
+      ],
+      domains: ["bible", "sermon", "music"],
+      kind: { kind: "multi_domain_convergence" },
+      assertionLevel: "inferred",
+      status: "detected",
+      confidence,
+      summary: "3 domains converge on the same transcript moment",
+      evidence: [],
+      ruleId: "multi_domain_convergence_v1",
+      ruleVersion: "1.0",
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    expect(correlation.kind.kind).toBe("multi_domain_convergence");
+    expect(correlation.domains.length).toBeGreaterThanOrEqual(3);
+  });
+
   it("moves a correlation through the review/dismiss lifecycle using FindingStatus, never a separate status enum", () => {
     const detected: FindingStatus = "detected";
     const reviewed: FindingStatus = "reviewed";

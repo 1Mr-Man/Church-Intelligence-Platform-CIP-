@@ -513,8 +513,8 @@ read-only-except-review/dismiss view layered on top of the workflows
 above - it never changes how Scripture detection, Music, or Sermon
 findings themselves are produced or reviewed. See
 [`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md). Under
-this repository's authoritative Phase 2 roadmap, this work is reserved
-for formal validation as Phase 2.8; the roadmap's actual Phase 2.4 is
+this repository's authoritative Phase 2 roadmap, this engine was extended
+as the roadmap's actual Phase 2.8; the roadmap's actual Phase 2.4 is
 Service Intelligence - see
 [`docs/service-intelligence.md`](service-intelligence.md).
 

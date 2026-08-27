@@ -387,11 +387,11 @@ end/title/speaker/section/segment-link action can create, activate, or otherwise
 `PresentationItem`.
 
 > **Roadmap note.** Under this repository's authoritative Phase 2 roadmap,
-> the cross-domain correlation engine referenced above is reserved for
-> formal validation as Phase 2.8; the roadmap's actual Phase 2.4 is
-> Service Intelligence. The "Phase 2.4" label on the correlation engine is
-> a historical artifact from before this roadmap was adopted and is not
-> rewritten.
+> the cross-domain correlation engine referenced above was extended as the
+> roadmap's actual Phase 2.8; the roadmap's actual Phase 2.4 is Service
+> Intelligence. The "Phase 2.4" label on the correlation engine's original
+> build is a historical artifact from before this roadmap was adopted and
+> is not rewritten.
 Phase 2.2's acoustic-sourced findings are the exact same
 `IntelligenceFinding`/`FindingQueue` types, so this guarantee extends to
 them automatically - accepting an acoustic finding only ever sets

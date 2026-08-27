@@ -261,6 +261,16 @@ No `content_candidates` table was added, and none is needed - a completed
 service's already-persisted findings are sufficient to re-derive every
 candidate by re-running `analyze_content_intelligence` if ever needed.
 
+**Phase 2.8 update:** `content_candidate_queue` gained a second reader.
+Cross-Domain Intelligence's `analyze_cross_domain()` now additionally
+attaches whatever is already queued here to the `IntelligenceContext` it
+builds (via `IntelligenceContext.with_content_candidates`), so a candidate
+can be correlated with a Bible or Music finding (`CorrelationKind::SermonContent`)
+- see `docs/cross-domain-intelligence.md`. This is a read-only addition:
+nothing here changed, `ContentIntelligenceEngine` gained no new caller
+inside itself, and a candidate's own fields (`contentPotential` included)
+are never mutated by the correlation layer.
+
 ## Content Registry non-conflation
 
 `core/content` (the Phase 1.5 Content Registry - `ContentType`/

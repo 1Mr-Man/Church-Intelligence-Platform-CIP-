@@ -61,12 +61,15 @@ not replace the operator's judgment.
 > modules (`detection`/`state`/`structure`/`taxonomy`/`theme`), were both
 > built under earlier, internal phase labels ("Phase 2.4" and "Phase 2.3"
 > respectively) before this roadmap was adopted; those labels are
-> historical artifacts and are not rewritten. The cross-domain engine is
-> reserved for formal validation under the roadmap's actual Phase 2.8; the
+> historical artifacts and are not rewritten. The
 > semantic sermon detection modules were subsequently extended in place as
 > the roadmap's actual Phase 2.6 (see [`docs/sermon-intelligence.md`](sermon-intelligence.md)),
 > with the roadmap's actual Phase 2.5 being the separate `foundation`
-> submodule referenced above.
+> submodule referenced above. The cross-domain engine was itself
+> subsequently extended in place as the roadmap's actual Phase 2.8 (two new
+> `CorrelationKind` variants, `SermonContent` and `MultiDomainConvergence`,
+> and `IntelligenceContext` gaining a `ContentCandidate`-aware builder) -
+> see [`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md).
 
 `core/confidence` is the one crate every other domain may depend on; the
 rest do not depend on each other except through two documented

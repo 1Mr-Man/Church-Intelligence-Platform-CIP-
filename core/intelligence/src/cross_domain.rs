@@ -1,11 +1,16 @@
-//! [`CrossDomainCorrelationEngine`]: the correlation layer (Phase 2.4).
-//! Reads already-produced findings out of a shared [`IntelligenceContext`]
-//! and derives [`IntelligenceCorrelation`]s between them - it never calls
-//! `BibleIntelligenceEngine`, `MusicIntelligenceEngine`, or
-//! `SermonIntelligenceEngine` directly, and it never mutates a source
-//! finding, the transcript, or the active Scripture context. See
-//! `docs/cross-domain-intelligence.md` for the full rule catalogue,
-//! confidence hierarchy, and design rationale.
+//! [`CrossDomainCorrelationEngine`]: the correlation layer, first built in
+//! Phase 2.4 and extended in Phase 2.8 (per the authoritative Phase 2
+//! roadmap) once Service Intelligence, Sermon Foundation, and Content
+//! Intelligence existed to correlate against. Reads already-produced
+//! findings (and, since Phase 2.8, already-produced Content Intelligence
+//! candidates) out of a shared [`IntelligenceContext`] and derives
+//! [`IntelligenceCorrelation`]s between them - it never calls
+//! `BibleIntelligenceEngine`, `MusicIntelligenceEngine`,
+//! `SermonIntelligenceEngine`, `ServiceIntelligenceEngine`, or
+//! `ContentIntelligenceEngine` directly, and it never mutates a source
+//! finding, a content candidate, the transcript, or the active Scripture
+//! context. See `docs/cross-domain-intelligence.md` for the full rule
+//! catalogue, confidence hierarchy, and design rationale.
 //!
 //! ## Why this is not an `IntelligenceEngine`
 //!
@@ -37,6 +42,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
 use uuid::Uuid;
 
+use crate::content_candidate::ContentCandidate;
 use crate::context::{IntelligenceContext, ServiceEventSummary};
 use crate::correlation::{CorrelationKind, IntelligenceCorrelation};
 use crate::domain::{AssertionLevel, FindingStatus, IntelligenceDomain};
@@ -53,6 +59,11 @@ const RULE_THEME_MUSIC: &str = "theme_music_v1";
 const RULE_SCRIPTURE_MUSIC: &str = "scripture_music_v1";
 const RULE_SERVICE_TRANSITION: &str = "service_transition_v1";
 const RULE_TEMPORAL_ASSOCIATION: &str = "temporal_association_v1";
+/// Phase 2.8 (per the authoritative Phase 2 roadmap) - see
+/// [`rule_sermon_content`].
+const RULE_SERMON_CONTENT: &str = "sermon_content_v1";
+/// Phase 2.8 - see [`rule_multi_domain_convergence`].
+const RULE_MULTI_DOMAIN_CONVERGENCE: &str = "multi_domain_convergence_v1";
 
 // --- temporal windows (spec section 12) ------------------------------------
 
@@ -135,6 +146,11 @@ struct AnalysisContext<'a> {
     by_domain: HashMap<IntelligenceDomain, Vec<&'a IntelligenceFinding>>,
     segment_sequence: HashMap<Uuid, u64>,
     recent_service_events: &'a [ServiceEventSummary],
+    /// Recently-queued Content Intelligence candidates (Phase 2.8), already
+    /// excluding `Rejected` ones - see [`rule_sermon_content`]. Never a
+    /// re-detection: this is exactly `IntelligenceContext.recent_content_candidates`,
+    /// filtered the same way `by_domain` filters findings.
+    recent_content_candidates: Vec<&'a ContentCandidate>,
 }
 
 impl<'a> AnalysisContext<'a> {
@@ -154,11 +170,17 @@ impl<'a> AnalysisContext<'a> {
             .iter()
             .map(|s| (s.id, s.sequence))
             .collect();
+        let recent_content_candidates = context
+            .recent_content_candidates
+            .iter()
+            .filter(|c| c.status != FindingStatus::Rejected)
+            .collect();
         Self {
             service_id: context.service_id,
             by_domain,
             segment_sequence,
             recent_service_events: &context.recent_service_events,
+            recent_content_candidates,
         }
     }
 
@@ -167,6 +189,22 @@ impl<'a> AnalysisContext<'a> {
             .get(&domain)
             .map(Vec::as_slice)
             .unwrap_or(&[])
+    }
+
+    /// The Sermon-domain finding a content candidate was derived from, if
+    /// it's still within the bounded recent-findings window - never
+    /// guessed, and `None` when the parent finding has aged out (the
+    /// candidate simply cannot be correlated in that case, exactly like
+    /// [`temporal_relationship`] returning `None` for an unresolved
+    /// segment id).
+    fn content_candidate_parent(
+        &self,
+        candidate: &ContentCandidate,
+    ) -> Option<&'a IntelligenceFinding> {
+        self.domain(IntelligenceDomain::Sermon)
+            .iter()
+            .find(|f| candidate.source_finding_ids.contains(&f.id))
+            .copied()
     }
 }
 
@@ -559,9 +597,176 @@ fn rule_service_transition(ctx: &AnalysisContext) -> Vec<IntelligenceCorrelation
     out
 }
 
+/// A Content Intelligence candidate (Phase 2.7's `ContentCandidate`)
+/// relates to a Bible or Music finding, via the candidate's own source
+/// Sermon finding's transcript proximity to that finding (Phase 2.8) -
+/// never a re-derivation of the candidate itself (its `content_potential`,
+/// `title_or_label`, and `working_concept` are read but never recomputed
+/// or mutated), and never a correlation between the candidate and its own
+/// parent Sermon finding (that link already exists, verbatim, as
+/// `ContentCandidate.source_finding_ids` - restating it as a correlation
+/// would be a tautology, not a discovery). One tier lower than
+/// [`rule_theme_scripture`]'s confidence at each tier, since a content
+/// candidate is one derivation step further from the transcript than the
+/// Sermon finding it came from.
+fn rule_sermon_content(ctx: &AnalysisContext) -> Vec<IntelligenceCorrelation> {
+    let mut out = Vec::new();
+    for candidate in &ctx.recent_content_candidates {
+        let Some(parent) = ctx.content_candidate_parent(candidate) else {
+            continue;
+        };
+        for (domain, other) in ctx
+            .domain(IntelligenceDomain::Bible)
+            .iter()
+            .map(|f| (IntelligenceDomain::Bible, *f))
+            .chain(
+                ctx.domain(IntelligenceDomain::Music)
+                    .iter()
+                    .map(|f| (IntelligenceDomain::Music, *f)),
+            )
+        {
+            let Some(tier) = temporal_relationship(parent, other, &ctx.segment_sequence) else {
+                continue;
+            };
+            let score = match tier {
+                TemporalTier::Immediate => 0.65,
+                TemporalTier::Near => 0.45,
+                TemporalTier::Recent => continue,
+            };
+            out.push(
+                IntelligenceCorrelation::new(
+                    ctx.service_id,
+                    vec![candidate.id, other.id],
+                    vec![IntelligenceDomain::Content, domain],
+                    CorrelationKind::SermonContent,
+                    AssertionLevel::Inferred,
+                    confidence(
+                        score,
+                        format!(
+                            "{tier:?} transcript proximity between content candidate's source sermon finding and a {domain:?} finding"
+                        ),
+                    ),
+                    format!(
+                        "Content candidate '{}' relates to {}",
+                        candidate.title_or_label, other.summary
+                    ),
+                    RULE_SERMON_CONTENT,
+                    RULE_VERSION,
+                )
+                // Reuses `AnotherFinding` for the candidate's own id as
+                // well as `other`'s - both are Uuid-identified derived
+                // intelligence objects (see `EvidenceSource`'s docs);
+                // introducing a parallel evidence variant only for this
+                // one link would violate this crate's reuse discipline.
+                .with_evidence(vec![
+                    crate::evidence::EvidenceSource::AnotherFinding {
+                        finding_id: candidate.id,
+                    },
+                    crate::evidence::EvidenceSource::AnotherFinding { finding_id: other.id },
+                    crate::evidence::EvidenceSource::Temporal {
+                        description: format!("{tier:?} transcript proximity (via source sermon finding)"),
+                    },
+                ]),
+            );
+        }
+    }
+    out
+}
+
+/// Three or more distinct `IntelligenceDomain`s' findings share the same
+/// literal transcript segment (Phase 2.8) - stronger evidence than any
+/// single pairwise rule alone, since every domain in the group references
+/// the exact same moment, not merely a nearby one. Deliberately scoped to
+/// true `IntelligenceFinding` domains (Bible/Music/Sermon/Service); Content
+/// candidates are not included here (see [`rule_sermon_content`] for the
+/// one rule that does connect them) - a candidate carries no
+/// `transcript_segment_ids` of its own to cluster by. Never claims a
+/// causal or theological connection, only that the domains were said
+/// together (spec: "RELATIONSHIP != COINCIDENCE" still applies - this rule
+/// reports the coincidence honestly, as breadth of evidence, not as
+/// meaning).
+fn rule_multi_domain_convergence(ctx: &AnalysisContext) -> Vec<IntelligenceCorrelation> {
+    let mut out = Vec::new();
+    let convergence_domains = [
+        IntelligenceDomain::Bible,
+        IntelligenceDomain::Music,
+        IntelligenceDomain::Sermon,
+        IntelligenceDomain::Service,
+    ];
+    let mut by_segment: HashMap<Uuid, Vec<&IntelligenceFinding>> = HashMap::new();
+    for domain in convergence_domains {
+        for finding in ctx.domain(domain) {
+            for seg_id in &finding.transcript_segment_ids {
+                by_segment.entry(*seg_id).or_default().push(finding);
+            }
+        }
+    }
+    let mut segment_ids: Vec<Uuid> = by_segment.keys().copied().collect();
+    segment_ids.sort_unstable();
+
+    for seg_id in segment_ids {
+        let findings = &by_segment[&seg_id];
+        let domains_present: Vec<IntelligenceDomain> = convergence_domains
+            .iter()
+            .copied()
+            .filter(|d| findings.iter().any(|f| f.domain == *d))
+            .collect();
+        if domains_present.len() < 3 {
+            continue;
+        }
+        let mut ids: Vec<Uuid> = findings.iter().map(|f| f.id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        let score = if domains_present.len() >= 4 {
+            0.9
+        } else {
+            0.85
+        };
+        let summaries: Vec<&str> = findings.iter().map(|f| f.summary.as_str()).collect();
+        out.push(
+            IntelligenceCorrelation::new(
+                ctx.service_id,
+                ids.clone(),
+                domains_present.clone(),
+                CorrelationKind::MultiDomainConvergence,
+                AssertionLevel::Inferred,
+                confidence(
+                    score,
+                    format!(
+                        "{} distinct domains share the same transcript segment",
+                        domains_present.len()
+                    ),
+                ),
+                format!(
+                    "{} domains converge on the same transcript moment: {}",
+                    domains_present.len(),
+                    summaries.join("; ")
+                ),
+                RULE_MULTI_DOMAIN_CONVERGENCE,
+                RULE_VERSION,
+            )
+            .with_evidence(
+                ids.iter()
+                    .map(|id| crate::evidence::EvidenceSource::AnotherFinding { finding_id: *id })
+                    .collect(),
+            ),
+        );
+    }
+    out
+}
+
 /// Fallback: any cross-domain pair at `Immediate`/`Near` proximity not
 /// already claimed by a stronger rule - always low confidence, never
-/// promoted further (spec section 12).
+/// promoted further (spec section 12). Phase 2.8 adds `Service` to this
+/// domain set - previously a Service finding could never participate even
+/// in this weakest fallback, leaving Service<->Music and Service<->Scripture
+/// with no correlation path at all. No dedicated `ServiceMusic`/
+/// `ServiceScripture` `CorrelationKind` was added: no evidence stronger
+/// than temporal proximity connects these pairs anywhere in this engine
+/// (unlike Sermon<->Service, which keeps its own [`rule_service_transition`]
+/// because a sermon conclusion signal is meaningfully, specifically tied to
+/// a service-lifecycle event) - inventing a same-strength dedicated kind
+/// would only add taxonomy surface without adding informational value.
 fn rule_temporal_association(
     ctx: &AnalysisContext,
     claimed: &HashSet<(Uuid, Uuid)>,
@@ -571,6 +776,7 @@ fn rule_temporal_association(
         IntelligenceDomain::Bible,
         IntelligenceDomain::Music,
         IntelligenceDomain::Sermon,
+        IntelligenceDomain::Service,
     ];
     for i in 0..domains.len() {
         for j in (i + 1)..domains.len() {
@@ -639,6 +845,8 @@ const STRONG_RULES: &[Rule] = &[
     rule_theme_music,
     rule_scripture_music,
     rule_service_transition,
+    rule_sermon_content,
+    rule_multi_domain_convergence,
 ];
 
 /// The Phase 2.4 correlation layer. Stateless (no fields yet - reserved
@@ -1305,6 +1513,124 @@ mod tests {
         }
     }
 
+    /// Phase 2.8's own full-service walkthrough: Service enters Worship,
+    /// a song is recognized alongside a worship-transition sermon signal
+    /// (Service + Music + Sermon converge on the same moment), the sermon
+    /// moves into its main point with a supporting Scripture reference to
+    /// ROM 8:28 (a real Bible finding, matching the just-completed BSB
+    /// production dataset milestone's reference format), and Content
+    /// Intelligence has already queued a candidate from that main point.
+    /// Every correlation asserted here traces to real, implemented
+    /// evidence - this is not a claim that these four kinds always
+    /// co-occur, only that they do when the evidence genuinely supports
+    /// each one independently (spec: "ONLY emit relationships whose
+    /// actual evidence meets the implemented rules").
+    #[test]
+    fn phase_2_8_canonical_full_service_walkthrough() {
+        let service_id = Uuid::new_v4();
+        let seg_worship = segment(0);
+        let seg_teaching = segment(1);
+
+        // Service enters Worship, a song is recognized, and a
+        // worship-transition sermon signal all land on the same moment -
+        // three distinct domains converging on one literal segment.
+        let service_worship = service_finding(service_id, "Phase: Worship", &[seg_worship.id]);
+        let music = music_finding(service_id, "Test Fixture Hymn One", &[seg_worship.id]);
+        let transition = sermon_finding(
+            service_id,
+            "Transition: WORSHIP -> TEACHING",
+            &[seg_worship.id],
+        );
+
+        // The sermon's main point, its explicit Scripture cross-link, and
+        // the real Bible finding it supports.
+        let main_point = sermon_finding(
+            service_id,
+            "Main Point: Trusting God during difficult seasons",
+            &[seg_teaching.id],
+        );
+        let scripture_link = sermon_finding(
+            service_id,
+            "Supporting Scripture: ROM 8:28",
+            &[seg_teaching.id],
+        );
+        let verse28 = bible_finding(service_id, "ROM 8:28", &[seg_teaching.id]);
+
+        // Content Intelligence has already queued a candidate from the
+        // main point - Cross-Domain never re-derives it, only reads it.
+        let candidate = content_candidate_for(
+            service_id,
+            &main_point,
+            "Teaching: Trusting God during difficult seasons",
+        );
+
+        let context = build_context_with_candidates(
+            service_id,
+            vec![seg_worship, seg_teaching],
+            vec![
+                service_worship.clone(),
+                music.clone(),
+                transition.clone(),
+                main_point.clone(),
+                scripture_link.clone(),
+                verse28.clone(),
+            ],
+            Vec::new(),
+            vec![candidate.clone()],
+        );
+
+        let correlations = CrossDomainCorrelationEngine::new().analyze(&context);
+
+        // ScriptureSermon: the explicit cross-link exactly matches the
+        // real Bible finding.
+        let scripture_sermon = correlations
+            .iter()
+            .find(|c| {
+                c.kind == CorrelationKind::ScriptureSermon
+                    && c.source_finding_ids.contains(&scripture_link.id)
+                    && c.source_finding_ids.contains(&verse28.id)
+            })
+            .expect("expected ScriptureSermon: exact reference match");
+        assert_eq!(scripture_sermon.confidence.score, 0.95);
+
+        // SermonMusic: the transition signal shares the worship segment
+        // with the recognized song.
+        assert!(correlations
+            .iter()
+            .any(|c| c.kind == CorrelationKind::SermonMusic
+                && c.source_finding_ids.contains(&transition.id)
+                && c.source_finding_ids.contains(&music.id)));
+
+        // MultiDomainConvergence: Service + Music + Sermon all reference
+        // the same worship-segment moment.
+        let convergence = correlations
+            .iter()
+            .find(|c| c.kind == CorrelationKind::MultiDomainConvergence)
+            .expect("expected a MultiDomainConvergence correlation");
+        assert_eq!(convergence.domains.len(), 3);
+        for id in [service_worship.id, music.id, transition.id] {
+            assert!(convergence.source_finding_ids.contains(&id));
+        }
+
+        // SermonContent: the candidate (derived from the main point)
+        // relates to the real Bible finding sharing the main point's
+        // teaching-segment moment - never restated against its own parent.
+        let sermon_content = correlations
+            .iter()
+            .find(|c| c.kind == CorrelationKind::SermonContent)
+            .expect("expected a SermonContent correlation");
+        assert!(sermon_content.source_finding_ids.contains(&candidate.id));
+        assert!(sermon_content.source_finding_ids.contains(&verse28.id));
+        assert!(!sermon_content.source_finding_ids.contains(&main_point.id));
+
+        // No presentation side effect anywhere in this analysis, and every
+        // correlation is honestly `Inferred` - never `Generated`.
+        assert!(correlations
+            .iter()
+            .all(|c| c.status == FindingStatus::Detected
+                && c.assertion_level == AssertionLevel::Inferred));
+    }
+
     // --- theme-scripture / theme-music / service-transition rules ----------
 
     #[test]
@@ -1389,6 +1715,331 @@ mod tests {
             1,
             "only the near event should correlate: {hits:?}"
         );
+    }
+
+    // --- Phase 2.8: content candidates, multi-domain convergence, Service ----
+
+    fn service_finding(service_id: Uuid, summary: &str, segments: &[Uuid]) -> IntelligenceFinding {
+        finding(
+            service_id,
+            IntelligenceDomain::Service,
+            FindingKind::ServiceState,
+            AssertionLevel::Observed,
+            summary,
+            segments,
+        )
+    }
+
+    fn content_candidate_for(
+        service_id: Uuid,
+        parent: &IntelligenceFinding,
+        label: &str,
+    ) -> ContentCandidate {
+        use crate::content_candidate::ContentCandidateType;
+
+        ContentCandidate::new(
+            service_id,
+            None,
+            vec![parent.id],
+            ContentCandidateType::Theme,
+            label,
+            label,
+            AssertionLevel::Suggested,
+            CR::new(0.8, CS::Heuristic, None),
+            0.5,
+            "sermon-content",
+            "1.0",
+        )
+    }
+
+    fn build_context_with_candidates(
+        service_id: Uuid,
+        segments: Vec<TranscriptSegment>,
+        findings: Vec<IntelligenceFinding>,
+        events: Vec<ServiceEventSummary>,
+        candidates: Vec<ContentCandidate>,
+    ) -> IntelligenceContext {
+        build_context(service_id, segments, findings, events).with_content_candidates(candidates)
+    }
+
+    #[test]
+    fn sermon_content_fires_at_immediate_proximity_and_never_correlates_with_its_own_parent() {
+        let service_id = Uuid::new_v4();
+        let s0 = segment(0);
+        let sermon = sermon_finding(service_id, "Theme: perseverance", &[s0.id]);
+        let bible = bible_finding(service_id, "JAS 1:12", &[s0.id]);
+        let candidate = content_candidate_for(service_id, &sermon, "Theme: perseverance");
+        let context = build_context_with_candidates(
+            service_id,
+            vec![s0],
+            vec![sermon.clone(), bible.clone()],
+            Vec::new(),
+            vec![candidate.clone()],
+        );
+
+        let correlations = CrossDomainCorrelationEngine::new().analyze(&context);
+        let hit = correlations
+            .iter()
+            .find(|c| c.kind == CorrelationKind::SermonContent)
+            .expect("expected a SermonContent correlation");
+        assert_eq!(hit.confidence.score, 0.65);
+        assert!(hit.source_finding_ids.contains(&candidate.id));
+        assert!(hit.source_finding_ids.contains(&bible.id));
+        assert!(
+            !hit.source_finding_ids.contains(&sermon.id),
+            "a SermonContent correlation must never restate the candidate's own parent link as a discovery: {hit:?}"
+        );
+        assert_eq!(hit.assertion_level, AssertionLevel::Inferred);
+    }
+
+    #[test]
+    fn sermon_content_fires_at_lower_confidence_when_only_near() {
+        let service_id = Uuid::new_v4();
+        let segments: Vec<TranscriptSegment> = (0..3).map(segment).collect();
+        let sermon = sermon_finding(service_id, "Theme: perseverance", &[segments[0].id]);
+        let bible = bible_finding(service_id, "JAS 1:12", &[segments[2].id]);
+        let candidate = content_candidate_for(service_id, &sermon, "Theme: perseverance");
+        let context = build_context_with_candidates(
+            service_id,
+            segments,
+            vec![sermon, bible.clone()],
+            Vec::new(),
+            vec![candidate.clone()],
+        );
+
+        let correlations = CrossDomainCorrelationEngine::new().analyze(&context);
+        let hit = correlations
+            .iter()
+            .find(|c| c.kind == CorrelationKind::SermonContent)
+            .expect("expected a SermonContent correlation at Near proximity");
+        assert_eq!(hit.confidence.score, 0.45);
+    }
+
+    #[test]
+    fn sermon_content_produces_nothing_when_the_parent_finding_is_not_in_context() {
+        let service_id = Uuid::new_v4();
+        let s0 = segment(0);
+        let bible = bible_finding(service_id, "JAS 1:12", &[s0.id]);
+        // The candidate's `source_finding_ids` names a Sermon finding id
+        // that never appears in `recent_findings` (e.g. aged out of the
+        // bounded window) - the rule must not fabricate a parent.
+        let orphan_id = Uuid::new_v4();
+        let candidate = ContentCandidate::new(
+            service_id,
+            None,
+            vec![orphan_id],
+            crate::content_candidate::ContentCandidateType::Theme,
+            "Theme: perseverance",
+            "Theme: perseverance",
+            AssertionLevel::Suggested,
+            CR::new(0.8, CS::Heuristic, None),
+            0.5,
+            "sermon-content",
+            "1.0",
+        );
+        let context = build_context_with_candidates(
+            service_id,
+            vec![s0],
+            vec![bible],
+            Vec::new(),
+            vec![candidate],
+        );
+
+        let correlations = CrossDomainCorrelationEngine::new().analyze(&context);
+        assert!(
+            !correlations
+                .iter()
+                .any(|c| c.kind == CorrelationKind::SermonContent),
+            "no SermonContent correlation without a resolvable parent finding"
+        );
+    }
+
+    #[test]
+    fn sermon_content_never_fires_when_no_candidates_were_attached_to_the_context() {
+        // A plain `build_context` (no `.with_content_candidates` call at
+        // all) must behave exactly as it did before Phase 2.8 - proves the
+        // additive-extension discipline holds for this rule specifically.
+        let service_id = Uuid::new_v4();
+        let s0 = segment(0);
+        let sermon = sermon_finding(service_id, "Theme: perseverance", &[s0.id]);
+        let bible = bible_finding(service_id, "JAS 1:12", &[s0.id]);
+        let context = build_context(service_id, vec![s0], vec![sermon, bible], Vec::new());
+
+        let correlations = CrossDomainCorrelationEngine::new().analyze(&context);
+        assert!(!correlations
+            .iter()
+            .any(|c| c.kind == CorrelationKind::SermonContent));
+    }
+
+    #[test]
+    fn multi_domain_convergence_fires_when_three_domains_share_one_segment() {
+        let service_id = Uuid::new_v4();
+        let s0 = segment(0);
+        let bible = bible_finding(service_id, "ROM 8:28", &[s0.id]);
+        let sermon = sermon_finding(
+            service_id,
+            "Main Point: God works all things for good",
+            &[s0.id],
+        );
+        let music = music_finding(service_id, "Test Fixture Hymn One", &[s0.id]);
+        let context = build_context(
+            service_id,
+            vec![s0],
+            vec![bible.clone(), sermon.clone(), music.clone()],
+            Vec::new(),
+        );
+
+        let correlations = CrossDomainCorrelationEngine::new().analyze(&context);
+        let hit = correlations
+            .iter()
+            .find(|c| c.kind == CorrelationKind::MultiDomainConvergence)
+            .expect("expected a MultiDomainConvergence correlation");
+        assert_eq!(hit.confidence.score, 0.85);
+        assert_eq!(hit.domains.len(), 3);
+        for id in [bible.id, sermon.id, music.id] {
+            assert!(hit.source_finding_ids.contains(&id));
+        }
+        assert_eq!(hit.assertion_level, AssertionLevel::Inferred);
+    }
+
+    #[test]
+    fn multi_domain_convergence_scores_higher_with_a_fourth_domain() {
+        let service_id = Uuid::new_v4();
+        let s0 = segment(0);
+        let bible = bible_finding(service_id, "ROM 8:28", &[s0.id]);
+        let sermon = sermon_finding(
+            service_id,
+            "Main Point: God works all things for good",
+            &[s0.id],
+        );
+        let music = music_finding(service_id, "Test Fixture Hymn One", &[s0.id]);
+        let service = service_finding(service_id, "Phase: Sermon", &[s0.id]);
+        let context = build_context(
+            service_id,
+            vec![s0],
+            vec![
+                bible.clone(),
+                sermon.clone(),
+                music.clone(),
+                service.clone(),
+            ],
+            Vec::new(),
+        );
+
+        let correlations = CrossDomainCorrelationEngine::new().analyze(&context);
+        let hit = correlations
+            .iter()
+            .find(|c| c.kind == CorrelationKind::MultiDomainConvergence)
+            .expect("expected a MultiDomainConvergence correlation");
+        assert_eq!(hit.confidence.score, 0.9);
+        assert_eq!(hit.domains.len(), 4);
+    }
+
+    #[test]
+    fn multi_domain_convergence_never_fires_for_only_two_domains() {
+        let service_id = Uuid::new_v4();
+        let s0 = segment(0);
+        let bible = bible_finding(service_id, "ROM 8:28", &[s0.id]);
+        let music = music_finding(service_id, "Test Fixture Hymn One", &[s0.id]);
+        let context = build_context(service_id, vec![s0], vec![bible, music], Vec::new());
+
+        let correlations = CrossDomainCorrelationEngine::new().analyze(&context);
+        assert!(!correlations
+            .iter()
+            .any(|c| c.kind == CorrelationKind::MultiDomainConvergence));
+    }
+
+    #[test]
+    fn multi_domain_convergence_never_fires_for_near_but_not_shared_segments() {
+        // Three domains, but each in its own segment (Near, not Immediate) -
+        // convergence requires the literal same segment, never mere
+        // proximity (that stays the weaker `TemporalProximity` fallback's
+        // job).
+        let service_id = Uuid::new_v4();
+        let segments: Vec<TranscriptSegment> = (0..3).map(segment).collect();
+        let bible = bible_finding(service_id, "ROM 8:28", &[segments[0].id]);
+        let sermon = sermon_finding(
+            service_id,
+            "Main Point: God works all things for good",
+            &[segments[1].id],
+        );
+        let music = music_finding(service_id, "Test Fixture Hymn One", &[segments[2].id]);
+        let context = build_context(service_id, segments, vec![bible, sermon, music], Vec::new());
+
+        let correlations = CrossDomainCorrelationEngine::new().analyze(&context);
+        assert!(!correlations
+            .iter()
+            .any(|c| c.kind == CorrelationKind::MultiDomainConvergence));
+    }
+
+    #[test]
+    fn service_domain_now_participates_in_the_temporal_fallback() {
+        // Before Phase 2.8, `Service` was entirely excluded from
+        // `rule_temporal_association`'s domain set - a Service finding
+        // could never correlate with anything, not even at the weakest
+        // tier. This proves the fix without inventing a dedicated
+        // `ServiceMusic`/`ServiceScripture` kind (see the rule's own docs
+        // for why that would be unjustified).
+        let service_id = Uuid::new_v4();
+        let s0 = segment(0);
+        let service = service_finding(service_id, "Phase: Worship", &[s0.id]);
+        let music = music_finding(service_id, "Test Fixture Hymn One", &[s0.id]);
+        let context = build_context(
+            service_id,
+            vec![s0],
+            vec![service.clone(), music.clone()],
+            Vec::new(),
+        );
+
+        let correlations = CrossDomainCorrelationEngine::new().analyze(&context);
+        let hit = correlations
+            .iter()
+            .find(|c| {
+                c.kind == CorrelationKind::TemporalProximity
+                    && c.source_finding_ids.contains(&service.id)
+                    && c.source_finding_ids.contains(&music.id)
+            })
+            .expect("Service and Music at Immediate proximity should now produce a TemporalProximity correlation");
+        assert_eq!(hit.confidence.score, 0.35);
+    }
+
+    #[test]
+    fn phase_2_8_analysis_is_deterministic_across_repeated_calls() {
+        let service_id = Uuid::new_v4();
+        let s0 = segment(0);
+        let bible = bible_finding(service_id, "ROM 8:28", &[s0.id]);
+        let sermon = sermon_finding(
+            service_id,
+            "Main Point: God works all things for good",
+            &[s0.id],
+        );
+        let music = music_finding(service_id, "Test Fixture Hymn One", &[s0.id]);
+        let candidate = content_candidate_for(service_id, &sermon, "Theme: perseverance");
+        let context = build_context_with_candidates(
+            service_id,
+            vec![s0],
+            vec![bible, sermon, music],
+            Vec::new(),
+            vec![candidate],
+        );
+
+        let engine = CrossDomainCorrelationEngine::new();
+        let strip = |mut cs: Vec<IntelligenceCorrelation>| {
+            for c in &mut cs {
+                c.id = Uuid::nil();
+            }
+            cs
+        };
+        let first = strip(engine.analyze(&context));
+        for _ in 0..10 {
+            let repeat = strip(engine.analyze(&context));
+            assert_eq!(first.len(), repeat.len());
+            for (a, b) in first.iter().zip(repeat.iter()) {
+                assert_eq!(a.kind, b.kind);
+                assert_eq!(a.source_finding_ids, b.source_finding_ids);
+                assert_eq!(a.confidence.score, b.confidence.score);
+            }
+        }
     }
 
     // --- CorrelationQueue operator workflow -----------------------------------

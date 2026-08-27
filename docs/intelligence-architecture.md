@@ -23,12 +23,23 @@ already-produced findings out of the existing `IntelligenceContext` and
 structures them into a new, separate type (`ContentCandidate`), the same
 "not an `IntelligenceEngine`" pattern the cross-domain correlation engine
 already established - see [`docs/content-intelligence.md`](content-intelligence.md).
-The formal, roadmap Phase 2.8 Cross-Domain Intelligence validation
-remains **PLANNED / NOT IMPLEMENTED**; an earlier cross-domain correlation rule
-engine was already built under an internal label that also read
-"Phase 2.4" (see [`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md))
-and is reserved for that future Phase 2.8 validation - that historical
-label is not rewritten. `core/sermon`'s own semantic detection modules
+The roadmap's actual Phase 2.8, Cross-Domain Intelligence, is now
+implemented - not as a sixth engine, but as an *extension* of the
+correlation rule engine already built under an internal label that also
+read "Phase 2.4" (see
+[`docs/cross-domain-intelligence.md`](cross-domain-intelligence.md); that
+historical label is not rewritten). Phase 2.8 audited that existing
+`CrossDomainCorrelationEngine` first and found it already satisfied nearly
+every formal Phase 2.8 requirement; the two genuine gaps it closed were (1)
+`IntelligenceContext` had no field for `ContentCandidate` at all (Content
+Intelligence, Phase 2.7, postdates the original engine), fixed the same
+additive way Phase 2.5's `with_sermon_context` was - a new
+`with_content_candidates` builder, never a required constructor argument;
+and (2) the `Service` domain was entirely excluded even from the weakest
+fallback rule, so a Service finding could never correlate with anything.
+Two new `CorrelationKind` variants (`SermonContent`, `MultiDomainConvergence`)
+and two new rules were added; every Phase 2.4 rule, confidence value, and
+Tauri command is unchanged. `core/sermon`'s own semantic detection modules
 (section 26 above) were similarly built under an internal label that
 read "Phase 2.3"; that historical label is not rewritten, but the modules
 themselves were subsequently extended in place as this roadmap's actual

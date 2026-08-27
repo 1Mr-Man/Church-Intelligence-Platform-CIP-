@@ -89,10 +89,15 @@ export interface IntelligenceFinding {
 }
 
 /**
- * Closed, deterministic taxonomy (Phase 2.4 spec section 5) - `other` keeps
- * this extensible without a schema change. `temporal_proximity` (Phase 2.0)
- * is the same concept the Phase 2.4 spec calls "TemporalAssociation" -
- * reused under its original name rather than adding a duplicate variant.
+ * Closed, deterministic taxonomy (Phase 2.4 spec section 5, extended in
+ * Phase 2.8) - `other` keeps this extensible without a schema change.
+ * `temporal_proximity` (Phase 2.0) is the same concept the Phase 2.4 spec
+ * calls "TemporalAssociation" - reused under its original name rather than
+ * adding a duplicate variant. `sermon_content`/`multi_domain_convergence`
+ * are Phase 2.8's only two new variants - see
+ * `docs/cross-domain-intelligence.md`'s taxonomy section for why no
+ * dedicated `service_music`/`service_scripture` kind was added (Service
+ * now participates in `temporal_proximity` instead).
  */
 export type CorrelationKind =
   | { kind: "temporal_proximity" }
@@ -103,6 +108,8 @@ export type CorrelationKind =
   | { kind: "theme_scripture" }
   | { kind: "theme_music" }
   | { kind: "service_transition" }
+  | { kind: "sermon_content" }
+  | { kind: "multi_domain_convergence" }
   | { kind: "other"; detail: string };
 
 /**
