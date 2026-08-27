@@ -4,20 +4,144 @@ This document explains what Phase 1.4 added on top of Phase 1.3's
 operator workflow: a real presentation preparation path from an approved
 suggestion (or a manual reference) through to persisted, prepared output,
 and the validation that proves the whole pipeline - detection through
-presentation - behaves correctly and never bypasses the operator.
+presentation - behaves correctly and never bypasses the operator. **A
+later addition, described in "Local display foundation" below, closes the
+one remaining gap this section originally documented: CIP can now
+actually put a prepared item onto a local display window under explicit
+operator control.**
 
 **Core principle, unchanged and made explicit by this phase's data model:
 APPROVED is not PREPARED, and PREPARED is not DISPLAYING.** Approval means
 the operator accepted a suggestion. Preparation means real, local-Bible
 content has been rendered and persisted, ready for output. Displaying
-means an explicit output/display action has occurred - and nothing in
-this codebase can perform that action yet, so nothing here ever reaches
-it. See "No automatic preparation, no automatic projection" below.
+means an explicit output/display action has occurred. As of the "Local
+display foundation" addition below, that action is real: an explicit
+operator Display click opens/updates a second window and only then
+commits `Prepared -> Active`. Nothing else - no finding, no candidate, no
+preview, no automatic pipeline step - can ever cross that boundary. See
+"No automatic preparation, no automatic projection" below.
 
-**Not in this phase:** OBS/vMix integration, projector/window output, any
-real "display" action, song/hymn recognition, sermon intelligence,
-content generation, cloud sync. See [`README.md`](../README.md) for the
-full phase boundary.
+**Not in this phase (Phase 1.4 itself):** OBS/vMix integration, real
+"display" action, song/hymn recognition, sermon intelligence, content
+generation, cloud sync. See [`README.md`](../README.md) for the full
+phase boundary. **The local display window** (a second Tauri window
+showing a prepared item on a projector/TV/secondary monitor) **was added
+later** - see "Local display foundation" below - but OBS/vMix/NDI/
+streaming/multi-output integration remains explicitly out of scope for
+that addition too.
+
+## Local display foundation
+
+This section documents the local presentation display window: the
+smallest real display output CIP has, added on top of everything else
+this document describes without changing any of it. It answers "can CIP
+actually put a prepared item onto a screen" with **yes, under explicit
+operator control, via a second local Tauri window** - while leaving OBS,
+vMix, NDI, streaming, and multi-output entirely out of scope.
+
+### Why a second Tauri window, and nothing else
+
+CIP already renders every prepared item as a `RenderedSlide` (see
+"Renderer & template" above); the only missing piece was somewhere to
+actually show it outside the operator's own control window. A second
+`tauri::WebviewWindow` - the same frontend bundle, branching on its own
+window label - is the smallest possible real answer: no second build, no
+new rendering logic, no new content model, no OBS/NDI/vMix output stage.
+`apps/desktop/src-tauri/src/presentation_display.rs` owns window
+lifecycle only (open/close/detect); `apps/desktop/src-tauri/src/presentation.rs`
+owns every decision about whether an item may be displayed and the actual
+`Prepared -> Active -> Stopped` persistence transitions, matching this
+module's existing Tauri-agnostic, independently-unit-tested pattern.
+
+### Lifecycle: Prepared -> Active -> Stopped, for real this time
+
+```
+PREPARED --[operator: Display]--> ACTIVE --[operator: Stop, or manual window close]--> STOPPED
+```
+
+No new `PresentationItemStatus` variant was added - `Active` already
+existed in the data model and the database `CHECK` constraint already
+allowed it (see "Data model" above); this addition is the first code path
+that actually uses it. The transition is deliberately split into two
+phases so an item is **never** marked `Active` before the real display
+operation has actually succeeded:
+
+1. **`prepare_to_activate`** (pure, no persistence): confirms the item is
+   currently `Prepared`, confirms no other item for the same service is
+   already `Active` (at most one `Active` item at a time, enforced here),
+   and renders the content via the existing `render_content()`. Any
+   failure here (wrong status, another item already active, unrenderable
+   content) returns an error and touches no database row.
+2. The Tauri command layer then performs the real side effect: opens (or
+   focuses) the display window and pushes the rendered slide to it.
+3. **`commit_activation`** (persistence only): only once step 2 has
+   actually returned success does this transition the row from `Prepared`
+   to `Active` and emit `PresentationStarted` (see "Events" below).
+
+If step 2 fails (e.g. the window fails to open), step 3 never runs - the
+item stays `Prepared`, exactly as if Display had never been clicked.
+
+**Stop** (explicit operator action), **Close** (explicit operator action
+on the display window itself), and a **manual close** of the display
+window (the operator's OS window controls, Alt+F4, etc.) all converge on
+the same shared reconciliation function,
+`commands::clear_active_presentation`: blank the display, transition the
+`Active` item to `Stopped`, and emit `PresentationStopped`. This means
+closing the display window by hand can never leave CIP in a state where
+the database says "Active" but nothing is actually showing - the same
+guarantee an explicit Stop gives.
+
+### Restart safety
+
+An unclean shutdown (crash, force-quit) could in principle leave a row
+persisted as `Active` with no window actually open. `lib.rs`'s `setup()`
+runs `persistence::reconcile_stale_active_presentation_items()` -
+`UPDATE presentation_items SET status = 'stopped' WHERE status = 'active'`
+- once, before any window or command exists, so a restart can never be
+mistaken for "still displaying." This was verified against the real
+on-disk development database, not just an in-memory test fixture: a real
+`Active` row was inserted directly via the same persistence functions the
+app itself uses, the real compiled binary was launched under Xvfb, and
+its own log file recorded `reconciled 1 presentation item(s) left active
+by a previous run to stopped` - see "Desktop runtime verification" in
+this phase's implementation report for the full trace. A relaunch with
+nothing stale to reconcile logs nothing (the sweep is a silent no-op),
+matching `reconcile_stale_active_presentation_items_is_a_safe_no_op_when_nothing_is_active`.
+
+### The display window is a passive renderer only
+
+`capabilities/display.json` grants the `display` window `core:default`
+only - the exact same minimal grant the `main` window already has. This
+application has no filesystem, shell, HTTP, or dialog plugin installed at
+all, so the display window has no more capability surface than `main`
+ever did, and specifically: no database connection, no ability to call
+any operator command, no filesystem/shell/network access. It only ever
+listens for the existing `PRESENTATION_STARTED`/`PRESENTATION_STOPPED`
+events (the same public event bus every other window already uses) and
+renders whatever `RenderedSlide` arrives, or a blank screen when none is
+active. It carries no operator controls (no Stop button, no menu) - all
+control lives in the operator's own `main` window.
+
+### Operator workflow
+
+In the **Current Output** panel: each `Prepared` item gets a **Display**
+button (disabled while another item is already `Active`, for the
+at-most-one-active invariant). An **Open Display** / **Close Display**
+button pair controls the display window independently of any content
+being shown on it. Once an item is `Active`, it appears in its own card
+with a **Stop** button. Duplicate Display clicks, a Display click with no
+display window open yet (it opens automatically), and closing the
+display window mid-show are all handled - see "Testing" below for the
+specific tests covering each.
+
+### What remains explicitly out of scope
+
+OBS/vMix/NDI integration, streaming output, multiple simultaneous
+displays/outputs, a real second monitor in this development environment
+(see "Desktop runtime verification" in the implementation report for
+exactly what was and wasn't verified), and any visual/typographic
+redesign of `RenderedSlide` beyond what "Renderer & template" above
+already describes.
 
 ## What already existed, and what this phase added
 
@@ -58,7 +182,7 @@ spec's NOT_PREPARED/PREPARED/DISPLAYING/CANCELLED language as follows:
 | ----------------- | ------------------------------------------------- |
 | NOT_PREPARED       | no `presentation_items` row exists yet             |
 | PREPARED           | `PresentationItemStatus::Prepared`                 |
-| DISPLAYING         | `PresentationItemStatus::Active` - **never set by anything in this phase**; reserved for a future real display integration |
+| DISPLAYING         | `PresentationItemStatus::Active` - set only by an explicit operator Display action, via `presentation_display.rs`; see "Local display foundation" below |
 | CANCELLED          | `PresentationItemStatus::Stopped`, reused as "prepared then retracted" - unambiguous in practice since nothing here ever reaches `Active` first |
 
 `PresentationContent` is unchanged: `Scripture { reference,
@@ -209,13 +333,21 @@ Two boundaries this phase explicitly proves, not just documents:
    asserts the `presentation_items` table is still empty immediately
    after a suggestion is created (and still empty after preview, which is
    non-mutating).
-2. **Nothing ever sets a `PresentationItem` to `Active`.** No code path
-   in this codebase writes that status - `persist_prepared_item` always
+2. **Nothing but an explicit operator Display action ever sets a
+   `PresentationItem` to `Active`.** `persist_prepared_item` always
    inserts `Prepared`, and `cancel_item` only ever transitions
-   `Prepared -> Stopped`. The acceptance test asserts this explicitly
-   after every step, and the restart-recovery test (below) asserts a
-   prepared item is still exactly `Prepared` after reopening the database
-   - a restart can never advance it either.
+   `Prepared -> Stopped` - neither path can reach `Active`. The one path
+   that can, `presentation::commit_activation`, is called from exactly one
+   place: the `display_presentation` Tauri command, itself only reachable
+   from the operator's own Display button (see "Local display foundation"
+   below). No finding acceptance, no candidate promotion, no preview, and
+   no automatic pipeline step calls it. The acceptance test asserts this
+   explicitly after every step, and the restart-recovery test (below)
+   asserts a prepared item is still exactly `Prepared` after reopening the
+   database - a restart can never advance it either, and a stale `Active`
+   row left by an unclean shutdown is swept back to `Stopped` before
+   anything else runs (see "Local display foundation" > "Restart
+   safety").
 
 Phase 2.1's Music Intelligence findings are held to the identical
 standard: `apps/desktop/src-tauri/src/music.rs` and
@@ -330,22 +462,32 @@ the operational history with every hover-preview.
 | `list_prepared_presentations()`      | No       | active service                     |
 | `get_presentation_item(itemId)`      | No       | item exists                        |
 | `cancel_presentation(itemId)`        | Yes      | item currently `Prepared`           |
+| `open_presentation_display()`        | No (window only) | -                           |
+| `close_presentation_display()`       | Yes (reconciles any `Active` item) | - |
+| `get_presentation_display_state()`   | No       | -                                   |
+| `display_presentation(itemId)`       | Yes      | item currently `Prepared`, no other item `Active`, real window open succeeds |
+| `clear_presentation_display()`       | Yes      | -                                   |
 
 Every command validates its own input the same way every earlier
 command does (empty strings, malformed ids, invalid state transitions)
 and returns `AppError` on failure - none expose internal Rust types the
-frontend doesn't need.
+frontend doesn't need. The five display commands are documented in full
+in "Local display foundation" above.
 
 ## Events
 
-Two new `AppEvent` variants: `PresentationPreviewed` (emitted by both
-preview commands) and `PresentationCancelled` (emitted by
-`cancel_presentation`). `PresentationPrepared` already existed and is
+Two new `AppEvent` variants added in Phase 1.4: `PresentationPreviewed`
+(emitted by both preview commands) and `PresentationCancelled` (emitted
+by `cancel_presentation`). `PresentationPrepared` already existed and is
 still emitted by both `prepare_presentation` and
 `create_manual_presentation`. `PresentationStarted`/`PresentationStopped`
-remain declared but **unused** - reserved for a future real display
-integration; nothing in this phase emits them, matching the "do not emit
-DISPLAYING unless real display output exists" constraint.
+were declared in an earlier phase but left unused until the "Local
+display foundation" addition: `PresentationStarted` (item + rendered
+slide) is now emitted by `display_presentation` immediately after a real
+display-window operation succeeds and the `Active` transition commits;
+`PresentationStopped` (item) is emitted by `commands::clear_active_presentation`,
+covering explicit Stop, explicit Close, and a manual display-window
+close alike.
 
 ## Frontend workspace
 
@@ -363,9 +505,12 @@ DISPLAYING unless real display output exists" constraint.
   fully-manual path (no suggestion at all) is reachable from the UI.
 - A real **Current Output** panel, replacing the old static "Nothing
   projected" text: lists every currently-`Prepared` item for the active
-  service with a `● PREPARED (automatic|manual)` status line and a Cancel
-  action, or a `NOTHING PREPARED` message when empty. It never renders
-  `PROJECTED`/`DISPLAYING`, since nothing here can produce that state.
+  service with a `● PREPARED (automatic|manual)` status line, a Cancel
+  action, and (since "Local display foundation" above) a **Display**
+  button; an active item gets its own card with a **Stop** button; and
+  **Open Display**/**Close Display** buttons control the display window
+  itself. A `NOTHING PREPARED` message still appears when the list is
+  empty.
 
 Presentation preparation and cancellation already appear in the existing
 Service Timeline panel (no duplicate timeline was added).
@@ -399,6 +544,32 @@ Service Timeline panel (no duplicate timeline was added).
   `lib/liveEvents.test.ts` (the new command/event wrappers go through the
   same Tauri-runtime guard as every earlier one).
 
+### Local display foundation tests
+
+- `apps/desktop/src-tauri/src/presentation.rs`: `prepare_to_activate`
+  rejects a non-`Prepared` item, rejects when another item for the same
+  service is already `Active`, and succeeds with a real rendered slide
+  for a valid `Prepared` item; `commit_activation` transitions
+  `Prepared -> Active` and rejects a non-`Prepared` item;
+  `stop_active_item` transitions the active item to `Stopped` and is a
+  safe no-op when nothing is active; a full activate-then-stop round trip;
+  at-most-one-active-per-service is enforced even across two different
+  prepared items.
+- `apps/desktop/src-tauri/src/persistence.rs`:
+  `update_presentation_item_status_can_activate_a_prepared_item`,
+  `reconcile_stale_active_presentation_items_stops_every_active_row_and_leaves_others_untouched`,
+  `reconcile_stale_active_presentation_items_is_a_safe_no_op_when_nothing_is_active`.
+- `presentation_display.rs` (window lifecycle itself) is deliberately
+  **not** unit-tested - it is exercised only by real desktop runtime
+  validation under Xvfb, matching this project's established "no
+  `tauri::test` harness" convention (window creation, focus, and the
+  `Destroyed` event are real OS/Tauri behavior a mock IPC harness cannot
+  meaningfully simulate).
+- Frontend: `lib/commands.test.ts` (the five new display commands, plus
+  the outside-Tauri guard), `lib/liveEvents.test.ts`
+  (`onPresentationStarted`/`onPresentationStopped`), `domain/contracts.test.ts`
+  (`PresentationDisplayPayload`/`PresentationDisplayState` shapes).
+
 ## Limitations
 
 - **Real Whisper acoustic validation** was not re-run for this phase -
@@ -409,11 +580,16 @@ Service Timeline panel (no duplicate timeline was added).
   [`docs/live-speech.md`](live-speech.md)).
 - **Real audio hardware validation** was likewise not re-run; no new
   audio code was added in this phase.
-- **No real display/output integration exists** - OBS, vMix, a
-  projector, or any actual "put pixels on a second screen" mechanism is
-  explicitly out of scope. `PresentationItemStatus::Active` and the
-  `PRESENTATION_STARTED`/`PRESENTATION_STOPPED` events exist as reserved
-  architecture, not as implemented behavior.
+- **A local second-window display now exists** (see "Local display
+  foundation" above), but **OBS, vMix, NDI, streaming, and multi-output
+  remain explicitly out of scope**, as does any real second physical
+  monitor/projector - this development environment has none, so desktop
+  runtime validation covered real window creation and lifecycle under
+  Xvfb (a virtual X server) and real on-disk database state, not an
+  actual physical display. See "Desktop runtime verification" in this
+  phase's implementation report for exactly what was and wasn't verified;
+  it should never be read as claiming physical projector testing that did
+  not occur.
 - **Only one local translation (KJV)** exists in this environment's seed
   data, so translation-handling behavior is validated against that one
   translation only.
@@ -426,7 +602,8 @@ Service Timeline panel (no duplicate timeline was added).
 ```sh
 cargo test -p cip-presentation-renderer  # renderer determinism/validation
 cargo test -p cip-core-presentation      # PresentationItem/with_* builders
-cargo test -p cip-desktop --lib presentation::   # presentation.rs unit tests
+cargo test -p cip-desktop --lib presentation::   # presentation.rs unit tests, incl. activate/stop
+cargo test -p cip-desktop --lib persistence::    # incl. restart-reconciliation tests
 cargo test -p cip-desktop --lib pipeline::       # canonical acceptance + restart + offline
 pnpm vitest run                          # frontend domain/command/event tests
 ```

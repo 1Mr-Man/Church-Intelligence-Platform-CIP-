@@ -23,12 +23,16 @@ import {
   changeSermonSection,
   checkBibleDatasetIntegrity,
   clearCurrentSong,
+  clearPresentationDisplay,
+  closePresentationDisplay,
   correctServicePhase,
   createManualPresentation,
+  displayPresentation,
   dismissCrossDomainCorrelation,
   endSermon,
   getAppConfig,
   getIntelligenceCapabilities,
+  getPresentationDisplayState,
   getServiceIntelligenceState,
   getSermon,
   getSermonFoundationState,
@@ -47,6 +51,7 @@ import {
   listSermonSections,
   listSermonSegments,
   markServicePhase,
+  openPresentationDisplay,
   pauseSermon,
   previewPresentation,
   previewScripture,
@@ -139,6 +144,63 @@ describe("commands.ts Tauri IPC guard", () => {
     await createManualPresentation("JHN 3:16");
 
     expect(invokeMock).toHaveBeenCalledWith("create_manual_presentation", { reference: "JHN 3:16" });
+  });
+
+  it("openPresentationDisplay calls open_presentation_display with no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue(undefined);
+
+    await openPresentationDisplay();
+
+    expect(invokeMock).toHaveBeenCalledWith("open_presentation_display", undefined);
+  });
+
+  it("getPresentationDisplayState calls get_presentation_display_state with no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({ windowOpen: false, activeItem: null });
+
+    await getPresentationDisplayState();
+
+    expect(invokeMock).toHaveBeenCalledWith("get_presentation_display_state", undefined);
+  });
+
+  it("displayPresentation calls only display_presentation, never prepare_presentation again", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await displayPresentation("item-1");
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("display_presentation", { itemId: "item-1" });
+  });
+
+  it("clearPresentationDisplay calls clear_presentation_display with no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue(null);
+
+    await clearPresentationDisplay();
+
+    expect(invokeMock).toHaveBeenCalledWith("clear_presentation_display", undefined);
+  });
+
+  it("closePresentationDisplay calls close_presentation_display with no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue(undefined);
+
+    await closePresentationDisplay();
+
+    expect(invokeMock).toHaveBeenCalledWith("close_presentation_display", undefined);
+  });
+
+  it("rejects every presentation display command outside the Tauri runtime, without calling invoke()", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    await expect(openPresentationDisplay()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(getPresentationDisplayState()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(displayPresentation("id")).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(clearPresentationDisplay()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(closePresentationDisplay()).rejects.toBeInstanceOf(TauriUnavailableError);
+    expect(invokeMock).not.toHaveBeenCalled();
   });
 
   it("listContentRegistry passes null contentType when omitted (Phase 1.5)", async () => {

@@ -1,0 +1,59 @@
+/* The presentation display window - deliberately minimal, no design
+ * system work here (see PresentationDisplay.tsx's docs): black
+ * background, large centered white text, safe for a projector, TV, or
+ * secondary monitor. */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #000;
+}
+
+.presentation-display {
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 6vh 8vw;
+  background: #000;
+  color: #fff;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  text-align: center;
+}
+
+.presentation-display--blank {
+  /* Inactive state: a plain black screen, nothing else - never a
+   * placeholder logo/message that could itself be mistaken for content. */
+}
+
+.presentation-display__heading {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 4rem);
+  font-weight: 600;
+  color: #f2d675;
+}
+
+.presentation-display__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  font-size: clamp(1.5rem, 4vw, 3rem);
+  line-height: 1.4;
+  max-width: 80vw;
+}
+
+.presentation-display__body p {
+  margin: 0;
+}
+
+.presentation-display__footer {
+  margin: 0;
+  font-size: clamp(1rem, 2vw, 1.5rem);
+  color: #999;
+}

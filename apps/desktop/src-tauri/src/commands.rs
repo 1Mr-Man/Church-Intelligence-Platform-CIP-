@@ -15,6 +15,7 @@ use crate::music;
 use crate::persistence;
 use crate::pipeline::handle_final_transcript;
 use crate::presentation;
+use crate::presentation_display;
 use crate::sermon_foundation;
 use crate::state::{AppState, DEFAULT_TRANSLATION_ID};
 use crate::timeline::{self, TimelineEntry};
@@ -1181,6 +1182,18 @@ pub struct PresentationPreview {
     pub slide: RenderedSlide,
 }
 
+/// The `PresentationStarted` event payload - both the updated `PresentationItem`
+/// (so the operator's own "Current Output" panel can flip its status) and
+/// the already-rendered `RenderedSlide` (so the display window has exactly
+/// what it needs to show, with no second rendering system in the frontend
+/// and no database internals exposed - spec sections 14/15).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresentationDisplayPayload {
+    pub item: PresentationItem,
+    pub slide: RenderedSlide,
+}
+
 fn preview_reference(
     reference: &str,
     app: &AppHandle,
@@ -1394,6 +1407,195 @@ pub fn cancel_presentation(
 
     let _ = emit(&app, AppEvent::PresentationCancelled, item.clone());
     Ok(item)
+}
+
+// --- local presentation display -------------------------------------------
+//
+// The first real, local, on-screen output for a prepared presentation item
+// - a dedicated Tauri window under direct operator control (never anything
+// automatic - see `presentation_display.rs`'s module docs and
+// `docs/presentation.md`'s "Local display architecture" section). Reuses
+// `PresentationItemStatus::Active`/`Stopped`, the `PresentationStarted`/
+// `PresentationStopped` events, and the same timeline/error conventions
+// every other presentation command already established above - nothing
+// here invents a second lifecycle, error hierarchy, or event bus.
+
+/// Opens (or, if already open, focuses) the presentation display window -
+/// useful on its own for positioning it on a projector/second monitor
+/// before anything is ready to show, and called automatically by
+/// `display_presentation` when needed.
+#[tauri::command]
+pub fn open_presentation_display(
+    app: AppHandle,
+    _state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    presentation_display::open_display_window(&app)
+        .map_err(|e| {
+            AppError::from(presentation::PresentationError::DisplayUnavailable(
+                e.to_string(),
+            ))
+        })
+        .map_err(log_and_return)
+}
+
+/// Whether the display window currently exists, and which item (if any) is
+/// currently `Active` for the active service - the operator UI's sync
+/// point on mount, never assumed from local state alone.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresentationDisplayState {
+    pub window_open: bool,
+    pub active_item: Option<PresentationItem>,
+}
+
+#[tauri::command]
+pub fn get_presentation_display_state(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PresentationDisplayState, AppError> {
+    let active_item = match current_service_id(&state) {
+        Ok(service_id) => {
+            let db = state.db.lock().expect("db connection poisoned");
+            persistence::list_presentation_items(
+                &db,
+                service_id,
+                Some(PresentationItemStatus::Active),
+            )
+            .map_err(AppError::from)
+            .map_err(log_and_return)?
+            .into_iter()
+            .next()
+        }
+        Err(_) => None,
+    };
+    Ok(PresentationDisplayState {
+        window_open: presentation_display::is_display_window_open(&app),
+        active_item,
+    })
+}
+
+/// Displays a still-`Prepared` item for real: renders it, opens the display
+/// window if needed, and only then commits `Prepared -> Active` - never
+/// the other way around (spec section 8/28: an item is never marked
+/// `Active` before the real display operation has actually succeeded, and
+/// nothing but this explicit operator action may cross that boundary).
+#[tauri::command]
+pub fn display_presentation(
+    item_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PresentationItem, AppError> {
+    let id = parse_uuid(&item_id).map_err(log_and_return)?;
+
+    let db = state.db.lock().expect("db connection poisoned");
+    let (_item, slide) = presentation::prepare_to_activate(&db, id)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
+    drop(db); // release before the window-manager call below
+
+    presentation_display::open_display_window(&app)
+        .map_err(|e| {
+            AppError::from(presentation::PresentationError::DisplayUnavailable(
+                e.to_string(),
+            ))
+        })
+        .map_err(log_and_return)?;
+
+    let db = state.db.lock().expect("db connection poisoned");
+    let activated = presentation::commit_activation(&db, id)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
+    record_timeline(
+        &db,
+        Some(activated.service_id),
+        AppEvent::PresentationStarted,
+        LogCategory::Presentation,
+        serde_json::json!({ "presentationItemId": activated.id }),
+    );
+    drop(db);
+
+    let _ = emit(
+        &app,
+        AppEvent::PresentationStarted,
+        PresentationDisplayPayload {
+            item: activated.clone(),
+            slide,
+        },
+    );
+    Ok(activated)
+}
+
+/// Stops whichever presentation item is currently `Active` for the active
+/// service, if any - blanks the display window without closing it (spec
+/// section 5/9). Safe and idempotent when nothing is active: returns
+/// `Ok(None)` rather than an error, and never crashes.
+///
+/// Shared by the explicit operator Stop action and, via
+/// [`clear_active_presentation`], the display window's own manual-close
+/// reconciliation - both leave persistence in exactly the same state.
+#[tauri::command]
+pub fn clear_presentation_display(
+    app: AppHandle,
+    _state: State<'_, AppState>,
+) -> Result<Option<PresentationItem>, AppError> {
+    clear_active_presentation(&app).map_err(log_and_return)
+}
+
+/// The plain-function core of [`clear_presentation_display`], callable
+/// without a command's `State<'_, AppState>` extractor - `AppHandle::state`
+/// reaches the same managed `AppState` either way. Used directly by
+/// `presentation_display.rs`'s window-`Destroyed` handler, which has no
+/// command invocation to extract state from.
+pub(crate) fn clear_active_presentation(
+    app: &AppHandle,
+) -> Result<Option<PresentationItem>, AppError> {
+    let state = app.state::<AppState>();
+    let service_id = state
+        .active_service
+        .lock()
+        .expect("active_service mutex poisoned")
+        .as_ref()
+        .map(|s| s.id);
+
+    let db = state.db.lock().expect("db connection poisoned");
+    let stopped = match service_id {
+        Some(sid) => presentation::stop_active_item(&db, sid).map_err(AppError::from)?,
+        None => None,
+    };
+    if let Some(ref item) = stopped {
+        record_timeline(
+            &db,
+            Some(item.service_id),
+            AppEvent::PresentationStopped,
+            LogCategory::Presentation,
+            serde_json::json!({ "presentationItemId": item.id }),
+        );
+    }
+    drop(db);
+
+    if let Some(ref item) = stopped {
+        let _ = emit(app, AppEvent::PresentationStopped, item.clone());
+    }
+    Ok(stopped)
+}
+
+/// Closes the presentation display window outright (as opposed to
+/// `clear_presentation_display`, which blanks it but leaves it open) -
+/// stops any active item first via the same `Destroyed`-event
+/// reconciliation a manual close triggers, so this and a manual close
+/// always leave identical state.
+#[tauri::command]
+pub fn close_presentation_display(
+    app: AppHandle,
+    _state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    presentation_display::close_display_window(&app)
+        .map_err(|e| {
+            AppError::from(presentation::PresentationError::DisplayUnavailable(
+                e.to_string(),
+            ))
+        })
+        .map_err(log_and_return)
 }
 
 // --- ambiguity resolution & context correction (Phase 1.3) ----------------

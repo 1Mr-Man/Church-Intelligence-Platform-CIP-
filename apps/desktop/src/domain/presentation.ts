@@ -41,3 +41,21 @@ export interface PresentationPreview {
   content: PresentationContent;
   slide: RenderedSlide;
 }
+
+/** The `PRESENTATION_STARTED` event payload - both the updated
+ * `PresentationItem` (now `Active`) and the already-rendered
+ * `RenderedSlide` the display window shows verbatim. No second rendering
+ * system on the frontend: the display window never re-derives a slide
+ * from raw content, it only ever shows exactly what the backend already
+ * rendered. */
+export interface PresentationDisplayPayload {
+  item: PresentationItem;
+  slide: RenderedSlide;
+}
+
+/** The `get_presentation_display_state` response - the operator UI's sync
+ * point on mount, never assumed from local state alone. */
+export interface PresentationDisplayState {
+  windowOpen: boolean;
+  activeItem: PresentationItem | null;
+}

@@ -29,6 +29,7 @@ import type {
   LiveStatus,
   MusicImportReport,
   MusicQueryType,
+  PresentationDisplayState,
   PresentationItem,
   PresentationPreview,
   ProcessedSegment,
@@ -207,6 +208,48 @@ export function getPresentationItem(itemId: string): Promise<PresentationItem> {
 /** Cancels ("retracts") a still-prepared item before it's ever displayed. */
 export function cancelPresentation(itemId: string): Promise<PresentationItem> {
   return invokeCommand("cancel_presentation", { itemId });
+}
+
+// --- local presentation display -------------------------------------------
+//
+// The first real, local, on-screen output for a prepared presentation item
+// - a dedicated Tauri window under direct operator control. Never anything
+// automatic: only `displayPresentation` (an explicit operator click) may
+// cross the Prepared -> Active boundary. See `docs/presentation.md`.
+
+/** Opens (or focuses, if already open) the presentation display window -
+ * useful on its own for positioning it on a projector/second monitor
+ * before anything is ready to show. */
+export function openPresentationDisplay(): Promise<void> {
+  return invokeCommand("open_presentation_display");
+}
+
+/** Whether the display window currently exists, and which item (if any) is
+ * currently `active` for the active service - call on mount to sync, never
+ * assume from local state alone. */
+export function getPresentationDisplayState(): Promise<PresentationDisplayState> {
+  return invokeCommand("get_presentation_display_state");
+}
+
+/** Displays a still-`prepared` item for real: renders it, opens the
+ * display window if needed, and only then marks it `active` - never the
+ * other way around. This is the one explicit operator action that may
+ * cross the Prepared -> Active boundary. */
+export function displayPresentation(itemId: string): Promise<PresentationItem> {
+  return invokeCommand("display_presentation", { itemId });
+}
+
+/** Stops whichever item is currently active, if any - blanks the display
+ * window without closing it. Safe and idempotent when nothing is active
+ * (resolves with `null`, never rejects for that reason). */
+export function clearPresentationDisplay(): Promise<PresentationItem | null> {
+  return invokeCommand("clear_presentation_display");
+}
+
+/** Closes the presentation display window outright (as opposed to
+ * `clearPresentationDisplay`, which blanks it but leaves it open). */
+export function closePresentationDisplay(): Promise<void> {
+  return invokeCommand("close_presentation_display");
 }
 
 // --- ambiguity resolution & context correction (Phase 1.3) ----------------

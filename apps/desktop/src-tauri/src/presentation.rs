@@ -11,14 +11,25 @@
 //! is kept independently unit-testable here, the command function itself
 //! stays a thin wrapper).
 //!
-//! ## PREPARED vs DISPLAYING (Phase 1.4 section 3)
+//! ## PREPARED vs DISPLAYING (Phase 1.4 section 3, extended by the local
+//! presentation display foundation)
 //!
-//! This module only ever produces items in `PresentationItemStatus::Prepared`
-//! (or, via [`cancel_item`], `Stopped`). Nothing here writes `Active` -
-//! that's reserved for a future real display/output integration. APPROVED
-//! (a suggestion) is not the same as PREPARED (a presentation item):
-//! [`ensure_suggestion_approved`] is the only bridge between the two, and
-//! it is never bypassed.
+//! Preparation (this module's original job) only ever produces items in
+//! `PresentationItemStatus::Prepared` (or, via [`cancel_item`], `Stopped`).
+//! APPROVED (a suggestion) is not the same as PREPARED (a presentation
+//! item): [`ensure_suggestion_approved`] is the only bridge between the
+//! two, and it is never bypassed.
+//!
+//! The local presentation display foundation adds the second, later half
+//! of the lifecycle: [`prepare_to_activate`]/[`commit_activation`] (the
+//! `Prepared -> Active` transition, committed only after the real display
+//! window operation in `apps/desktop/src-tauri/src/commands.rs` has
+//! already succeeded - never before) and [`stop_active_item`] (`Active ->
+//! Stopped`). Nothing in this module ever opens a window or touches Tauri;
+//! that stays in `commands.rs`/`presentation_display.rs`, keeping this
+//! module exactly as Tauri-agnostic and independently testable as it
+//! always was. See `docs/presentation.md`'s "Local display architecture"
+//! section.
 
 use cip_core_ai::SuggestionStatus;
 use cip_core_bible::{BibleProvider, BibleProviderError, ScriptureReference};
@@ -48,6 +59,20 @@ pub enum PresentationError {
     SuggestionNotScripture,
     #[error("presentation item {0} is not prepared (currently {1:?}) and cannot be cancelled")]
     NotCancelable(Uuid, PresentationItemStatus),
+    /// Only a `Prepared` item can be displayed - an already-`Active` or
+    /// already-`Stopped` item cannot be re-displayed by this path (the
+    /// operator would prepare a fresh item instead).
+    #[error("presentation item {0} is not prepared (currently {1:?}) and cannot be displayed")]
+    NotDisplayable(Uuid, PresentationItemStatus),
+    /// At most one presentation item may be `Active` at a time (spec
+    /// section 10) - the operator must explicitly stop the item named here
+    /// before displaying another.
+    #[error("presentation item {0} is already active; stop it before displaying another")]
+    AlreadyActive(Uuid),
+    /// The real local display window could not be opened/updated - never
+    /// a reason to claim `Active` anyway (spec section 8).
+    #[error("presentation display window unavailable: {0}")]
+    DisplayUnavailable(String),
 }
 
 /// `"ROM 8:28"` -> `("ROM", 8, 28)`. Reverses `ScriptureReference`'s own
@@ -147,6 +172,82 @@ pub fn cancel_item(
         item_id,
         PresentationItemStatus::Stopped,
     )?)
+}
+
+/// Validates and renders a `Prepared` item for real local display - never
+/// persists anything (spec section 8: never mark `Active` before the real
+/// display operation has succeeded). The caller (`commands::display_presentation`)
+/// must actually open/update the display window using the returned
+/// `RenderedSlide` before calling [`commit_activation`]; if it can't, this
+/// item must stay `Prepared`.
+///
+/// Rejects with [`PresentationError::AlreadyActive`] when another item for
+/// the same service is already `Active` (spec section 10: "at most one
+/// active presentation item at a time") - the operator must stop it first
+/// rather than this silently replacing it.
+pub fn prepare_to_activate(
+    conn: &Connection,
+    item_id: Uuid,
+) -> Result<(PresentationItem, RenderedSlide), PresentationError> {
+    let current = persistence::get_presentation_item(conn, item_id)?;
+    if current.status != PresentationItemStatus::Prepared {
+        return Err(PresentationError::NotDisplayable(item_id, current.status));
+    }
+    let already_active = persistence::list_presentation_items(
+        conn,
+        current.service_id,
+        Some(PresentationItemStatus::Active),
+    )?;
+    if let Some(existing) = already_active.into_iter().next() {
+        return Err(PresentationError::AlreadyActive(existing.id));
+    }
+    let slide = render_content(&current.content)?;
+    Ok((current, slide))
+}
+
+/// Commits the `Prepared -> Active` transition - call only after the real
+/// display window operation has already succeeded (see [`prepare_to_activate`]'s
+/// docs). Re-validates the item is still `Prepared` rather than trusting
+/// time has stood still since the earlier call.
+pub fn commit_activation(
+    conn: &Connection,
+    item_id: Uuid,
+) -> Result<PresentationItem, PresentationError> {
+    let current = persistence::get_presentation_item(conn, item_id)?;
+    if current.status != PresentationItemStatus::Prepared {
+        return Err(PresentationError::NotDisplayable(item_id, current.status));
+    }
+    Ok(persistence::update_presentation_item_status(
+        conn,
+        item_id,
+        PresentationItemStatus::Active,
+    )?)
+}
+
+/// Stops whichever presentation item is currently `Active` for `service_id`,
+/// if any - safe and idempotent when nothing is active (spec section 9:
+/// "operation should be safe and idempotent... do not crash"), returning
+/// `Ok(None)` rather than an error in that case. Used both by the explicit
+/// operator Stop/Clear-Display action and by the display window's own
+/// manual-close reconciliation (`commands::clear_active_presentation`), so
+/// both paths leave persistence in the exact same state.
+pub fn stop_active_item(
+    conn: &Connection,
+    service_id: Uuid,
+) -> Result<Option<PresentationItem>, PresentationError> {
+    let active = persistence::list_presentation_items(
+        conn,
+        service_id,
+        Some(PresentationItemStatus::Active),
+    )?;
+    let Some(item) = active.into_iter().next() else {
+        return Ok(None);
+    };
+    Ok(Some(persistence::update_presentation_item_status(
+        conn,
+        item.id,
+        PresentationItemStatus::Stopped,
+    )?))
 }
 
 #[cfg(test)]
@@ -331,5 +432,141 @@ mod tests {
             err,
             PresentationError::NotCancelable(_, PresentationItemStatus::Stopped)
         ));
+    }
+
+    fn prepared_item(conn: &Connection, session_id: Uuid, body: &str) -> PresentationItem {
+        let item = PresentationItem::prepare(
+            session_id,
+            PresentationContent::Text {
+                title: None,
+                body: body.to_string(),
+            },
+        );
+        persistence::persist_presentation_item(conn, &item).unwrap();
+        item
+    }
+
+    #[test]
+    fn prepare_to_activate_renders_a_prepared_item_without_persisting_anything() {
+        let conn = migrated_conn();
+        let session = ServiceSession::start("Activate Test");
+        persistence::persist_service(&conn, &session).unwrap();
+        let item = prepared_item(&conn, session.id, "Welcome to service");
+
+        let (loaded, slide) = prepare_to_activate(&conn, item.id).unwrap();
+        assert_eq!(loaded.id, item.id);
+        assert_eq!(loaded.status, PresentationItemStatus::Prepared);
+        assert_eq!(slide.body_lines, vec!["Welcome to service".to_string()]);
+
+        // Still Prepared - prepare_to_activate never mutates persistence.
+        let reloaded = persistence::get_presentation_item(&conn, item.id).unwrap();
+        assert_eq!(reloaded.status, PresentationItemStatus::Prepared);
+    }
+
+    #[test]
+    fn prepare_to_activate_rejects_an_item_that_is_not_prepared() {
+        let conn = migrated_conn();
+        let session = ServiceSession::start("Activate Reject Test");
+        persistence::persist_service(&conn, &session).unwrap();
+        let item = prepared_item(&conn, session.id, "hello");
+        cancel_item(&conn, item.id).unwrap();
+
+        let err = prepare_to_activate(&conn, item.id).unwrap_err();
+        assert!(matches!(
+            err,
+            PresentationError::NotDisplayable(_, PresentationItemStatus::Stopped)
+        ));
+    }
+
+    #[test]
+    fn prepare_to_activate_rejects_a_second_item_while_one_is_already_active() {
+        let conn = migrated_conn();
+        let session = ServiceSession::start("Only One Active Test");
+        persistence::persist_service(&conn, &session).unwrap();
+        let first = prepared_item(&conn, session.id, "first");
+        let second = prepared_item(&conn, session.id, "second");
+
+        commit_activation(&conn, first.id).unwrap();
+
+        let err = prepare_to_activate(&conn, second.id).unwrap_err();
+        assert!(matches!(err, PresentationError::AlreadyActive(id) if id == first.id));
+    }
+
+    #[test]
+    fn commit_activation_transitions_prepared_to_active() {
+        let conn = migrated_conn();
+        let session = ServiceSession::start("Commit Activation Test");
+        persistence::persist_service(&conn, &session).unwrap();
+        let item = prepared_item(&conn, session.id, "hello");
+
+        let activated = commit_activation(&conn, item.id).unwrap();
+        assert_eq!(activated.status, PresentationItemStatus::Active);
+        let reloaded = persistence::get_presentation_item(&conn, item.id).unwrap();
+        assert_eq!(reloaded.status, PresentationItemStatus::Active);
+    }
+
+    #[test]
+    fn commit_activation_rejects_an_item_that_is_no_longer_prepared() {
+        let conn = migrated_conn();
+        let session = ServiceSession::start("Commit Activation Race Test");
+        persistence::persist_service(&conn, &session).unwrap();
+        let item = prepared_item(&conn, session.id, "hello");
+        commit_activation(&conn, item.id).unwrap();
+
+        // Simulates two display commands racing: the second call's earlier
+        // prepare_to_activate check is now stale.
+        let err = commit_activation(&conn, item.id).unwrap_err();
+        assert!(matches!(
+            err,
+            PresentationError::NotDisplayable(_, PresentationItemStatus::Active)
+        ));
+    }
+
+    #[test]
+    fn stop_active_item_transitions_active_to_stopped() {
+        let conn = migrated_conn();
+        let session = ServiceSession::start("Stop Active Test");
+        persistence::persist_service(&conn, &session).unwrap();
+        let item = prepared_item(&conn, session.id, "hello");
+        commit_activation(&conn, item.id).unwrap();
+
+        let stopped = stop_active_item(&conn, session.id).unwrap();
+        assert_eq!(
+            stopped.map(|i| i.status),
+            Some(PresentationItemStatus::Stopped)
+        );
+    }
+
+    #[test]
+    fn stop_active_item_is_a_safe_no_op_when_nothing_is_active() {
+        let conn = migrated_conn();
+        let session = ServiceSession::start("Stop Nothing Active Test");
+        persistence::persist_service(&conn, &session).unwrap();
+        let _prepared_but_not_active = prepared_item(&conn, session.id, "hello");
+
+        assert_eq!(stop_active_item(&conn, session.id).unwrap(), None);
+    }
+
+    #[test]
+    fn activate_then_stop_leaves_exactly_one_historical_stopped_row_never_two_active() {
+        let conn = migrated_conn();
+        let session = ServiceSession::start("Full Cycle Test");
+        persistence::persist_service(&conn, &session).unwrap();
+        let item = prepared_item(&conn, session.id, "hello");
+
+        commit_activation(&conn, item.id).unwrap();
+        stop_active_item(&conn, session.id).unwrap();
+
+        let all = persistence::list_presentation_items(&conn, session.id, None).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].status, PresentationItemStatus::Stopped);
+
+        let still_active = persistence::list_presentation_items(
+            &conn,
+            session.id,
+            Some(PresentationItemStatus::Active),
+        )
+        .unwrap();
+        assert!(still_active.is_empty());
     }
 }

@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "display",
+  "description": "Presentation display window - a passive renderer only. Same minimal grant as the main window's own capability (core:default); this app has no fs/shell/http/dialog plugin installed at all, so this window never has filesystem, shell, network, or database access.",
+  "windows": [
+    "display"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}

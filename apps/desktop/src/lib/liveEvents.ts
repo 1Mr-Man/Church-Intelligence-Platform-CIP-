@@ -18,6 +18,7 @@ import type {
   CurrentSong,
   IntelligenceCorrelation,
   IntelligenceFinding,
+  PresentationDisplayPayload,
   PresentationItem,
   ProcessedSegment,
   ScriptureDetection,
@@ -78,6 +79,23 @@ export function onPresentationPrepared(handler: (item: PresentationItem) => void
 
 export function onPresentationCancelled(handler: (item: PresentationItem) => void): Promise<UnlistenFn> {
   return listenSafe<PresentationItem>(AppEvents.PresentationCancelled, handler);
+}
+
+/** A presentation item was actually displayed on the local presentation
+ * window (`Prepared -> Active`) - the payload carries both the updated
+ * item and the already-rendered slide the display window shows verbatim.
+ * Only ever emitted by an explicit operator Display action. */
+export function onPresentationStarted(
+  handler: (payload: PresentationDisplayPayload) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<PresentationDisplayPayload>(AppEvents.PresentationStarted, handler);
+}
+
+/** The active presentation item was stopped (`Active -> Stopped`) - by an
+ * explicit operator Stop/Clear-Display action, or by the display window
+ * being closed manually (both paths reconcile to the same event). */
+export function onPresentationStopped(handler: (item: PresentationItem) => void): Promise<UnlistenFn> {
+  return listenSafe<PresentationItem>(AppEvents.PresentationStopped, handler);
 }
 
 /** A new Music Intelligence finding (Phase 2.1) - never implies a

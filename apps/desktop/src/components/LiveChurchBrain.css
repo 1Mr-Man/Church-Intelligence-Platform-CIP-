@@ -135,6 +135,12 @@
   padding: 0.75rem;
 }
 
+.live-brain__suggestion-card--active {
+  border-color: #2e7d32;
+  background: #f1f8f2;
+  margin-bottom: 0.75rem;
+}
+
 .live-brain__suggestion-header {
   display: flex;
   justify-content: space-between;

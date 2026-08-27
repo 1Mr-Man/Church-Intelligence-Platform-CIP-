@@ -22,7 +22,13 @@ import type {
   IntelligenceCorrelation,
   IntelligenceFinding,
 } from "./intelligence";
-import type { PresentationItem, PresentationPreview, RenderedSlide } from "./presentation";
+import type {
+  PresentationDisplayPayload,
+  PresentationDisplayState,
+  PresentationItem,
+  PresentationPreview,
+  RenderedSlide,
+} from "./presentation";
 import type {
   ServiceIntelligenceSummary,
   ServicePhase,
@@ -224,6 +230,33 @@ describe("domain contracts", () => {
     };
     expect(preview.slide.bodyLines.length).toBeGreaterThan(0);
     expect(preview.content.type).toBe("scripture");
+  });
+
+  it("constructs a PresentationDisplayPayload carrying both the active item and its already-rendered slide (local presentation display)", () => {
+    const item: PresentationItem = {
+      id: "00000000-0000-0000-0000-000000000008",
+      serviceId: "00000000-0000-0000-0000-000000000002",
+      content: { type: "scripture", reference: "ROM 8:28", translationId: "KJV", text: "..." },
+      status: "active",
+      createdAt: new Date().toISOString(),
+      sourceSuggestionId: null,
+      template: "SCRIPTURE_DEFAULT",
+    };
+    const slide: RenderedSlide = {
+      template: "SCRIPTURE_DEFAULT",
+      heading: "ROM 8:28",
+      bodyLines: ["And we know that all things work together for good"],
+      footer: "KJV",
+    };
+    const payload: PresentationDisplayPayload = { item, slide };
+    expect(payload.item.status).toBe("active");
+    expect(payload.slide.heading).toBe("ROM 8:28");
+  });
+
+  it("constructs a PresentationDisplayState with no active item and a closed window", () => {
+    const state: PresentationDisplayState = { windowOpen: false, activeItem: null };
+    expect(state.windowOpen).toBe(false);
+    expect(state.activeItem).toBeNull();
   });
 
   it("constructs a TimelineEntry describing a service-lifecycle event", () => {

@@ -19,6 +19,8 @@ import {
   onMusicFindingRejected,
   onPresentationPrepared,
   onPresentationPreviewed,
+  onPresentationStarted,
+  onPresentationStopped,
   onSermonFindingAccepted,
   onSermonFindingDetected,
   onSermonFindingRejected,
@@ -84,6 +86,26 @@ describe("liveEvents.ts Tauri event-subscription guard", () => {
 
     expect(listenMock).toHaveBeenCalledWith("PRESENTATION_PREVIEWED", expect.any(Function));
     expect(listenMock).toHaveBeenCalledWith("PRESENTATION_PREPARED", expect.any(Function));
+  });
+
+  it("subscribes to PRESENTATION_STARTED and PRESENTATION_STOPPED (local presentation display)", async () => {
+    isTauriMock.mockReturnValue(true);
+    listenMock.mockResolvedValue(() => {});
+
+    await onPresentationStarted(() => {});
+    await onPresentationStopped(() => {});
+
+    expect(listenMock).toHaveBeenCalledWith("PRESENTATION_STARTED", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith("PRESENTATION_STOPPED", expect.any(Function));
+  });
+
+  it("resolves to a no-op unlisten for the display events outside the Tauri runtime", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    const unlisten = await onPresentationStarted(() => {});
+
+    expect(listenMock).not.toHaveBeenCalled();
+    expect(() => unlisten()).not.toThrow();
   });
 
   it("subscribes to the three distinct music finding events (Phase 2.1)", async () => {

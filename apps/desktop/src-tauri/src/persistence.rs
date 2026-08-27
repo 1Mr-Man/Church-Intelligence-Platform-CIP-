@@ -566,8 +566,10 @@ fn parse_presentation_item_status(status: &str) -> cip_core_presentation::Presen
 }
 
 /// Persist a prepared presentation item (`status = 'prepared'`, matching
-/// `PresentationItemStatus::Prepared`). Nothing in this pipeline ever
-/// writes `'active'` - see `commands::prepare_presentation`'s docs.
+/// `PresentationItemStatus::Prepared`). Preparing never writes `'active'`
+/// directly - only an explicit, later `display_presentation` command does
+/// that (see `commands.rs`'s docs and `update_presentation_item_status`
+/// below).
 pub fn persist_presentation_item(
     conn: &Connection,
     item: &cip_core_presentation::PresentationItem,
@@ -692,9 +694,11 @@ pub fn list_presentation_items(
         .collect()
 }
 
-/// Update a presentation item's status (e.g. cancelling a prepared item -
-/// `Stopped`, reused as "prepared then retracted" since nothing in this
-/// phase ever transitions an item to `Active`). Returns the updated row.
+/// Update a presentation item's status - cancelling a prepared item
+/// (`Stopped`, "prepared then retracted"), activating one for real local
+/// display (`Active`, see `commands::display_presentation`), or stopping
+/// an active one (`Stopped`, see `commands::clear_presentation_display`).
+/// Returns the updated row.
 pub fn update_presentation_item_status(
     conn: &Connection,
     item_id: Uuid,
@@ -708,6 +712,21 @@ pub fn update_presentation_item_status(
         ],
     )?;
     get_presentation_item(conn, item_id)
+}
+
+/// Startup safety sweep (spec: "restart must never automatically
+/// project"): any presentation item still `Active` from a previous,
+/// uncleanly-ended run is reconciled to `Stopped` before the app manages
+/// any state or opens any window. Never re-opens a display, never re-reads
+/// which item it was - the whole point is that nothing downstream ever
+/// sees a leftover `Active` row and treats it as "still showing." Returns
+/// how many rows were reconciled, for a one-line startup log.
+pub fn reconcile_stale_active_presentation_items(conn: &Connection) -> Result<usize, PersistError> {
+    let affected = conn.execute(
+        "UPDATE presentation_items SET status = 'stopped' WHERE status = 'active'",
+        [],
+    )?;
+    Ok(affected)
 }
 
 // --- sermon foundation (Phase 2.5, per the authoritative Phase 2 roadmap) --
@@ -1513,6 +1532,79 @@ mod tests {
             updated.status,
             cip_core_presentation::PresentationItemStatus::Stopped
         );
+    }
+
+    #[test]
+    fn update_presentation_item_status_can_activate_a_prepared_item() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let item = cip_core_presentation::PresentationItem::prepare(
+            session.id,
+            cip_core_presentation::PresentationContent::Text {
+                title: None,
+                body: "welcome".into(),
+            },
+        );
+        persist_presentation_item(&conn, &item).unwrap();
+
+        let activated = update_presentation_item_status(
+            &conn,
+            item.id,
+            cip_core_presentation::PresentationItemStatus::Active,
+        )
+        .unwrap();
+        assert_eq!(
+            activated.status,
+            cip_core_presentation::PresentationItemStatus::Active
+        );
+    }
+
+    #[test]
+    fn reconcile_stale_active_presentation_items_stops_every_active_row_and_leaves_others_untouched(
+    ) {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let active = cip_core_presentation::PresentationItem::prepare(
+            session.id,
+            cip_core_presentation::PresentationContent::Text {
+                title: None,
+                body: "left active from a previous run".into(),
+            },
+        );
+        persist_presentation_item(&conn, &active).unwrap();
+        update_presentation_item_status(
+            &conn,
+            active.id,
+            cip_core_presentation::PresentationItemStatus::Active,
+        )
+        .unwrap();
+
+        let prepared = cip_core_presentation::PresentationItem::prepare(
+            session.id,
+            cip_core_presentation::PresentationContent::Text {
+                title: None,
+                body: "still legitimately prepared".into(),
+            },
+        );
+        persist_presentation_item(&conn, &prepared).unwrap();
+
+        let affected = reconcile_stale_active_presentation_items(&conn).unwrap();
+        assert_eq!(affected, 1);
+
+        assert_eq!(
+            get_presentation_item(&conn, active.id).unwrap().status,
+            cip_core_presentation::PresentationItemStatus::Stopped
+        );
+        assert_eq!(
+            get_presentation_item(&conn, prepared.id).unwrap().status,
+            cip_core_presentation::PresentationItemStatus::Prepared
+        );
+    }
+
+    #[test]
+    fn reconcile_stale_active_presentation_items_is_a_safe_no_op_when_nothing_is_active() {
+        let conn = migrated_conn();
+        assert_eq!(reconcile_stale_active_presentation_items(&conn).unwrap(), 0);
     }
 
     #[test]

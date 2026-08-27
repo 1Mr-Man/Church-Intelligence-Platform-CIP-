@@ -12,6 +12,7 @@ mod music;
 mod persistence;
 mod pipeline;
 mod presentation;
+mod presentation_display;
 mod sermon;
 mod sermon_foundation;
 mod service;
@@ -104,6 +105,20 @@ pub fn run() {
             let mut db = cip_database::open(&config.database_path)?;
             let applied = cip_database::run_migrations(&mut db)?;
             log::info!(target: LogCategory::Database.target(), "{} migration(s) applied", applied.len());
+
+            // Local presentation display foundation: restart must never
+            // automatically project anything (see `presentation_display.rs`'s
+            // module docs and `docs/presentation.md`). Any presentation
+            // item left `Active` by a previous, uncleanly-ended run is
+            // reconciled to `Stopped` here, before anything else touches
+            // presentation state or any window is created.
+            let reconciled = persistence::reconcile_stale_active_presentation_items(&db)?;
+            if reconciled > 0 {
+                log::info!(
+                    target: LogCategory::Presentation.target(),
+                    "reconciled {reconciled} presentation item(s) left active by a previous run to stopped"
+                );
+            }
 
             // Dev/test convenience only: a handful of verses so the UI has
             // something to query. Never applied in Production, and never a
@@ -276,6 +291,11 @@ pub fn run() {
             commands::list_prepared_presentations,
             commands::get_presentation_item,
             commands::cancel_presentation,
+            commands::open_presentation_display,
+            commands::get_presentation_display_state,
+            commands::display_presentation,
+            commands::clear_presentation_display,
+            commands::close_presentation_display,
             commands::search_bible,
             commands::list_content_registry,
             commands::get_content_metadata,

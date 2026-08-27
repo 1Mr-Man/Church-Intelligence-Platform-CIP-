@@ -112,6 +112,14 @@ export function LiveChurchBrain() {
   // Current Output panel's data (Phase 1.4 section 27). Never includes
   // cancelled items.
   const [preparedItems, setPreparedItems] = useState<PresentationItem[]>([]);
+  // The single item currently displayed on the local presentation window
+  // (Prepared -> Active), if any, plus whether that window currently
+  // exists - only ever changes via an explicit operator Display/Stop
+  // action or the display window being closed manually, never
+  // automatically. See `docs/presentation.md`'s "Local display
+  // architecture" section.
+  const [activeDisplayItem, setActiveDisplayItem] = useState<PresentationItem | null>(null);
+  const [displayWindowOpen, setDisplayWindowOpen] = useState(false);
   // Non-mutating previews, keyed by suggestion id / search reference -
   // Preview never changes `suggestions`/`approvedSuggestions`/`preparedItems`
   // (section 14: preview and prepare are separate actions).
@@ -242,6 +250,13 @@ export function LiveChurchBrain() {
       commands.listSuggestions("pending").then(setSuggestions).catch(() => {});
       commands.listSuggestions("approved").then(setApprovedSuggestions).catch(() => {});
       commands.listPreparedPresentations().then(setPreparedItems).catch(() => {});
+      commands
+        .getPresentationDisplayState()
+        .then((s) => {
+          setDisplayWindowOpen(s.windowOpen);
+          setActiveDisplayItem(s.activeItem);
+        })
+        .catch(() => {});
       commands.listTranscript(TRANSCRIPT_LIMIT).then(setTranscript).catch(() => {});
       commands.listTimeline(TIMELINE_LIMIT).then(setTimeline).catch(() => {});
       commands.listMusicFindings().then(setMusicFindings).catch(() => {});
@@ -257,6 +272,7 @@ export function LiveChurchBrain() {
       setSuggestions([]);
       setApprovedSuggestions([]);
       setPreparedItems([]);
+      setActiveDisplayItem(null);
       setPreviews({});
       setSearchPreviews({});
       setTranscript([]);
@@ -331,6 +347,12 @@ export function LiveChurchBrain() {
       liveEvents.onPresentationCancelled((item) =>
         setPreparedItems((prev) => prev.filter((x) => x.id !== item.id)),
       ),
+      liveEvents.onPresentationStarted(({ item }) => {
+        setPreparedItems((prev) => prev.filter((x) => x.id !== item.id));
+        setActiveDisplayItem(item);
+        setDisplayWindowOpen(true);
+      }),
+      liveEvents.onPresentationStopped(() => setActiveDisplayItem(null)),
       liveEvents.onMusicFindingDetected((finding) => setMusicFindings((prev) => [finding, ...prev])),
       liveEvents.onMusicFindingAccepted((finding) =>
         setMusicFindings((prev) => prev.filter((f) => f.id !== finding.id)),
@@ -946,7 +968,70 @@ export function LiveChurchBrain() {
       </section>
 
       <section className="live-brain__panel live-brain__panel--current-output">
-        <h2>Current Output</h2>
+        <h2>
+          Current Output{" "}
+          <span className="live-brain__status-dot">
+            &#9679; DISPLAY {displayWindowOpen ? "OPEN" : "CLOSED"}
+          </span>
+        </h2>
+        <p className="live-brain__hint">
+          A local presentation window under direct operator control - never opened or projected automatically. See{" "}
+          <em>docs/presentation.md</em>.
+        </p>
+        <div className="live-brain__row">
+          <button
+            type="button"
+            disabled={isBusy("open-display")}
+            onClick={() =>
+              withBusy("open-display", async () => {
+                await commands.openPresentationDisplay();
+                setDisplayWindowOpen(true);
+              })
+            }
+          >
+            Open Display
+          </button>
+          <button
+            type="button"
+            disabled={!displayWindowOpen || isBusy("close-display")}
+            onClick={() =>
+              withBusy("close-display", async () => {
+                await commands.closePresentationDisplay();
+                setDisplayWindowOpen(false);
+                setActiveDisplayItem(null);
+              })
+            }
+          >
+            Close Display
+          </button>
+        </div>
+
+        {activeDisplayItem && (
+          <div className="live-brain__suggestion-card live-brain__suggestion-card--active">
+            <div className="live-brain__suggestion-header">
+              <strong>
+                {activeDisplayItem.content.type === "scripture"
+                  ? activeDisplayItem.content.reference
+                  : activeDisplayItem.content.title}
+              </strong>
+              <span className="live-brain__status-dot">&#9679; ACTIVE &mdash; ON SCREEN</span>
+            </div>
+            <div className="live-brain__row">
+              <button
+                type="button"
+                disabled={isBusy("stop-display")}
+                onClick={() =>
+                  withBusy("stop-display", async () => {
+                    await commands.clearPresentationDisplay();
+                  })
+                }
+              >
+                Stop
+              </button>
+            </div>
+          </div>
+        )}
+
         {preparedItems.length === 0 ? (
           <p className="live-brain__hint">NOTHING PREPARED &mdash; CIP never prepares or projects content automatically.</p>
         ) : (
@@ -965,6 +1050,18 @@ export function LiveChurchBrain() {
                   </p>
                 )}
                 <div className="live-brain__row">
+                  <button
+                    type="button"
+                    disabled={!!activeDisplayItem || isBusy(`display-${item.id}`)}
+                    title={activeDisplayItem ? "Stop the currently active item before displaying another" : undefined}
+                    onClick={() =>
+                      withBusy(`display-${item.id}`, async () => {
+                        await commands.displayPresentation(item.id);
+                      })
+                    }
+                  >
+                    Display
+                  </button>
                   <button
                     type="button"
                     disabled={isBusy(`cancel-${item.id}`)}
