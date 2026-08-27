@@ -11,6 +11,7 @@ mod intelligence;
 pub mod logging;
 mod music;
 mod persistence;
+mod pilot_evidence;
 mod pipeline;
 mod presentation;
 mod presentation_display;

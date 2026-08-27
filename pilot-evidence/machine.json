@@ -1,0 +1,12 @@
+{
+  "_notice": "This is the BUILD/DEVELOPMENT environment used to produce and test this release, NOT a church pilot machine. It has no audio hardware and no display server. This file exists to document what environment produced the automated/Xvfb evidence in this package - it must never be read as Environment C (real hardware) machine data. See hardware-status.json for the explicit BLOCKED status.",
+  "os": "linux",
+  "osRelease": "Linux vm 6.18.44-fc-v22 #1 SMP PREEMPT_DYNAMIC x86_64 GNU/Linux",
+  "arch": "x86_64",
+  "cpuCores": 4,
+  "memoryTotal": "15Gi",
+  "audioHardware": "none (/dev/snd does not exist)",
+  "displayServer": "none ($DISPLAY empty, no xrandr) - Xvfb used only for Environment B validation",
+  "cipVersion": "0.1.0",
+  "gitBranch": "claude/cip-foundation-init-i85g87"
+}

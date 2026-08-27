@@ -1,0 +1,25 @@
+{
+  "automated": {
+    "environment": "automated",
+    "status": "pass",
+    "test": "commands::tests::a_vacuum_into_backup_survives_a_simulated_working_database_loss",
+    "steps": [
+      "create real service data in a real file-backed SQLite database",
+      "back it up via VACUUM INTO (the exact mechanism backup_database uses)",
+      "delete the working database file AND its -wal/-shm sidecars entirely",
+      "restore by copying the backup over the missing working path",
+      "reopen exactly as a fresh launch would",
+      "verify the service record survived intact"
+    ],
+    "result": "pass - no data loss"
+  },
+  "realHardware": {
+    "environment": "real_hardware",
+    "status": "blocked_hardware",
+    "backupCreatedOnPilotMachine": null,
+    "backupSizeBytes": null,
+    "backupTimestamp": null,
+    "restoreVerifiedOnPilotMachine": null,
+    "note": "the backup command itself (backup_database, VACUUM INTO) is real production code, unchanged by hardware availability - this entry tracks whether it was exercised on the actual pilot machine, which it has not been"
+  }
+}

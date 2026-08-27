@@ -1,0 +1,29 @@
+{
+  "xvfb": {
+    "environment": "xvfb",
+    "status": "pass",
+    "tests": [
+      {
+        "name": "TEST A: normal close and restart",
+        "evidence": "logs/xvfb-run1-fresh.log then logs/xvfb-run2-idempotent.log against the same data directory",
+        "result": "0 migrations applied on second launch, BSB already present, zero panics"
+      },
+      {
+        "name": "TEST C/D: real forced process termination (kill -9) during active runtime, then restart",
+        "evidence": "logs/xvfb-crash-before-kill.log, then a real SIGKILL sent to the running release binary's actual PID (confirmed exit code 137 = SIGKILL), then logs/xvfb-crash-after-kill-recovery.log",
+        "result": "real stale -wal/-shm sidecar files confirmed present immediately after the kill; relaunch showed 0 migrations applied, BSB still fully present (0 imported, 31086 already present), zero panics - SQLite's own WAL recovery handled the unclean shutdown transparently"
+      }
+    ],
+    "note": "this is the strongest crash-recovery evidence obtainable without real hardware: a real process, a real uncatchable signal, a real reopen. It is still Environment B (this container), not Environment C (a real pilot machine)."
+  },
+  "automated": {
+    "environment": "automated",
+    "status": "pass",
+    "note": "structural restart/reconciliation proven by pipeline.rs's file-backed restart tests and the backup/restore round-trip test - see automated-test-summary.json"
+  },
+  "realHardware": {
+    "environment": "real_hardware",
+    "status": "blocked_hardware",
+    "note": "a real crash/restart on the actual pilot machine (power loss, OS-level force quit) has not been performed"
+  }
+}

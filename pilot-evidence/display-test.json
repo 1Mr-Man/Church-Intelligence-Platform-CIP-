@@ -1,0 +1,22 @@
+{
+  "xvfb": {
+    "environment": "xvfb",
+    "status": "pass",
+    "note": "three real-binary launches this phase (RUN1 fresh, RUN2 idempotent, RUN3 installed-path) all completed startup cleanly under a virtual X server - see logs/xvfb-run1-fresh.log, logs/xvfb-run2-idempotent.log, logs/xvfb-run3-installed-path.log. This proves desktop/window-lifecycle runtime correctness only.",
+    "screensDetected": 1,
+    "physicalDisplay": false
+  },
+  "realHardware": {
+    "environment": "real_hardware",
+    "status": "blocked_hardware",
+    "secondDisplayDetected": null,
+    "connectionType": null,
+    "resolution": null,
+    "scaleFactor": null,
+    "scriptureReadableAtOperatorDistance": null,
+    "shortVerseTest": null,
+    "longVersePassageTest": null,
+    "rapidPrepareDisplayStopCycleTest": null,
+    "note": "no $DISPLAY, no xrandr, no physical monitor/projector hardware exists in this container - Xvfb evidence must never be read as physical-display evidence"
+  }
+}

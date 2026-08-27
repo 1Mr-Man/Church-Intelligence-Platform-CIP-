@@ -1,0 +1,31 @@
+{
+  "automated": {
+    "environment": "automated",
+    "status": "pass",
+    "bibleDataset": {
+      "translationId": "BSB",
+      "licensingStatus": "verified_public_domain",
+      "license": "Public Domain",
+      "totalBooks": 66,
+      "totalChapters": 1189,
+      "totalVerses": 31086,
+      "checksum": "d4335582ff26a3ac",
+      "checksumAlgorithm": "FNV-1a 64-bit over translation_id + every (book, chapter, verse, text) row - see cip_integrations_bible::importer::compute_checksum",
+      "checksumVerifiedThisPhase": true,
+      "source": "docs/data/bible/BSB/manifest.json (unchanged this phase, re-read and re-confirmed byte-for-byte)"
+    },
+    "hardImportGate": {
+      "status": "confirmed_active",
+      "evidence": "existing importer.rs / content.rs test suite re-run clean this phase (see automated-test-summary.json); import_bible_dataset remains transactional and licensing-gated; no code path in this phase touched the licensing gate",
+      "noUnknownToApprovedConversion": "confirmed - grep of this phase's diff shows zero writes to content_registry licensing/publisher/copyright fields; ContentMetadata.publisher stays None (UNKNOWN) unless explicitly set at import, unchanged behavior"
+    },
+    "noNewCopyrightedTranslationImported": true,
+    "noNewContentAssetsAddedThisPhase": true,
+    "note": "this phase added zero Bible/content data and zero licensing-relevant code changes; get_pilot_diagnostics reads the existing ContentMetadata via content_registry.get() but does not alter it"
+  },
+  "realHardware": {
+    "environment": "real_hardware",
+    "status": "not_applicable",
+    "note": "licensing is a data/code property, not a hardware property - it does not require Environment C evidence and is fully covered by the automated entry above"
+  }
+}

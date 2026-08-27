@@ -76,6 +76,24 @@ hardware. See
 [`docs/phase-3-2-hardware-pilot.md`](docs/phase-3-2-hardware-pilot.md)
 and [`docs/release-manifest-3.2.json`](docs/release-manifest-3.2.json).
 
+**Phase 3.3** asked whether CIP can now be qualified for a real physical
+church pilot, and built the machinery to answer that question honestly
+going forward: a code-level Hardware Pilot Qualification Model
+(`pilot_evidence.rs`) that makes "an automated pass is never a hardware
+pass" a structural guarantee rather than a promise, a substantially
+expanded `get_pilot_diagnostics` operator tool (machine identity, build
+commit, database health, Bible integrity, alongside the existing audio/
+Whisper/display detail), a deterministic hardware qualification
+checklist, and a portable, git-tracked `pilot-evidence/` package. A
+direct OS-level hardware re-probe found the same result as every prior
+phase - still **NOT AVAILABLE**, not upgraded to VERIFIED. Software gate:
+**RELEASE CANDIDATE**. Hardware qualification, pilot qualification, and
+final release gates: **HOLD**, honestly and explicitly, pending the same
+real microphone/Whisper/projector/operator verification on a church's
+own hardware named in Phase 3.2. See
+[`docs/phase-3-3-pilot-qualification.md`](docs/phase-3-3-pilot-qualification.md)
+and the [`pilot-evidence/`](pilot-evidence/) directory.
+
 > **Roadmap note.** This repository's authoritative Phase 2 roadmap is:
 > 2.0 Intelligence Architecture -> 2.1 Unified Intelligence Event/Context
 > Layer -> 2.2 Music Content Foundation -> 2.3 Music Intelligence -> **2.4

@@ -4,6 +4,8 @@
  * backend already resolved, via the `get_app_config` command.
  */
 
+import type { ContentMetadata } from "../domain/content";
+
 export type AppEnvironment = "development" | "test" | "production";
 
 export interface AppConfig {
@@ -35,10 +37,27 @@ export interface DisplayDiagnostic {
   name: string | null;
   widthPx: number;
   heightPx: number;
+  scaleFactor: number;
   isPrimary: boolean;
 }
 
+/** Which machine/build produced a diagnostic report (Phase 3.3). */
+export interface MachineDiagnostic {
+  os: string;
+  arch: string;
+  cipVersion: string;
+  buildCommit: string;
+}
+
+/** Is the database file actually readable/writable right now (Phase 3.3). */
+export interface DatabaseDiagnostic {
+  path: string;
+  readable: boolean;
+  writable: boolean;
+}
+
 export interface PilotDiagnostics {
+  machine: MachineDiagnostic;
   whisperModel: WhisperModelDiagnostic;
   audioDevices: Array<{ id: string; name: string; isDefault: boolean }>;
   audio: {
@@ -57,6 +76,9 @@ export interface PilotDiagnostics {
    * projector readiness - see `docs/phase-3-2-hardware-pilot.md`.
    */
   displays: DisplayDiagnostic[];
+  /** `null` when the BSB dataset is not registered - never fabricated. */
+  bible: ContentMetadata | null;
+  database: DatabaseDiagnostic;
 }
 
 /** Frontend mirror of `commands.rs`'s `BackupReport`, via `backup_database`. */

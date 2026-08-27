@@ -1,0 +1,32 @@
+{
+  "environment": "automated",
+  "commands": {
+    "cargo fmt --all -- --check": "pass",
+    "cargo clippy --workspace --all-targets -- -D warnings": "pass",
+    "cargo test --workspace (default features)": "768 passed, 0 failed",
+    "cargo test -p cip-ai-speech --features whisper": "7 passed, 0 failed",
+    "cargo test -p cip-desktop --features whisper": "204 passed, 0 failed",
+    "npm run typecheck (tsc -b)": "pass",
+    "npm run test (vitest run)": "179 passed, 0 failed",
+    "npm run lint (oxlint)": "0 errors, 2 pre-existing unrelated warnings",
+    "npm run build (vite build)": "pass"
+  },
+  "newTestsThisPhase": [
+    "commands::tests::pilot_diagnostics_serializes_camel_case (extended for machine/database/bible fields)",
+    "commands::tests::cip_git_commit_is_embedded_and_not_the_literal_placeholder",
+    "pilot_evidence::tests::automated_pass_never_satisfies_hardware_qualification",
+    "pilot_evidence::tests::xvfb_pass_never_satisfies_hardware_qualification",
+    "pilot_evidence::tests::every_non_hardware_environment_combined_still_blocks",
+    "pilot_evidence::tests::a_real_hardware_pass_record_produces_pass",
+    "pilot_evidence::tests::a_real_hardware_failure_is_never_masked_by_other_passing_evidence",
+    "pilot_evidence::tests::no_evidence_at_all_is_blocked_hardware_not_not_tested"
+  ],
+  "offlineDependencyCheck": {
+    "command": "cargo tree --workspace --all-features",
+    "result": "no reqwest/hyper-client/ureq/curl anywhere in the dependency graph"
+  },
+  "secretsScan": {
+    "command": "git diff | grep -iE \"TODO|FIXME|api[_-]?key|secret|password|BEGIN (RSA|PRIVATE)|dbg!|console\\.log\"",
+    "result": "no matches"
+  }
+}

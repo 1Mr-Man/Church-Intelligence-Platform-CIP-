@@ -1,0 +1,30 @@
+{
+  "automated": {
+    "environment": "automated",
+    "status": "pass",
+    "tests": [
+      "list_devices_does_not_crash_and_reports_an_honest_empty_list_without_hardware",
+      "starting_an_unknown_device_id_is_reported_not_fabricated",
+      "pause_without_capturing_is_a_reported_error_not_a_panic",
+      "stop_without_ever_starting_is_a_safe_no_op",
+      "record_stream_error_flips_capturing_false_and_records_the_reason",
+      "a_fresh_engine_reports_no_stream_error_by_default"
+    ]
+  },
+  "xvfb": {
+    "environment": "xvfb",
+    "status": "not_applicable",
+    "note": "audio capture is not display-dependent; Xvfb runs confirm the app starts cleanly with zero audio devices detected, matching automated evidence"
+  },
+  "realHardware": {
+    "environment": "real_hardware",
+    "status": "blocked_hardware",
+    "device": null,
+    "sampleRateHz": null,
+    "channels": null,
+    "captureDurationSeconds": null,
+    "errors": null,
+    "recoveryResult": null,
+    "note": "no microphone or audio device exists in this container - device enumeration correctly and honestly returns an empty list"
+  }
+}

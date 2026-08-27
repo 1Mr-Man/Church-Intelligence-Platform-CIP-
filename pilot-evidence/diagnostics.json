@@ -1,0 +1,57 @@
+{
+  "_notice": "get_pilot_diagnostics is a Tauri #[tauri::command] reachable only via live frontend IPC (invoke('get_pilot_diagnostics')) from within a running webview. This container has no webview-automation tooling (no WebDriver/tauri-driver, no way to drive the actual React UI and read back an IPC response), so this file is NOT a captured live response and must not be read as one. It is a structural example: real field VALUES drawn from files this phase already produced honestly (machine.json, Xvfb run logs, manifest.json), assembled into the exact JSON SHAPE get_pilot_diagnostics actually serializes (see apps/desktop/src-tauri/src/commands.rs, struct PilotDiagnostics and its field types), so a reviewer can see what the expanded diagnostics command now reports without a fabricated 'live capture' claim.",
+  "environment": "structural_example_not_a_live_capture",
+  "shapeSource": "apps/desktop/src-tauri/src/commands.rs: PilotDiagnostics { machine, whisperModel, audioDevices, audio, displays, bible, database }",
+  "example": {
+    "machine": {
+      "os": "linux",
+      "arch": "x86_64",
+      "cipVersion": "0.1.0",
+      "buildCommit": "fc690a0e258e"
+    },
+    "whisperModel": {
+      "status": "missing",
+      "_note": "real value from this container: no ggml/gguf model file is configured or present - see whisper-test.json"
+    },
+    "audioDevices": [],
+    "audio": {
+      "isCapturing": false,
+      "isPaused": false,
+      "sampleRateHz": 0,
+      "inputLevel": null,
+      "streamError": null,
+      "_note": "real value from this container: /dev/snd does not exist, so cpal enumerates zero devices and the engine reports idle/no-device state - see audio-test.json and hardware-status.json"
+    },
+    "displays": [
+      {
+        "name": "Xvfb screen 0",
+        "widthPx": 1280,
+        "heightPx": 800,
+        "scaleFactor": 1.0,
+        "isPrimary": true
+      }
+    ],
+    "bible": {
+      "id": "bible:BSB",
+      "contentType": "bible",
+      "name": "Berean Standard Bible",
+      "version": "bsb-1.0",
+      "language": "en",
+      "publisher": null,
+      "copyright": null,
+      "license": "Public Domain",
+      "_note": "real value shape from docs/data/bible/BSB/manifest.json / content_registry, confirmed present after each Xvfb run this phase"
+    },
+    "database": {
+      "path": "<app-data-dir>/cip.sqlite3",
+      "readable": true,
+      "writable": true,
+      "_note": "real result of the non-mutating OpenOptions writable check against this container's Xvfb-run database file"
+    }
+  },
+  "realHardware": {
+    "environment": "real_hardware",
+    "status": "blocked_hardware",
+    "note": "get_pilot_diagnostics has never been invoked from a real running webview on a real pilot machine. On real target hardware, whisperModel.status, audioDevices, audio, and displays above would report genuinely different values (a real model file or a real Missing/Unreadable result, real enumerated microphones, a real capturing/idle state, and the real monitor(s) actually connected) - none of that is known and none of it is guessed here."
+  }
+}

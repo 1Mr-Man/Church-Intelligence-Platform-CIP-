@@ -1,0 +1,31 @@
+{
+  "automated": {
+    "environment": "automated",
+    "releaseModeTestSuite": {
+      "suite": "pipeline (18 tests, includes Phase 3.1 full-service simulation and Phase 3.2 60-minute simulation)",
+      "durationSeconds": 0.78
+    }
+  },
+  "xvfb": {
+    "environment": "xvfb",
+    "startupToFullyInitializedSeconds": {
+      "run1FreshInstall": "~1-2s (9 migrations, full 31,086-verse BSB import, all 6 intelligence domains initialized)",
+      "run2Idempotent": "~1-2s (0 migrations, BSB already present)",
+      "run3InstalledPath": "~1-2s (identical to run1, launched from the .deb-extracted path)"
+    },
+    "hardwareUsedForThisMeasurement": "this build/CI container (4 cores, 15Gi RAM) - NOT a target pilot machine; see machine.json"
+  },
+  "realHardware": {
+    "environment": "real_hardware",
+    "startupTime": null,
+    "microphoneStartupLatency": null,
+    "whisperModelLoadTime": null,
+    "transcriptionLatency": null,
+    "intelligenceLatency": null,
+    "presentationActivationLatency": null,
+    "uiResponseTime": null,
+    "memoryOverTime": null,
+    "cpuOverTime": null,
+    "note": "no performance measurement on target pilot hardware has been taken; automated/Xvfb numbers above must not be compared against real hardware as if equivalent"
+  }
+}

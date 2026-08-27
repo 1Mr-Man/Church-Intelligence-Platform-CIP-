@@ -1,0 +1,31 @@
+{
+  "environment": "automated",
+  "tauriCapabilities": {
+    "windows": ["main", "display"],
+    "permissions": "core:default only on both windows",
+    "pluginsInCargoToml": ["tauri-plugin-log"],
+    "fsShellHttpDialogPlugins": "none"
+  },
+  "csp": {
+    "value": null,
+    "classification": "accepted_risk",
+    "rationale": "zero fs/shell/http/dialog plugin surface limits practical exposure; Tauri v2's IPC bootstrap script has its own nonce/CSP interaction that can only be safely verified against a real per-OS build/run, which this environment (Xvfb, no webview automation tooling) cannot exercise closely enough to validate a policy change blind. Re-evaluated and re-confirmed not release-blocking every phase since 3.0."
+  },
+  "whisperModelPathHandling": {
+    "onlyEverUsedAs": "std::fs::metadata / std::fs::File::open / whisper.cpp model loader",
+    "execOrSpawnFound": false,
+    "pathTraversalRisk": "none beyond the by-design ability for an operator to point CIP at any file they have read permission to"
+  },
+  "newCommandsThisPhase": {
+    "getPilotDiagnostics": "reads only already-configured state + Tauri's own monitor API; no new arbitrary-file-read surface",
+    "backupDatabase": "writes only via VACUUM INTO through the app's own already-open connection; never reads arbitrary files"
+  },
+  "sqlInjectionCheck": {
+    "method": "grep for format!-built SQL in persistence.rs",
+    "result": "no user-controlled string interpolated into a query; all values bound via rusqlite::params!"
+  },
+  "secretsScan": "clean (see automated-test-summary.json)",
+  "buildTimeGitCommand": {
+    "note": "build.rs invokes `git rev-parse --short=12 HEAD` at COMPILE time only (never at runtime) to embed a build identifier; falls back to 'unknown' if git or a checkout isn't available. This is a build-time-only exec, not a runtime exec surface."
+  }
+}

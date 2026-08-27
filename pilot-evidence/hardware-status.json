@@ -1,0 +1,21 @@
+{
+  "_notice": "The single source of truth for Environment C (real hardware) status this phase. Nothing in this file was fabricated or inferred from Automated/Xvfb evidence - see pilot_evidence.rs's hardware_qualification_status() for the code-level guardrail this reflects.",
+  "environmentCProbe": {
+    "devSnd": "does not exist",
+    "aplay": "not installed",
+    "procAsoundCards": "does not exist",
+    "displayVar": "empty",
+    "xrandr": "not installed",
+    "conclusion": "no audio hardware and no display server present in any environment this project has been built/tested in through Phase 3.3"
+  },
+  "capabilities": {
+    "realMicrophoneCapture": { "environment": "real_hardware", "status": "blocked_hardware", "note": "no microphone or audio device exists in any build/test environment used" },
+    "realWhisperTranscription": { "environment": "real_hardware", "status": "blocked_hardware", "note": "requires both a real model and real microphone audio; neither obtainable here" },
+    "speechLatency": { "environment": "real_hardware", "status": "blocked_hardware", "note": "depends on real microphone capture" },
+    "realPhysicalDisplay": { "environment": "real_hardware", "status": "blocked_hardware", "note": "no $DISPLAY, no xrandr, no physical monitor/projector" },
+    "presentationReadability": { "environment": "real_hardware", "status": "blocked_hardware", "note": "depends on real physical display" },
+    "realService": { "environment": "real_hardware", "status": "blocked_hardware", "note": "requires a real church, real operator, real hardware" },
+    "operatorTaskTiming": { "environment": "real_hardware", "status": "blocked_hardware", "note": "no human operator available in this session" },
+    "multiHourPhysicalStability": { "environment": "real_hardware", "status": "blocked_hardware", "note": "no real wall-clock multi-hour run performed; only a compressed simulated-load equivalent (Environment A) exists" }
+  }
+}

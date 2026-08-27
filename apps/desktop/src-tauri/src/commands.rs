@@ -277,12 +277,42 @@ pub struct DisplayDiagnostic {
     pub name: Option<String>,
     pub width_px: u32,
     pub height_px: u32,
+    pub scale_factor: f64,
     pub is_primary: bool,
+}
+
+/// Phase 3.3: which machine/build produced this diagnostic report - the
+/// minimum an evidence record needs to be attributable to a specific
+/// pilot machine and a specific release. `build_commit` is embedded at
+/// compile time by `build.rs` (a build-time-only `git rev-parse`, never a
+/// runtime process spawn) and reads `"unknown"` for a build that wasn't
+/// made from a git checkout (e.g. a source tarball) - never fabricated.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineDiagnostic {
+    pub os: String,
+    pub arch: String,
+    pub cip_version: String,
+    pub build_commit: String,
+}
+
+/// Phase 3.3: is the database file actually writable/readable right now -
+/// distinct from "did migrations apply" (`app_health_check` already
+/// answers that). A real disk-full or permissions problem on the pilot
+/// machine would show up here even if the connection that opened the app
+/// still works.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseDiagnostic {
+    pub path: String,
+    pub readable: bool,
+    pub writable: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PilotDiagnostics {
+    pub machine: MachineDiagnostic,
     pub whisper_model: WhisperModelDiagnostic,
     pub audio_devices: Vec<AudioDevice>,
     pub audio: AudioEngineStatus,
@@ -292,10 +322,19 @@ pub struct PilotDiagnostics {
     /// why this alone can never be treated as VERIFIED physical-projector
     /// readiness.
     pub displays: Vec<DisplayDiagnostic>,
+    pub bible: Option<ContentMetadata>,
+    pub database: DatabaseDiagnostic,
 }
 
 #[tauri::command]
 pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> PilotDiagnostics {
+    let machine = MachineDiagnostic {
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        cip_version: env!("CARGO_PKG_VERSION").to_string(),
+        build_commit: env!("CIP_GIT_COMMIT").to_string(),
+    };
+
     let whisper_model = diagnose_whisper_model(&state.config.whisper_model_path);
 
     let audio_engine = state
@@ -315,15 +354,46 @@ pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> Pilo
             name: m.name().cloned(),
             width_px: m.size().width,
             height_px: m.size().height,
+            scale_factor: m.scale_factor(),
             is_primary: primary_position == Some(*m.position()),
         })
         .collect();
 
+    let bible = state
+        .content_registry
+        .get(&content::bible_content_id(
+            crate::bible_production_dataset::BSB_TRANSLATION_ID,
+        ))
+        .unwrap_or(None);
+
+    let database = {
+        let readable = {
+            let db = state.db.lock().expect("db connection poisoned");
+            db.query_row("SELECT 1", [], |row| row.get::<_, i64>(0))
+                .is_ok()
+        };
+        // Opening for write without truncating or writing any bytes is a
+        // side-effect-free way to prove the file is writable - a "get
+        // diagnostics" command must never itself mutate the database.
+        let writable = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&state.config.database_path)
+            .is_ok();
+        DatabaseDiagnostic {
+            path: state.config.database_path.display().to_string(),
+            readable,
+            writable,
+        }
+    };
+
     PilotDiagnostics {
+        machine,
         whisper_model,
         audio_devices,
         audio,
         displays,
+        bible,
+        database,
     }
 }
 
@@ -4753,6 +4823,12 @@ mod tests {
     #[test]
     fn pilot_diagnostics_serializes_camel_case() {
         let diagnostics = PilotDiagnostics {
+            machine: MachineDiagnostic {
+                os: "linux".to_string(),
+                arch: "x86_64".to_string(),
+                cip_version: "0.1.0".to_string(),
+                build_commit: "abc123def456".to_string(),
+            },
             whisper_model: WhisperModelDiagnostic::Missing {
                 expected_path: "/tmp/ggml-tiny.en.bin".to_string(),
             },
@@ -4768,17 +4844,42 @@ mod tests {
                 name: Some("Virtual-1".to_string()),
                 width_px: 1280,
                 height_px: 800,
+                scale_factor: 1.0,
                 is_primary: true,
             }],
+            bible: None,
+            database: DatabaseDiagnostic {
+                path: "/tmp/cip.sqlite3".to_string(),
+                readable: true,
+                writable: true,
+            },
         };
         let value = serde_json::to_value(&diagnostics).unwrap();
+        assert_eq!(value["machine"]["cipVersion"], "0.1.0");
+        assert_eq!(value["machine"]["buildCommit"], "abc123def456");
         assert_eq!(value["whisperModel"]["status"], "missing");
         assert_eq!(
             value["whisperModel"]["expectedPath"],
             "/tmp/ggml-tiny.en.bin"
         );
         assert_eq!(value["displays"][0]["widthPx"], 1280);
+        assert_eq!(value["displays"][0]["scaleFactor"], 1.0);
         assert_eq!(value["displays"][0]["isPrimary"], true);
+        assert_eq!(value["database"]["writable"], true);
+    }
+
+    /// Phase 3.3: the machine identifier a real church-hardware evidence
+    /// record depends on must actually be populated from the real build,
+    /// not left as a placeholder - `env!("CIP_GIT_COMMIT")` is set by
+    /// `build.rs` at compile time.
+    #[test]
+    fn cip_git_commit_is_embedded_and_not_the_literal_placeholder() {
+        let commit = env!("CIP_GIT_COMMIT");
+        assert!(!commit.is_empty());
+        // Either a real short hash from this git checkout, or the
+        // documented, honest fallback for a non-git build - never blank,
+        // never a fabricated-looking value.
+        assert!(commit == "unknown" || commit.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     /// Phase 3.2 backup/recovery validation (spec section 18): create real

@@ -1,0 +1,26 @@
+{
+  "automated": {
+    "environment": "automated",
+    "status": "pass",
+    "tests": [
+      "missing_model_file_is_reported_as_model_not_found",
+      "corrupt_model_file_is_reported_as_transcription_failed_not_a_panic (real whisper.cpp: 'invalid model data (bad magic)')",
+      "diagnose_whisper_model_reports_missing_for_a_nonexistent_path",
+      "diagnose_whisper_model_reports_unreadable_for_a_directory",
+      "diagnose_whisper_model_reports_present_with_the_real_size_for_a_readable_file"
+    ],
+    "note": "built and tested with --features whisper against the real whisper-rs/whisper.cpp binding; no real ggml/gguf model file was available to load successfully"
+  },
+  "realHardware": {
+    "environment": "real_hardware",
+    "status": "blocked_hardware",
+    "modelPath": null,
+    "modelChecksum": null,
+    "modelLoadTimeMs": null,
+    "firstTranscriptionLatencyMs": null,
+    "steadyStateLatencyMs": null,
+    "knownPhrasesTranscribed": null,
+    "scriptureSpeechTranscribed": null,
+    "note": "requires both a real ggml/gguf model file (never bundled by CIP, by design) and real microphone audio; neither is obtainable in this environment"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "automated": {
+    "environment": "automated",
+    "status": "pass",
+    "test": "pipeline::tests::phase_3_2_sixty_minute_simulated_service_remains_stable",
+    "note": "SIMULATED, not real-time - 20 compressed cycles of sermon taxonomy + Scripture detection + presentation activate/stop against real SQLite and real production orchestration functions. Proves logical stability (bounded queue growth, no stale presentation state, no data loss) - never a substitute for a real timed service.",
+    "domainsExercisedLive": {
+      "bible": "observed (real BibleIntelligenceEngine, Romans references each cycle)",
+      "sermon": "observed (real SermonIntelligenceEngine, one taxonomy-shaped line per cycle)",
+      "content": "observed (ContentIntelligenceEngine reading sermon findings)",
+      "crossDomain": "observed (CrossDomainCorrelationEngine correlating Bible+Sermon)",
+      "music": "not_triggered_this_test (proven separately in Phase 3.1's full-service simulation)",
+      "service": "not_triggered_this_test (proven separately in existing Service Intelligence test suite)"
+    }
+  },
+  "realHardware": {
+    "environment": "real_hardware",
+    "status": "blocked_hardware",
+    "serviceDate": null,
+    "serviceDurationMinutes": null,
+    "operator": null,
+    "domainsObservedLive": null,
+    "note": "requires a real church, real operator, real microphone, real service - none available in this session"
+  }
+}

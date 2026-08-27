@@ -1,0 +1,20 @@
+{
+  "realHardware": {
+    "environment": "real_hardware",
+    "status": "blocked_hardware",
+    "installTimeMinutes": null,
+    "firstLaunchToReadyMinutes": null,
+    "microphoneSelectionTimeSeconds": null,
+    "whisperModelSelectionTimeSeconds": null,
+    "projectorConnectTimeMinutes": null,
+    "timeToFirstSuccessfulTranscriptionMinutes": null,
+    "operatorInterventionsDuringSimulatedService": null,
+    "operatorReportedConfusionPoints": null,
+    "note": "operator timing can only be measured by observing a real, non-developer operator use CIP on a real target machine with real hardware. No such operator, machine, or hardware is available in this session. Nothing in this field has been estimated, simulated, or inferred - all values are explicitly null rather than guessed."
+  },
+  "automated": {
+    "environment": "automated",
+    "status": "not_applicable",
+    "note": "operator-facing timing is a human-in-the-loop, real-hardware measurement by definition; there is no automated or Xvfb equivalent that would be meaningful evidence of it"
+  }
+}
