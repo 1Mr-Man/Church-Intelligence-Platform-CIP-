@@ -1,0 +1,12 @@
+{
+  "phase": "3.8.3",
+  "note": "Per the operator's own explicit instruction for this phase: 'Do NOT mark the phase PASS based on Linux/Xvfb alone. The physical Windows test is the decisive gate.' Nothing here is, or could be, simulated.",
+  "realMicrophone": { "status": "NOT_VERIFIED", "reason": "no physical microphone was connected/tested in this build environment" },
+  "realWhisper": { "status": "NOT_VERIFIED", "reason": "no real speech recognition was exercised against real audio in this build environment" },
+  "realProjectorOrSecondDisplay": { "status": "NOT_VERIFIED", "reason": "no physical second display/projector was connected/tested in this build environment" },
+  "realWebView2Runtime": { "status": "NOT_VERIFIED", "reason": "no real Windows/WebView2 runtime was available in this build environment; the applied fix targets a documented WebView2-specific initial-paint defect class but could not be exercised against the real WebView2 engine here" },
+  "realChurchService": { "status": "NOT_VERIFIED", "reason": "no real church service was run" },
+  "humanOperatorUx": { "status": "NOT_VERIFIED", "reason": "no human operator performed the fixed detect-approve-prepare-display workflow against this rebuilt artifact in this build environment" },
+  "realWindowsMachine": { "status": "NOT_VERIFIED", "reason": "no physical Windows machine was accessible to Claude Code in this build environment; this rebuilt installer has not yet been re-tested on the operator's own Windows laptop - the hard blocker the operator specified for this phase's gate" },
+  "presentationDisplayBlankRootCause": { "status": "NOT_CONFIRMED", "reason": "the applied Windows-only resize-nudge fix is the best-supported remaining explanation given real Linux/WebKitGTK end-to-end reproduction (which found the entire pipeline correct, including under adversarial near-zero-delay timing) and a well-documented Tauri/WRY/WebView2 defect class where a newly created secondary webview does not paint its first frame until it receives a resize/redraw signal - but it has not been confirmed by direct reproduction on real Windows/WebView2, since no such environment is accessible here. The 14-checkpoint diagnostic logging (now at Info level, always visible in the log file) is included specifically so the real cause can be confirmed or ruled out on the next physical test." }
+}

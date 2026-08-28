@@ -1,0 +1,35 @@
+{
+  "phase": "3.8.3",
+  "methodology": "Real Xvfb + xdotool + xwd GUI automation of the actual compiled cip-desktop binary (not a simulation) - see docs/phase-3-8-3-audit.md sections D-H and docs/phase-3-8-3-presentation-display-rendering.md for full narrative.",
+  "linuxWebKitGtkE2eResult": {
+    "summary": "The entire detect -> approve -> prepare -> display -> real BSB text rendering -> stop -> close -> reopen -> display-a-different-item pipeline works correctly on Linux/WebKitGTK every time it was run, including under deliberately adversarial near-zero-delay timing between Prepare and Display - directly ruling out hypotheses A, B, C, D, E, G, H from the operator's spec with real pixel evidence rather than reasoning.",
+    "hypothesesRuledOut": {
+      "A_reactNeverMounts": "ruled out - checkpoint 3 (mounted) fires every time",
+      "B_reactMountsButPayloadNull": "ruled out - checkpoint 9-12 (payload-applied) always fires with real, non-null content",
+      "C_payloadExistsButSlideEmpty": "ruled out - bodyLines/heading/footer always populated with real BSB text",
+      "D_cssNotLoaded": "ruled out - real screenshots show correctly styled gold heading / white body / black background",
+      "E_tauriEventNeverReachesDisplayWebview": "ruled out as a permanent failure - the event IS frequently lost to the mount-race (see raceConfirmed below), but the Phase 3.8.2 hydration fallback always recovers it",
+      "G_displayWebviewLoadsWrongDocument": "ruled out - the same frontend bundle correctly renders as PresentationDisplay every time",
+      "H_rendererReturnsUndisplayableContent": "ruled out - render_content always produces valid, non-empty RenderedSlide for real BSB scripture"
+    },
+    "remainingLiveHypothesis": "J - a known Tauri/WRY/WebView2-specific defect class where a newly created secondary webview window does not paint its initial frame until it receives a resize/redraw signal, or an unspecified other Windows-only cause"
+  },
+  "raceConfirmed": {
+    "description": "The final rebuilt binary's own diagnostic log (see pilot-evidence/3.8.3/e2e/diagnostic-log-checkpoints.log) proves the exact race the Phase 3.8.2 hydration fix was designed to cover happens on essentially every real invocation, not just under artificial timing: checkpoint 14 (backend about to emit PresentationStarted) is logged at 15:27:27, and checkpoint 3 (frontend component mounted) is not logged until 15:27:28 - a full second later. The event is therefore genuinely missed by the listener every time in this environment; the display only shows correct content because the on-mount hydration call (checkpoints 5/6/9-12) independently recovers the true current state from get_presentation_display_state. This is real, direct evidence that the Phase 3.8.2 hydration fallback is not a defensive nicety but the actual, load-bearing mechanism.",
+    "evidenceFile": "pilot-evidence/3.8.3/e2e/diagnostic-log-checkpoints.log"
+  },
+  "appliedFix": {
+    "description": "Windows-only (#[cfg(target_os = \"windows\")]) explicit window.set_size() call to the same target size, issued immediately after WebviewWindowBuilder::build() succeeds in presentation_display.rs's open_display_window. This is Linux/macOS-inert by construction (the block does not compile into non-Windows binaries) and does not touch any other platform's already-proven-correct behavior.",
+    "confidence": "best-supported remaining explanation, not confirmed by direct reproduction - no physical Windows/WebView2 environment was accessible in this container",
+    "verificationPerformed": [
+      "grep of the vendored Tauri 2.11.5 crate source confirming tauri::LogicalSize and WebviewWindow::set_size<S: Into<Size>>(&self, size: S) -> crate::Result<()> exist with the exact signature used",
+      "cargo check --target x86_64-pc-windows-gnu -p cip-desktop compiled the Windows-only block cleanly (real compiler verification despite no Windows machine)",
+      "full Linux/Xvfb re-verification pass against the rebuilt binary (with the fix + diagnostics baked in) confirmed zero regression to the already-proven-correct Linux behavior"
+    ]
+  },
+  "diagnosticInstrumentationDefectFoundAndFixed": {
+    "description": "The temporary diagnostic checkpoints were originally added using log::debug!, but this project's log level is hardcoded to log::LevelFilter::Info in apps/desktop/src-tauri/src/lib.rs (not driven by RUST_LOG - this app has no env_logger). This meant none of the new [diagnostic] checkpoint lines would ever have appeared in the log file the operator relies on, on Windows or anywhere else, even in a correctly functioning build - the instrumentation would have been silently useless at the exact moment it was needed. Found via direct grep of the log output during this phase's own re-verification pass, and fixed by changing the checkpoint calls (only) from log::debug! to log::info!.",
+    "filesChanged": ["apps/desktop/src-tauri/src/commands.rs", "apps/desktop/src-tauri/src/presentation_display.rs"],
+    "verifiedFixed": "confirmed via grep '\\[diagnostic\\]' against the final rebuilt binary's log output - all 14 checkpoint categories now appear as designed (see pilot-evidence/3.8.3/e2e/diagnostic-log-checkpoints.log)"
+  }
+}

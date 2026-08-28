@@ -1805,8 +1805,15 @@ pub fn get_presentation_display_state(
             })
             .ok()
     });
+    let window_open = presentation_display::is_display_window_open(&app);
+    log::info!(
+        target: crate::logging::LogCategory::Presentation.target(),
+        "[diagnostic] get_presentation_display_state (checkpoint 5/6): windowOpen={window_open} activeItem={} activeSlide={}",
+        active_item.is_some(),
+        active_slide.is_some()
+    );
     Ok(PresentationDisplayState {
-        window_open: presentation_display::is_display_window_open(&app),
+        window_open,
         active_item,
         active_slide,
     })
@@ -1831,6 +1838,14 @@ pub fn display_presentation(
         .map_err(log_and_return)?;
     drop(db); // release before the window-manager call below
 
+    log::info!(
+        target: crate::logging::LogCategory::Presentation.target(),
+        "[diagnostic] display_presentation: render_content produced heading={:?} bodyLines={} footer={:?} (checkpoint 13)",
+        slide.heading,
+        slide.body_lines.len(),
+        slide.footer
+    );
+
     presentation_display::open_display_window(&app)
         .map_err(|e| {
             AppError::from(presentation::PresentationError::DisplayUnavailable(
@@ -1852,6 +1867,11 @@ pub fn display_presentation(
     );
     drop(db);
 
+    log::info!(
+        target: crate::logging::LogCategory::Presentation.target(),
+        "[diagnostic] display_presentation: about to emit PresentationStarted for item {} (checkpoint 14 - lifecycle ordering: window opened -> activation committed -> event emitted now)",
+        activated.id
+    );
     let _ = emit(
         &app,
         AppEvent::PresentationStarted,
@@ -1947,6 +1967,26 @@ pub fn close_presentation_display(
             ))
         })
         .map_err(log_and_return)
+}
+
+/// Phase 3.8.3 TEMPORARY DIAGNOSTIC (spec section "REQUIRED TEMPORARY
+/// DIAGNOSTICS"): the display window's own frontend has no other way to
+/// surface what it observes - this app has no devtools/logging plugin, so
+/// a secondary webview's `console.log` output is otherwise invisible to
+/// the operator or to anyone reading the log file. This command exists
+/// only to route the display window's own lifecycle checkpoints (mount,
+/// hydration call/result, event received, payload applied) into the
+/// existing log stream via the existing `log::` macros - nothing else.
+/// No state is read or written, no capability beyond `core:default` is
+/// needed (identical reasoning to every other command's grant), and
+/// `stage`/`detail` are logged verbatim, never persisted, never sent
+/// anywhere but this process's own log output.
+#[tauri::command]
+pub fn log_display_diagnostic(stage: String, detail: String) {
+    log::info!(
+        target: crate::logging::LogCategory::Presentation.target(),
+        "[diagnostic] display window: {stage} - {detail}"
+    );
 }
 
 // --- ambiguity resolution & context correction (Phase 1.3) ----------------

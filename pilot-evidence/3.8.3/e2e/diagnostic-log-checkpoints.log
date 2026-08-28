@@ -1,0 +1,33 @@
+libEGL warning: DRI3 error: Could not get DRI3 device
+libEGL warning: Ensure your X server supports DRI3 to get accelerated rendering
+[2026-08-28][15:26:01][cip::app][INFO] starting CIP desktop (environment: Production, data_dir: /tmp/cip-e2e4-home/.local/share/org.churchintelligence.cip)
+[2026-08-28][15:26:01][cip::database][INFO] 11 migration(s) applied
+[2026-08-28][15:26:02][cip::database][INFO] BSB production Bible dataset: 66 book(s), 1189 chapter(s), 31086 verse(s) total (31086 imported, 0 already present)
+[2026-08-28][15:26:02][cip::app][INFO] sermon intelligence engine initialized (deterministic, offline)
+[2026-08-28][15:26:02][cip::app][INFO] service intelligence engine initialized (deterministic, offline)
+[2026-08-28][15:26:02][cip::app][INFO] sermon foundation initialized (deterministic, offline, no engine registration)
+[2026-08-28][15:26:02][cip::app][INFO] content intelligence initialized (deterministic, offline, no engine registration)
+[2026-08-28][15:26:02][cip::speech][INFO] built without the `whisper` feature; live transcription is unavailable (manual operation still works)
+[2026-08-28][15:26:02][cip::music][INFO] acoustic recognizer status: Unavailable (configured model directory does not exist: /tmp/cip-e2e4-home/.local/share/org.churchintelligence.cip/models/acoustic)
+[2026-08-28][15:26:12][cip::presentation][INFO] [diagnostic] get_presentation_display_state (checkpoint 5/6): windowOpen=false activeItem=false activeSlide=false
+[2026-08-28][15:26:12][cip::app][ERROR] no sermon is currently active - start one first
+[2026-08-28][15:26:12][cip::error][ERROR] no sermon is currently active - start one first
+[2026-08-28][15:27:27][cip::presentation][INFO] [diagnostic] display_presentation: render_content produced heading="MAT 6:9" bodyLines=3 footer=Some("BSB") (checkpoint 13)
+[2026-08-28][15:27:27][cip::presentation][INFO] [diagnostic] display window created (checkpoint 1)
+[2026-08-28][15:27:27][cip::presentation][INFO] [diagnostic] display_presentation: about to emit PresentationStarted for item d9e93f0d-5417-409e-8ccc-b3a08fbfc634 (checkpoint 14 - lifecycle ordering: window opened -> activation committed -> event emitted now)
+[2026-08-28][15:27:28][cip::presentation][INFO] [diagnostic] display window: mounted - PresentationDisplay component mounted (checkpoint 3)
+[2026-08-28][15:27:28][cip::presentation][INFO] [diagnostic] display window: effect-ran - useEffect body executing (checkpoint 4)
+[2026-08-28][15:27:28][cip::presentation][INFO] [diagnostic] display window: hydration-call - calling getPresentationDisplayState (checkpoint 5)
+[2026-08-28][15:27:28][cip::presentation][INFO] [diagnostic] get_presentation_display_state (checkpoint 5/6): windowOpen=true activeItem=true activeSlide=true
+[2026-08-28][15:27:28][cip::presentation][INFO] [diagnostic] display window: hydration-result - windowOpen=true activeItem=true activeSlide=true (checkpoint 6)
+[2026-08-28][15:27:28][cip::presentation][INFO] [diagnostic] display window: payload-applied - source=hydration heading=MAT 6:9 bodyLines=3 footer=BSB (checkpoints 9-12)
+[2026-08-28][15:28:11][cip::presentation][INFO] [diagnostic] display window: presentation-stopped-received - PresentationStopped event received (checkpoint 8)
+[2026-08-28][15:29:06][cip::presentation][INFO] [diagnostic] display_presentation: render_content produced heading="ROM 8:28" bodyLines=4 footer=Some("BSB") (checkpoint 13)
+[2026-08-28][15:29:06][cip::presentation][INFO] [diagnostic] display window created (checkpoint 1)
+[2026-08-28][15:29:06][cip::presentation][INFO] [diagnostic] display_presentation: about to emit PresentationStarted for item c2e1d719-dd42-49d7-8301-19faec3a5091 (checkpoint 14 - lifecycle ordering: window opened -> activation committed -> event emitted now)
+[2026-08-28][15:29:06][cip::presentation][INFO] [diagnostic] display window: mounted - PresentationDisplay component mounted (checkpoint 3)
+[2026-08-28][15:29:06][cip::presentation][INFO] [diagnostic] display window: effect-ran - useEffect body executing (checkpoint 4)
+[2026-08-28][15:29:06][cip::presentation][INFO] [diagnostic] display window: hydration-call - calling getPresentationDisplayState (checkpoint 5)
+[2026-08-28][15:29:06][cip::presentation][INFO] [diagnostic] get_presentation_display_state (checkpoint 5/6): windowOpen=true activeItem=true activeSlide=true
+[2026-08-28][15:29:06][cip::presentation][INFO] [diagnostic] display window: hydration-result - windowOpen=true activeItem=true activeSlide=true (checkpoint 6)
+[2026-08-28][15:29:06][cip::presentation][INFO] [diagnostic] display window: payload-applied - source=hydration heading=ROM 8:28 bodyLines=4 footer=BSB (checkpoints 9-12)

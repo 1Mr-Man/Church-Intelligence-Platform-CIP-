@@ -1,0 +1,25 @@
+{
+  "phase": "3.8.3",
+  "note": "No physical Windows machine was available in this container for Phase 3.8.3. The operator's Phase 3.8.2 Windows testing (the intelligence pipeline working end-to-end, but the Presentation Display window rendering completely blank) was against the PRIOR build - this checklist covers verifying the rebuilt Phase 3.8.3 artifact, not a repeat of that prior test.",
+  "installer": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "f1df6631da8f4a13b586b28da9c9a6da883d253d8f56afc22474956aab753d7a",
+    "fileSizeBytes": 7133616,
+    "status": "NOT VERIFIED on real Windows hardware - cross-compiled, file(1)-inspected, and Windows-target cargo-check-verified only (Environment A/B)"
+  },
+  "hardBlockerPerOperatorSpec": "The operator's own explicit closing instruction for this phase: 'Do NOT mark the phase PASS based on Linux/Xvfb alone. The physical Windows test is the decisive gate.' That physical Windows test has NOT occurred in this session.",
+  "requiredForGateToBecomePASS": [
+    "a real Windows 10/11 x64 laptop (the same one that produced the blank-display report)",
+    "Internet disconnected for the duration of the checklist",
+    "install and launch this rebuilt installer specifically (SHA-256 above), not the prior Phase 3.8.2 build",
+    "confirm BSB is Ready, Start Service Replay, load the real sermon transcript, start replay",
+    "allow a Bible reference such as MAT 6:9 to appear, review the suggestion, Approve it, Prepare it",
+    "Open Presentation Display and confirm the Presentation Display window actually shows the prepared Scripture (real Bible text visible), not a blank window and not 'Not Responding'",
+    "Clear/Stop the display, confirm it blanks correctly",
+    "Prepare and Display a second, different Scripture, confirm it replaces the first correctly",
+    "Close Presentation Display, then reopen it, then Display another prepared item, confirm it appears correctly with no duplicate Active presentation items",
+    "End the service, open History, verify the service and its presentation history are present",
+    "if the display is still blank at any step, capture the app's log file (RUST_LOG is not required - the 14 diagnostic checkpoints now log at Info level by default) and report which checkpoints did/did not appear, per the diagnostic log format documented in docs/phase-3-8-3-presentation-display-rendering.md"
+  ],
+  "conclusion": "All physical-hardware/human-operator validation for Phase 3.8.3 remains NOT PERFORMED - not estimated, not simulated, not inferred from code review, and not carried over from the prior build's Environment C usage."
+}

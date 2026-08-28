@@ -50,6 +50,7 @@ import {
   listSermonHistory,
   listSermonSections,
   listSermonSegments,
+  logDisplayDiagnostic,
   markServicePhase,
   openPresentationDisplay,
   pauseSermon,
@@ -221,6 +222,27 @@ describe("commands.ts Tauri IPC guard", () => {
     await expect(displayPresentation("id")).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(clearPresentationDisplay()).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(closePresentationDisplay()).rejects.toBeInstanceOf(TauriUnavailableError);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("logDisplayDiagnostic (Phase 3.8.3 temporary diagnostic) calls log_display_diagnostic with stage and detail", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue(undefined);
+
+    await logDisplayDiagnostic("mounted", "component mounted");
+
+    expect(invokeMock).toHaveBeenCalledWith("log_display_diagnostic", {
+      stage: "mounted",
+      detail: "component mounted",
+    });
+  });
+
+  it("logDisplayDiagnostic rejects outside the Tauri runtime, without calling invoke()", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    await expect(logDisplayDiagnostic("mounted", "component mounted")).rejects.toBeInstanceOf(
+      TauriUnavailableError,
+    );
     expect(invokeMock).not.toHaveBeenCalled();
   });
 

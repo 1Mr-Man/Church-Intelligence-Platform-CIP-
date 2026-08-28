@@ -28,29 +28,60 @@ import * as liveEvents from "../lib/liveEvents";
 import { resolveHydratedPayload } from "./presentationDisplayHydration";
 import "./PresentationDisplay.css";
 
+/** Phase 3.8.3 TEMPORARY DIAGNOSTIC: best-effort, never awaited, never
+ * throws to the caller - routes a checkpoint into the log file via
+ * `log_display_diagnostic`. Silently does nothing if the call itself
+ * fails (e.g. outside the Tauri runtime), since diagnostics must never be
+ * able to affect the actual display. */
+function logCheckpoint(stage: string, detail: string) {
+  commands.logDisplayDiagnostic(stage, detail).catch(() => {});
+}
+
 export function PresentationDisplay() {
   const [payload, setPayload] = useState<PresentationDisplayPayload | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    logCheckpoint("mounted", "PresentationDisplay component mounted (checkpoint 3)");
+    logCheckpoint("effect-ran", "useEffect body executing (checkpoint 4)");
 
+    logCheckpoint("hydration-call", "calling getPresentationDisplayState (checkpoint 5)");
     commands
       .getPresentationDisplayState()
       .then((state) => {
+        logCheckpoint(
+          "hydration-result",
+          `windowOpen=${state.windowOpen} activeItem=${state.activeItem !== null} activeSlide=${state.activeSlide !== null} (checkpoint 6)`,
+        );
         if (cancelled) return;
         const hydrated = resolveHydratedPayload(state);
-        if (hydrated) setPayload(hydrated);
+        if (hydrated) {
+          logCheckpoint(
+            "payload-applied",
+            `source=hydration heading=${hydrated.slide.heading} bodyLines=${hydrated.slide.bodyLines.length} footer=${hydrated.slide.footer ?? "null"} (checkpoints 9-12)`,
+          );
+          setPayload(hydrated);
+        }
       })
-      .catch(() => {
+      .catch((e) => {
         // Best-effort hydration only - the event listeners below remain
         // the primary, live source of truth once subscribed.
+        logCheckpoint("hydration-error", String(e));
       });
 
     const unlistenPromises = [
       liveEvents.onPresentationStarted((p) => {
-        if (!cancelled) setPayload(p);
+        logCheckpoint("presentation-started-received", "PresentationStarted event received (checkpoint 7)");
+        if (!cancelled) {
+          logCheckpoint(
+            "payload-applied",
+            `source=event heading=${p.slide.heading} bodyLines=${p.slide.bodyLines.length} footer=${p.slide.footer ?? "null"} (checkpoints 9-12)`,
+          );
+          setPayload(p);
+        }
       }),
       liveEvents.onPresentationStopped(() => {
+        logCheckpoint("presentation-stopped-received", "PresentationStopped event received (checkpoint 8)");
         if (!cancelled) setPayload(null);
       }),
     ];

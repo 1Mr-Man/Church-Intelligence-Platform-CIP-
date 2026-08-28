@@ -294,6 +294,16 @@ export function closePresentationDisplay(): Promise<void> {
   return invokeCommand("close_presentation_display");
 }
 
+/** Phase 3.8.3 TEMPORARY DIAGNOSTIC: routes a lifecycle checkpoint from the
+ * display window's own frontend into the app's log output - the only way
+ * to observe what a secondary webview's own JavaScript sees, since this
+ * app has no devtools/logging plugin. Never rejects loudly enough to
+ * disrupt the display itself - callers should not await this on the
+ * critical rendering path. */
+export function logDisplayDiagnostic(stage: string, detail: string): Promise<void> {
+  return invokeCommand("log_display_diagnostic", { stage, detail });
+}
+
 // --- ambiguity resolution & context correction (Phase 1.3) ----------------
 
 /** Resolves an `ambiguous` detection by an explicit operator choice - see

@@ -343,6 +343,7 @@ pub fn run() {
             commands::display_presentation,
             commands::clear_presentation_display,
             commands::close_presentation_display,
+            commands::log_display_diagnostic,
             commands::list_presentation_history,
             commands::search_bible,
             commands::list_bible_books,

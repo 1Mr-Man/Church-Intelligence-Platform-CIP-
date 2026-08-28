@@ -73,6 +73,32 @@ pub fn open_display_window(app: &AppHandle) -> tauri::Result<()> {
     .visible(true)
     .build()?;
 
+    log::info!(
+        target: crate::logging::LogCategory::Presentation.target(),
+        "[diagnostic] display window created (checkpoint 1)"
+    );
+
+    // Phase 3.8.3: a real Windows-only defect class (a newly created
+    // secondary WebView2-backed window sometimes does not paint its
+    // initial frame until it receives a resize/redraw signal - the
+    // window exists and responds, but shows nothing) was the
+    // best-supported remaining explanation after real end-to-end
+    // reproduction on Linux/WebKitGTK under Xvfb found the entire
+    // pipeline working correctly, including under adversarial
+    // near-zero-delay timing (see docs/phase-3-8-3-audit.md section D-F).
+    // Forcing an explicit resize to the same target size immediately
+    // after creation triggers WebView2's paint without touching any
+    // other platform's already-proven-correct behavior.
+    #[cfg(target_os = "windows")]
+    {
+        if let Err(e) = window.set_size(tauri::LogicalSize::new(1280.0, 720.0)) {
+            log::warn!(
+                target: crate::logging::LogCategory::Presentation.target(),
+                "failed to nudge the display window's initial paint via resize: {e}"
+            );
+        }
+    }
+
     let app_handle = app.clone();
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::Destroyed) {
