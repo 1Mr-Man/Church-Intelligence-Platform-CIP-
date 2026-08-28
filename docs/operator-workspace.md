@@ -394,3 +394,113 @@ full regression suite (Rust + frontend) already green. Phase 2.10's own
 scope - installation, real audio/speech hardware, real church workflow,
 security review, full offline behavior audit, failure recovery under real
 conditions - remains entirely its own, unclaimed here.
+
+---
+
+# Addendum (Phase 3.5.1) — Visual Design Reference
+
+The architecture above (three regions, zero new backend surface) is
+unchanged. This addendum documents the visual design system Phase 3.5.1
+applied on top of it, in response to real Windows screenshot evidence
+being requested for that phase (see `docs/phase-3-5-1-ux-audit.md` for why
+that evidence was unavailable in this environment, and what was audited
+instead). Phase 3.5 (between 2.9 and 3.5.1) had already restructured this
+same render tree into Operator/Diagnostics modes with `ServiceControlBar`/
+`SystemStatusStrip`/`PresentationCard`; that structure is also unchanged
+by this addendum - only its visual treatment is.
+
+## A1. Theme
+
+CIP has one fixed, dedicated application theme - not a light/dark toggle
+tied to the OS preference. Real production church-AV software
+(ProPresenter, OBS, vMix) is dark by convention: operators run it in dim
+auditoriums and sound booths, on a laptop next to a much brighter
+projector output. A desktop application built for that environment has no
+reason to inherit a document viewer's light/dark preference.
+
+Base surfaces (`apps/desktop/src/index.css`):
+
+| Token | Value | Use |
+|---|---|---|
+| `--bg` | `#0c1120` | Page background |
+| `--bg-elevated` | `#131a2e` | Panel/card surface (one step up from page) |
+| `--bg-elevated-2` | `#1b2440` | Nested surface (a card inside a card) |
+| `--text-h` | `#f4f6fb` | Primary text (headings, values) |
+| `--text` | `#a9b2c8` | Secondary text (labels, hints) |
+| `--border` / `--border-strong` | `#2a3454` / `#3c4a75` | Card borders |
+| `--accent` | `#3b82f6` | Primary button / active toggle - same blue family as the "live" semantic color, so "click this" and "this is in progress" read as one idea |
+
+## A2. Semantic color system
+
+Eight colors, each with exactly one meaning, reused identically everywhere
+it appears. Color always accompanies a text label or icon - never the
+only signal.
+
+| Color | Token prefix | Meaning | Where it appears |
+|---|---|---|---|
+| Green | `--status-good` | Ready / connected / active / success | Readiness pills, "On Screen" badge, healthy status dots |
+| Blue | `--status-live` | Live / listening / in progress | "● Live" service badge, sermon-domain intelligence cards |
+| Amber | `--status-warn` | Needs attention / pending / optional | "Needs Attention" section top border, "Paused" badge, optional-feature notices |
+| Red | `--status-bad` | Error / disconnected / failure | Error banners, danger buttons |
+| Purple | `--status-intel` | Cross-domain / content / AI-adjacent | Content and Correlation domain badges |
+| Teal | `--status-audio` | Audio / live media | Music domain badges |
+| Gold | `--status-scripture` | Scripture / presentation emphasis, used selectively | Presentation card border/background, Bible domain badge, prepared-item scripture heading |
+| Neutral gray | `--status-neutral` | Idle / informational / structural | Service-domain badges, closed/idle states |
+
+Domain → color mapping (Attention Queue, Intelligence Feed):
+
+- 📖 Bible → gold (`--status-scripture`)
+- 🎵 Music → teal (`--status-audio`)
+- 🎙 Sermon → blue (`--status-live`)
+- ⚙ Service → neutral gray
+- 🟣 Content → purple (`--status-intel`)
+- 🔗 Correlation → purple (`--status-intel`)
+
+## A3. What changed vs. Phase 3.5
+
+Phase 3.5 built the correct *structure* described in the rest of this
+file. Phase 3.5.1 found and fixed why that structure still looked like an
+engineering console on a real screen - see `docs/phase-3-5-1-ux-audit.md`
+for the full findings. In summary:
+
+1. Removed a leftover Vite/Tauri template shell on `#root` (`text-align:
+   center`, a fixed `1126px` width, and a permanent side border) that was
+   centering all body text and clamping the entire app to a narrow column
+   regardless of screen size - Phase 3.5's own layout widening had been
+   silently clamped by this the whole time.
+2. Replaced the light/dark doc-site theme with CIP's own professional dark
+   theme (above).
+3. Gave every intelligence domain a real, consistent color + icon instead
+   of a `currentColor`-bordered pill that inherited whatever gray was
+   nearby.
+4. Trimmed `WorkspaceHeader` from a raw ALL-CAPS `<dl>` duplicating five
+   other panels (and leaking terms like "ACOUSTIC" and a raw backend
+   error string into Operator Mode) down to the three facts nothing else
+   on screen shows: service phase, active sermon/speaker, and confirmed
+   current song - rendered as the same status-pill language as the rest
+   of the screen.
+5. Gave panels an elevated surface color distinct from the page
+   background, added a three-tier button hierarchy (primary/secondary/
+   tertiary), and made the Presentation card visually dominant
+   (gold-tinted border/background, larger heading).
+
+## A4. Backend contract preservation
+
+Every change in this addendum is CSS, or a presentational trim of one
+React component (`WorkspaceHeader`) using only props it already received.
+No Tauri command, no Tauri event, no database schema, no intelligence
+engine, and no presentation-safety rule changed. See
+`pilot-evidence/3.5.1/software/` for the automated proof (`git diff`
+scoped entirely to `apps/desktop/src/**` and `docs/**`).
+
+## A5. Evidence status
+
+Every visual claim in this addendum is `PROVEN_AUTOMATED` (build succeeds,
+tests pass) or based on direct source-code reading of the CSS/JSX now in
+the tree - not `VERIFIED_WINDOWS` or `VERIFIED_PHYSICAL_HARDWARE`. No
+screenshot or video of this environment's output has been captured or
+reviewed, because no screenshot tool is available in this container and
+Xvfb is explicitly not a UX evidence source per this project's own rules.
+See `docs/phase-3-5-1-ux-audit.md` section 0 and the Phase 3.5.1 gate in
+`docs/phase-3-5-operator-ux.md` for the complete, honest evidence
+classification.

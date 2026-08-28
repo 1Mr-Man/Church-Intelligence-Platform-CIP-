@@ -417,3 +417,100 @@ physical claim above. Automated and Xvfb evidence does not substitute
 for it. Final UX status remains HOLD pending that validation on the
 actual HP EliteBook 830 G6, exactly as every prior hardware-pilot phase
 (3.1 through 3.4) has honestly reported for the same, unchanged reason.
+
+## 20. Phase 3.5.1 Correction (superseding update)
+
+Phase 3.5.1 was commissioned specifically because the structural work
+described above, while functionally correct, still produced a visually
+gray, low-contrast, "engineering console" appearance on a real Windows
+screen. See `docs/phase-3-5-1-ux-audit.md` for the full source-code audit
+(no screenshot or video was available in this environment even for that
+phase - the audit is honestly source-code-only, not screenshot-based) and
+`docs/operator-workspace.md` for the resulting design reference. In
+summary, Phase 3.5.1:
+
+- Removed a leftover Vite/Tauri landing-page shell on `#root`
+  (`text-align: center`, a fixed `1126px` width, permanent side borders)
+  that had been silently clamping this document's own "widened to 1180px"
+  claim in section 4/section 3's Existing-Contract Inventory the whole
+  time - the widening had no visible effect until this fix.
+- Replaced the light/dark doc-site theme with one committed professional
+  dark theme (deep navy/charcoal, per this environment's own instructions
+  section 4).
+- Added a real 8-color semantic system (green/blue/amber/red/purple/teal/
+  gold/neutral) applied to domain badges, card surfaces, and the
+  Presentation card, where Phase 3.5 had defined the tokens but used them
+  in only a handful of places.
+- Trimmed `WorkspaceHeader` (previously a raw ALL-CAPS `<dl>` duplicating
+  five other panels and leaking terms like "ACOUSTIC" and a raw backend
+  error-string tooltip into Operator Mode) down to the three facts nothing
+  else on screen shows.
+
+No backend contract, Tauri command/event, database schema, or
+intelligence-architecture file changed in Phase 3.5.1 either - see
+`pilot-evidence/3.5.1/software/automated-regression.json`. The Release
+Gate below **replaces** the block above as this document's current,
+authoritative gate; the block above is retained as a historical record of
+Phase 3.5's own state.
+
+============================================================
+CIP PHASE 3.5.1 — OPERATOR UX GATE
+============================================================
+
+```
+SOFTWARE:
+    PASS
+
+WINDOWS ARTIFACT:
+    PASS
+
+    NSIS installer rebuilt from Phase 3.5.1 source, checksum-verified,
+    PE32+ x64 embedded binary confirmed via file(1) - see
+    release/windows/release-manifest.json.
+
+ENVIRONMENT A (automated):
+    PASS
+
+    769 default-feature Rust tests, 7 whisper-feature Rust tests, 179
+    frontend tests - all green, identical/higher counts to Phase 3.5,
+    zero tests weakened or removed. cargo fmt/clippy/tsc/vite build/
+    oxlint all clean.
+
+ENVIRONMENT B (Xvfb):
+    PASS (smoke test only)
+
+    Fresh + idempotent relaunch of the rebuilt Linux binary with the
+    Phase 3.5.1 theme starts cleanly, 0 migrations on second launch, BSB
+    dataset intact. This proves runtime/startup correctness only - never
+    visual quality, per this environment's own Xvfb rule (section 25).
+
+ENVIRONMENT C (real Windows hardware):
+    NOT VERIFIED
+
+    No physical Windows machine, screenshot tool, or video capture was
+    available in this container. The installer above has not been
+    installed, launched, or viewed on any real display.
+
+RELEASE CANDIDATE:
+    HOLD
+```
+
+------------------------------------------------------------
+
+FINAL UX STATUS:
+
+    HOLD
+
+------------------------------------------------------------
+
+MANDATORY STATEMENT:
+
+Real Windows/hardware/human-operator UX validation, including a direct
+visual comparison against the originally-supplied screenshot, was not
+performed in this build environment because no such screenshot, video,
+physical Windows machine, or screenshot-capture tool was available here.
+Environment C remains NOT VERIFIED for every physical/visual claim.
+Automated and Xvfb evidence does not substitute for it. Final UX status
+remains HOLD pending real-hardware validation on the actual HP EliteBook
+830 G6, exactly as every prior hardware-pilot phase has honestly reported
+for the same, unchanged reason.

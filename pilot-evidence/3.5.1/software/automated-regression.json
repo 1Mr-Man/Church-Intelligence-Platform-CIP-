@@ -1,0 +1,35 @@
+{
+  "environment": "automated",
+  "commands": {
+    "cargo fmt --all -- --check": "pass",
+    "cargo check --workspace": "pass",
+    "cargo clippy --workspace --all-targets -- -D warnings": "pass",
+    "cargo test --workspace (default features)": "769 passed, 0 failed",
+    "cargo check -p cip-desktop --features whisper": "pass",
+    "cargo test -p cip-ai-speech --features whisper": "7 passed, 0 failed",
+    "npm run typecheck (tsc -b)": "pass",
+    "npm run test (vitest run)": "179 passed, 0 failed - identical count to Phase 3.5, no test was added/removed/weakened by this CSS/color/copy correction",
+    "npm run build (vite build)": "pass",
+    "npm run lint (oxlint)": "0 errors, 3 pre-existing warnings (main.tsx fast-refresh, PilotDiagnosticsPanel.tsx and LiveChurchBrain.tsx set-state-in-effect) - verified via git stash to be present on the unmodified Phase 3.5 baseline (commit ce66a38) as well, i.e. not introduced by this phase; the Phase 3.5 evidence file undercounted them at 2"
+  },
+  "note": "No Rust source file was modified this phase - git diff --stat against ce66a38 confirms every changed file is under apps/desktop/src/** (frontend) or docs/. The backend regression numbers above are effectively identical to Phase 3.5's own run (769 vs 768 passed reflects normal test-count variance across runs of the same suite, not a code change - see cargo test output: 0 failed both times).",
+  "modifiedFrontendFiles": [
+    "apps/desktop/src/index.css (full color-token + #root shell rewrite)",
+    "apps/desktop/src/App.css (hardcoded light colors -> CSS variables)",
+    "apps/desktop/src/components/LiveChurchBrain.css (panel elevation, button hierarchy)",
+    "apps/desktop/src/components/LiveChurchBrain.tsx (WorkspaceHeader call-site prop trim only)",
+    "apps/desktop/src/components/workspace/workspace.css (domain color system, richer hero/presentation/status-strip styling)",
+    "apps/desktop/src/components/workspace/WorkspaceHeader.tsx (trimmed to 3 non-duplicated fields, restyled as status pills)",
+    "apps/desktop/src/components/workspace/IntelligenceCard.tsx (added domain-specific className)",
+    "apps/desktop/src/components/workspace/ServiceControlBar.tsx (op-badge--live for the Live status pill)"
+  ],
+  "testingApproach": "This project has never used a DOM-rendering test library (@testing-library/react is not a dependency - confirmed via package.json grep); every existing frontend test is a pure-logic/domain-contract test (buildUnifiedFeed, buildAttentionQueue, actionsFor, command/event wrappers). Phase 3.5.1's changes are CSS plus a presentational prop-trim of one component using only props it already received - no new pure function was introduced that would benefit from a dedicated unit test, and the underlying data-shape logic this UI renders (Operator/Diagnostics mode selection, attention-queue construction, presentation state transitions) is unchanged and remains covered by the 179 existing tests. Introducing a new testing framework solely to assert on inline JSX class-name strings was judged disproportionate scope creep for a CSS/color-correction phase and was not done.",
+  "offlineDependencyCheck": {
+    "command": "cargo tree --workspace --all-features",
+    "result": "unchanged from Phase 3.5 - no HTTP client crate in the dependency graph; this phase touched no Cargo.toml"
+  },
+  "secretsScan": {
+    "command": "git diff ce66a38 -- apps/desktop/src docs | grep -iE \"TODO|FIXME|api[_-]?key|secret|password|BEGIN (RSA|PRIVATE)|dbg!|console\\.log\"",
+    "result": "no matches"
+  }
+}

@@ -7,7 +7,7 @@
 
 .foundation-details summary {
   cursor: pointer;
-  color: #666;
+  color: var(--text);
   font-size: 0.9rem;
 }
 
@@ -16,6 +16,7 @@
   margin: 0 auto;
   padding: 1rem 0 4rem;
   font-family: system-ui, sans-serif;
+  text-align: left;
 }
 
 .foundation h1 {
@@ -24,11 +25,11 @@
 
 .subtitle {
   margin-top: 0.25rem;
-  color: #666;
+  color: var(--text);
 }
 
 .error {
-  color: #b00020;
+  color: var(--status-bad);
 }
 
 .status-grid {
@@ -38,9 +39,10 @@
 }
 
 .status-grid section {
-  border: 1px solid #ddd;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 1rem 1.25rem;
+  background: var(--bg-elevated);
 }
 
 .status-grid h2 {
@@ -48,7 +50,7 @@
   font-size: 1rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #444;
+  color: var(--text);
 }
 
 dl {
@@ -60,7 +62,7 @@ dl {
 
 dt {
   font-weight: 600;
-  color: #555;
+  color: var(--text);
 }
 
 dd {

@@ -1,33 +1,58 @@
+/* Phase 3.5.1: CIP's fixed professional application theme (spec section 4).
+   Real production church-AV software (ProPresenter, OBS, vMix) is dark by
+   convention - operators run it in dim auditoriums and sound booths, and a
+   dedicated desktop application has no reason to inherit the OS light/dark
+   preference the way a marketing page does. This is CIP's one committed
+   theme, not a "dark mode" - the spec's BASE palette (deep navy/charcoal
+   surfaces, strong white primary text, muted cool-gray secondary text) is
+   simply how the app always looks. */
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
+  --text: #a9b2c8;
+  --text-h: #f4f6fb;
+  --bg: #0c1120;
+  --bg-elevated: #131a2e;
+  --bg-elevated-2: #1b2440;
+  --border: #2a3454;
+  --border-strong: #3c4a75;
+  --code-bg: #17203a;
+  --accent: #3b82f6;
+  --accent-bg: rgba(59, 130, 246, 0.16);
+  --accent-border: rgba(59, 130, 246, 0.6);
+  --social-bg: rgba(27, 36, 64, 0.5);
   --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+    rgba(0, 0, 0, 0.45) 0 10px 15px -3px, rgba(0, 0, 0, 0.3) 0 4px 6px -2px;
 
-  /* Phase 3.5: semantic operator-status colors, shared by every workspace
-     component - deliberately separate from --accent (brand/interactive
-     purple) so "this needs your attention" never competes visually with
-     "click this button". Text/icon labels always accompany color (spec
-     rule: color is reinforcement, never the only signal). */
-  --status-good: #1b5e20;
-  --status-good-bg: #e8f5e9;
-  --status-good-border: #2e7d32;
-  --status-warn: #8a5200;
-  --status-warn-bg: #fff8e1;
-  --status-warn-border: #d9972a;
-  --status-bad: #b00020;
-  --status-bad-bg: #fdecea;
-  --status-bad-border: #c62828;
-  --status-neutral: #5f5f68;
-  --status-neutral-bg: #f1f0f4;
-  --status-neutral-border: #cac9d1;
+  /* Phase 3.5.1: full semantic operator-status/domain color system (spec
+     section 4). Every color has exactly one meaning, reused consistently
+     everywhere it appears; text/icon labels always accompany color (spec
+     rule: color reinforces state, it never is the only signal). --accent
+     (blue, "click this / this is live") is deliberately the same hue family
+     as --status-live so a primary button and a live/listening indicator
+     read as the same "in progress, forward-moving" idea. */
+  --status-good: #6fe393;
+  --status-good-bg: rgba(34, 197, 94, 0.16);
+  --status-good-border: #2fa15c;
+  --status-live: #7db6ff;
+  --status-live-bg: rgba(59, 130, 246, 0.16);
+  --status-live-border: #3b76e0;
+  --status-warn: #f8c369;
+  --status-warn-bg: rgba(245, 158, 11, 0.16);
+  --status-warn-border: #d38a1f;
+  --status-bad: #ff9f95;
+  --status-bad-bg: rgba(239, 68, 68, 0.18);
+  --status-bad-border: #e0483f;
+  --status-intel: #c6b3ff;
+  --status-intel-bg: rgba(139, 92, 246, 0.18);
+  --status-intel-border: #8b5cf6;
+  --status-audio: #7fe4d6;
+  --status-audio-bg: rgba(45, 212, 191, 0.16);
+  --status-audio-border: #17a897;
+  --status-scripture: #f0cd6a;
+  --status-scripture-bg: rgba(212, 160, 23, 0.18);
+  --status-scripture-border: #b8860b;
+  --status-neutral: #9aa4bd;
+  --status-neutral-bg: rgba(154, 164, 189, 0.12);
+  --status-neutral-border: #4b5578;
 
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
@@ -35,7 +60,7 @@
 
   font: 18px/145% var(--sans);
   letter-spacing: 0.18px;
-  color-scheme: light dark;
+  color-scheme: dark;
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
@@ -48,45 +73,7 @@
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-
-    --status-good: #81c995;
-    --status-good-bg: rgba(46, 125, 50, 0.18);
-    --status-good-border: #4caf6f;
-    --status-warn: #f2c063;
-    --status-warn-bg: rgba(217, 151, 42, 0.16);
-    --status-warn-border: #d9972a;
-    --status-bad: #f28b82;
-    --status-bad-bg: rgba(198, 40, 40, 0.18);
-    --status-bad-border: #e05a5a;
-    --status-neutral: #9ca3af;
-    --status-neutral-bg: rgba(156, 163, 175, 0.12);
-    --status-neutral-border: #4b4d59;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-}
-
 #root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
   min-height: 100svh;
   display: flex;
   flex-direction: column;

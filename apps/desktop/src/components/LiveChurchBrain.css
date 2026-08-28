@@ -128,16 +128,16 @@
   border-radius: 10px;
   padding: 1rem 1.25rem;
   margin-bottom: 1.25rem;
-  background: var(--bg);
+  background: var(--bg-elevated);
 }
 
 .live-brain__panel h2 {
   margin-top: 0;
   font-size: 0.95rem;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text);
-  opacity: 0.75;
+  letter-spacing: 0.06em;
+  color: var(--text-h);
+  opacity: 0.9;
 }
 
 .live-brain__row {
@@ -393,6 +393,10 @@
   padding-top: 0.75rem;
 }
 
+/* Three-tier button hierarchy (spec section 20): tertiary (bare default -
+   Refresh, Check Integrity, Correct, Select), secondary (outlined accent -
+   Preview, Search, Pause), primary (solid accent - Start Service, Prepare,
+   Display). Never more than one primary action visible per decision point. */
 button {
   padding: 0.4rem 0.75rem;
   border-radius: 6px;
@@ -404,18 +408,19 @@ button {
 }
 
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
 button:not(:disabled):hover {
-  filter: brightness(0.95);
+  filter: brightness(1.25);
 }
 
-@media (prefers-color-scheme: dark) {
-  button:not(:disabled):hover {
-    filter: brightness(1.2);
-  }
+.op-button--secondary {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+  color: var(--text-h);
+  font-weight: 600;
 }
 
 /* A visually primary action (Start Service, Display) - never used for a
@@ -425,18 +430,21 @@ button:not(:disabled):hover {
   background: var(--accent);
   border-color: var(--accent-border);
   color: #fff;
-  font-weight: 600;
+  font-weight: 700;
   font-size: 1rem;
   padding: 0.6rem 1.4rem;
+  box-shadow: 0 2px 10px rgba(59, 130, 246, 0.35);
 }
 
 .op-button--primary:not(:disabled):hover {
-  filter: brightness(1.08);
+  filter: brightness(1.1);
 }
 
 .op-button--danger {
+  background: var(--status-bad-bg);
   border-color: var(--status-bad-border);
   color: var(--status-bad);
+  font-weight: 600;
 }
 
 @media (max-width: 720px) {

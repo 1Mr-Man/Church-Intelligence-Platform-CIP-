@@ -106,7 +106,7 @@ export function ServiceControlBar({
     <section className="op-service-bar">
       <div className="op-service-bar__identity">
         <span className="op-service-bar__title">{activeTitle}</span>
-        <span className={`op-badge ${serviceStatus === "live" ? "op-badge--good" : "op-badge--warn"}`}>
+        <span className={`op-badge ${serviceStatus === "live" ? "op-badge--live" : "op-badge--warn"}`}>
           {serviceStatus === "live" ? "● Live" : "Paused"}
         </span>
       </div>

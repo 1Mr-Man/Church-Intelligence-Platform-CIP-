@@ -27,9 +27,11 @@ export interface IntelligenceCardProps {
 export function IntelligenceCard({ item, actions, busy, onAction }: IntelligenceCardProps) {
   const confidencePercent = Math.round(item.confidence.score * 100);
   return (
-    <li className="workspace-card">
+    <li className={`workspace-card workspace-card--${item.domain}`}>
       <div className="workspace-card__header">
-        <span className="workspace-card__domain">{DOMAIN_LABELS[item.domain]}</span>
+        <span className={`workspace-card__domain workspace-card__domain--${item.domain}`}>
+          {DOMAIN_LABELS[item.domain]}
+        </span>
         <strong>{item.summary}</strong>
         <span className="workspace-card__confidence">{confidencePercent}%</span>
       </div>

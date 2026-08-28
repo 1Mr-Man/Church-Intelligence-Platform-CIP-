@@ -662,15 +662,7 @@ export function LiveChurchBrain() {
         }
       />
 
-      <WorkspaceHeader
-        status={status}
-        sermonFoundation={sermonFoundation}
-        serviceIntel={serviceIntel}
-        activeContext={activeContext}
-        lastReference={lastReference}
-        activeDisplayItem={activeDisplayItem}
-        displayWindowOpen={displayWindowOpen}
-      />
+      <WorkspaceHeader status={status} sermonFoundation={sermonFoundation} serviceIntel={serviceIntel} />
       <SystemStatusStrip status={status} deviceCount={devices.length} displayWindowOpen={displayWindowOpen} />
 
       <AttentionQueue items={attentionQueue} busy={busy} onAction={handleUnifiedAction} />

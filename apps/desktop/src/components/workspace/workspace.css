@@ -5,6 +5,14 @@
    any color used here, matching `.live-brain__badge`'s existing
    discipline. */
 
+/* "Needs Attention" (spec Priority 2) gets the amber "pending action" tint
+   from the top of the card - it's the single most important thing to
+   notice after service/presentation state. The Intelligence Feed below it
+   stays neutral (it's read-only history, not a call to action). */
+.workspace-attention {
+  border-top: 3px solid var(--status-warn-border);
+}
+
 .workspace-header__grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -35,9 +43,11 @@
 }
 
 .workspace-card {
-  border: 1px solid rgba(127, 127, 127, 0.3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--status-neutral-border);
   border-radius: 6px;
   padding: 0.6rem 0.8rem;
+  background: var(--bg-elevated-2);
 }
 
 .workspace-card__header {
@@ -51,11 +61,62 @@
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  padding: 0.1rem 0.4rem;
-  border: 1px solid currentColor;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid var(--status-neutral-border);
   border-radius: 999px;
-  opacity: 0.85;
+  color: var(--status-neutral);
+  background: var(--status-neutral-bg);
+  font-weight: 700;
 }
+
+/* Domain color system (spec section 4/6): each intelligence domain gets one
+   fixed color + icon, reused identically in the Attention Queue and the
+   Intelligence Feed - the same fact ("this is a Bible finding") always looks
+   the same everywhere it appears. Bible/Scripture uses the reserved gold
+   tone (spec: "use gold selectively for Scripture"); Music/Sermon use the
+   audio/live tones since both originate from live spoken or sung audio;
+   Content and Correlation share the intelligence/AI purple family; Service
+   (structural/system findings) stays neutral gray. */
+.workspace-card--bible { border-left-color: var(--status-scripture-border); }
+.workspace-card--music { border-left-color: var(--status-audio-border); }
+.workspace-card--sermon { border-left-color: var(--status-live-border); }
+.workspace-card--service { border-left-color: var(--status-neutral-border); }
+.workspace-card--content { border-left-color: var(--status-intel-border); }
+.workspace-card--correlation { border-left-color: var(--status-intel-border); }
+
+.workspace-card__domain--bible {
+  color: var(--status-scripture);
+  background: var(--status-scripture-bg);
+  border-color: var(--status-scripture-border);
+}
+.workspace-card__domain--music {
+  color: var(--status-audio);
+  background: var(--status-audio-bg);
+  border-color: var(--status-audio-border);
+}
+.workspace-card__domain--sermon {
+  color: var(--status-live);
+  background: var(--status-live-bg);
+  border-color: var(--status-live-border);
+}
+.workspace-card__domain--service {
+  color: var(--status-neutral);
+  background: var(--status-neutral-bg);
+  border-color: var(--status-neutral-border);
+}
+.workspace-card__domain--content,
+.workspace-card__domain--correlation {
+  color: var(--status-intel);
+  background: var(--status-intel-bg);
+  border-color: var(--status-intel-border);
+}
+
+.workspace-card__domain--bible::before { content: "\1F4D6 "; }
+.workspace-card__domain--music::before { content: "\1F3B5 "; }
+.workspace-card__domain--sermon::before { content: "\1F399 "; }
+.workspace-card__domain--service::before { content: "\2699 "; }
+.workspace-card__domain--content::before { content: "\1F7E3 "; }
+.workspace-card__domain--correlation::before { content: "\1F517 "; }
 
 .workspace-card__confidence {
   margin-left: auto;
@@ -122,25 +183,26 @@
    service yet" hero (large, unmistakable call to action) and the
    "service live/paused" compact bar. */
 .op-hero {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 2rem 1.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  padding: 2.25rem 1.75rem;
   margin-bottom: 1.25rem;
   text-align: center;
-  background: linear-gradient(180deg, var(--status-neutral-bg), transparent);
+  background: linear-gradient(160deg, var(--accent-bg), var(--bg-elevated) 65%);
 }
 
 .op-hero__eyebrow {
   font-size: 0.8rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  opacity: 0.6;
+  letter-spacing: 0.12em;
+  color: var(--status-live);
+  font-weight: 700;
   margin: 0 0 0.35rem;
 }
 
 .op-hero__title {
-  font-size: 1.6rem;
-  font-weight: 600;
+  font-size: 2rem;
+  font-weight: 700;
   margin: 0 0 0.5rem;
   color: var(--text-h);
 }
@@ -174,10 +236,11 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 0.75rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--status-live-border);
   border-radius: 12px;
   padding: 0.9rem 1.25rem;
   margin-bottom: 1.25rem;
+  background: var(--status-live-bg);
 }
 
 .op-service-bar__identity {
@@ -215,6 +278,7 @@
 }
 
 .op-badge--good { color: var(--status-good); background: var(--status-good-bg); }
+.op-badge--live { color: var(--status-live); background: var(--status-live-bg); }
 .op-badge--warn { color: var(--status-warn); background: var(--status-warn-bg); }
 .op-badge--bad { color: var(--status-bad); background: var(--status-bad-bg); }
 .op-badge--neutral { color: var(--status-neutral); background: var(--status-neutral-bg); }
@@ -240,27 +304,34 @@
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.35rem 0.75rem;
+  padding: 0.4rem 0.85rem;
   border-radius: 8px;
   border: 1px solid var(--border);
   font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-h);
+  background: var(--bg-elevated);
 }
 
 .op-status-strip__icon {
-  font-size: 1rem;
+  font-size: 1.1rem;
   line-height: 1;
 }
 
 .op-status-strip__dot {
-  width: 0.5rem;
-  height: 0.5rem;
+  width: 0.55rem;
+  height: 0.55rem;
   border-radius: 50%;
   flex: none;
 }
 
+.op-status-strip__item--good { border-color: var(--status-good-border); background: var(--status-good-bg); }
 .op-status-strip__item--good .op-status-strip__dot { background: var(--status-good-border); }
+.op-status-strip__item--warn { border-color: var(--status-warn-border); background: var(--status-warn-bg); }
 .op-status-strip__item--warn .op-status-strip__dot { background: var(--status-warn-border); }
+.op-status-strip__item--bad { border-color: var(--status-bad-border); background: var(--status-bad-bg); }
 .op-status-strip__item--bad .op-status-strip__dot { background: var(--status-bad-border); }
+.op-status-strip__item--neutral { border-color: var(--status-neutral-border); background: var(--status-neutral-bg); }
 .op-status-strip__item--neutral .op-status-strip__dot { background: var(--status-neutral-border); }
 
 /* Presentation card (spec section 11/12 Priority 4) - the single most
@@ -270,14 +341,17 @@
    never mistake "queued" for "on the projector right now" (spec's hard
    safety rule). */
 .op-presentation {
-  border: 2px solid var(--border);
+  border: 2px solid var(--status-scripture-border);
   border-radius: 14px;
   padding: 1.5rem;
   margin-bottom: 1.25rem;
+  background: linear-gradient(160deg, var(--status-scripture-bg), var(--bg-elevated) 55%);
+  box-shadow: var(--shadow);
 }
 
 .op-presentation--active {
   border-color: var(--status-good-border);
+  background: linear-gradient(160deg, var(--status-good-bg), var(--bg-elevated) 55%);
 }
 
 .op-presentation__header {
@@ -291,10 +365,11 @@
 
 .op-presentation__header h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 1.1rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  opacity: 0.7;
+  letter-spacing: 0.06em;
+  color: var(--text-h);
+  opacity: 0.95;
 }
 
 .op-presentation__empty {
@@ -304,10 +379,11 @@
 }
 
 .op-presentation__item {
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
   padding: 1.1rem 1.25rem;
   margin-top: 0.75rem;
+  background: var(--bg-elevated-2);
 }
 
 .op-presentation__item--active {
@@ -316,10 +392,14 @@
 }
 
 .op-presentation__scripture {
-  font-size: 1.6rem;
+  font-size: 1.7rem;
   font-weight: 700;
-  color: var(--text-h);
+  color: var(--status-scripture);
   margin: 0 0 0.4rem;
+}
+
+.op-presentation__item--active .op-presentation__scripture {
+  color: var(--text-h);
 }
 
 .op-presentation__text {

@@ -1,0 +1,11 @@
+{
+  "note": "Phase 3.5.1 changed only CSS/color/copy in the operator workspace - it did not change the workflow steps, the number of clicks, or any Tauri command/event a timing/usability task exercises. The Phase 3.5 timing/usability checklist (pilot-evidence/3.5/windows-ux/windows-ux-checklist.json) therefore applies unchanged to this build as well: same 11 timing tasks (T1-T11), same 6 human-usability tasks (H1-H6), all still HOLD for the identical reason - no real Windows machine, human operator, microphone, or second display was available in this container.",
+  "supersededBy": "This build's installer (release/windows/Church Intelligence Platform_0.1.0_x64-setup.exe, SHA-256 9d59e0c7236c4a0aaa4995d66aeda9631ea119f66145e103805e5baf8c58f664) is what any future real-hardware run of that Phase 3.5 checklist should be performed against - not the Phase 3.5 installer, which this one replaces.",
+  "screenshotEvidence": {
+    "requested": true,
+    "suppliedToThisSession": false,
+    "reason": "No image or video file was attached to the task message, and a filesystem search of the working tree, /tmp, and this session's scratchpad found none. See docs/phase-3-5-1-ux-audit.md section 0 for the full account.",
+    "status": "NOT_AVAILABLE"
+  },
+  "conclusion": "All timing, usability, and direct visual-comparison tasks remain HOLD/NOT_AVAILABLE - not estimated, not simulated, not inferred from code review."
+}
