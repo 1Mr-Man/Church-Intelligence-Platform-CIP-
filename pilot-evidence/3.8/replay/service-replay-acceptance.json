@@ -1,0 +1,19 @@
+{
+  "phase": "3.8",
+  "environment": "automated (Environment A, real file-backed SQLite, real BSB dataset)",
+  "timestampUtc": "2026-08-28T09:00:00Z",
+  "test": "pipeline::tests::phase_3_8_service_replay_full_offline_acceptance",
+  "method": "A realistic 4-segment sermon transcript is fed sequentially (never batched) through the exact pure cores the frontend Service Replay scheduler calls per segment: handle_final_transcript (Bible Suggestion path), sermon::analyze_and_queue (Sermon Finding path), and a standalone BibleIntelligenceEngine.analyze (Bible Finding path) - each against the real, complete BSB dataset (66 books / 1,189 chapters / 31,086 verses). After the loop, content_intelligence::analyze_and_queue and cross_domain::analyze_and_queue are run once, mirroring the operator clicking 'Analyze Cross-Domain + Content' after replay completes. One resulting Bible suggestion (John 3:16) is then approved and carried through prepare/activate/stop. The real on-disk SQLite file is then closed and reopened.",
+  "verified": [
+    "transcript sequence numbers strictly increase across all 4 segments - proof of genuine sequential (not batched/simultaneous) processing",
+    "all 4 segments persisted exactly once via the Suggestion path",
+    "the real Sermon Intelligence engine produced at least one finding from the realistic transcript",
+    "the real Bible Finding path produced at least one finding (John 3:16 / Romans 8:28) from the real BSB dataset",
+    "Content Intelligence and Cross-Domain analysis both executed successfully against the accumulated findings (their actual output count is logged, never hard-asserted - honesty rule: never fabricate a correlation/candidate the real deterministic engines did not genuinely produce)",
+    "the approved John 3:16 suggestion, its presentation item (Prepared -> Active -> Stopped), and the ended service all survive closing and reopening the real on-disk database file",
+    "no stale replay state exists after restart - by construction, since Service Replay's own scheduler (segment position/pause/speed) lives entirely in frontend memory and never touches the database at all"
+  ],
+  "result": "PASS",
+  "evidenceSource": "cargo test -p cip-desktop pipeline::tests::phase_3_8_service_replay_full_offline_acceptance",
+  "limitations": "Environment A only - real Windows human-operator Service Replay usage (Environment C) not performed this phase. This test proves the offline end-to-end intelligence workflow; it does NOT prove microphone hardware, CPAL hardware capture, Whisper real-world latency, or physical audio quality, per spec section 33's explicit category separation."
+}

@@ -1,0 +1,20 @@
+{
+  "phase": "3.8",
+  "note": "No physical Windows machine was available in this container for Phase 3.8, the identical constraint recorded in every prior phase's windows/hardware evidence directory. This is not a regression.",
+  "installer": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "4f1a1890d10584c37424a71cfe1e664829c76c40adeafba0aef06a355d891ac4",
+    "fileSizeBytes": 7126295,
+    "status": "NOT VERIFIED on real Windows hardware - cross-compiled and file(1)-inspected only (Environment A/B)"
+  },
+  "newScreensRequiringRealHardwareValidationWhenAvailable": [
+    "Service Replay (transcript paste/file-load, sample transcript, speed selector, pause/resume/stop/restart, progress bar)",
+    "The renamed 'Service Replay' nav entry (previously 'Offline Test Center')"
+  ],
+  "requiredForGateToBecomePASS": [
+    "a real Windows 10/11 x64 laptop (the user's HP EliteBook)",
+    "Internet disconnected for the duration of the checklist",
+    "a human operator running docs/phase-3-8-service-replay-operator.md's checklist: load the sample transcript, start replay, observe segments arriving sequentially, confirm Bible + Sermon findings, approve + prepare + preview + display + stop a resulting Scripture, stop replay, stop service, verify History, restart CIP, verify persistence"
+  ],
+  "conclusion": "All physical-hardware/human-operator validation for Phase 3.8 remains NOT PERFORMED - not estimated, not simulated, not inferred from code review."
+}
