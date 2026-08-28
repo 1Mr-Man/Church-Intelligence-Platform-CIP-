@@ -1075,7 +1075,7 @@ fn handle_audio_chunk(app: &AppHandle, service_id: Uuid, chunk: AudioChunk) {
                 state.bible_provider.as_ref(),
                 &mut context,
                 service_id,
-                DEFAULT_TRANSLATION_ID,
+                &resolve_default_translation_id(&state),
                 segment,
             )
         };
@@ -1199,7 +1199,7 @@ pub fn process_test_transcript(
             state.bible_provider.as_ref(),
             &mut context,
             service_id,
-            DEFAULT_TRANSLATION_ID,
+            &resolve_default_translation_id(&state),
             segment,
         )
         .map_err(AppError::from)
@@ -1359,7 +1359,12 @@ pub fn edit_suggestion(
         require_non_empty(&new_reference, "new_reference").map_err(log_and_return)?;
 
     let (book, chapter, verse) = parse_display_reference(&new_reference).map_err(log_and_return)?;
-    let reference = ScriptureReference::single(DEFAULT_TRANSLATION_ID, &book, chapter, verse);
+    let reference = ScriptureReference::single(
+        resolve_default_translation_id(&state),
+        &book,
+        chapter,
+        verse,
+    );
     state
         .bible_provider
         .get_verse(&reference)
@@ -1512,7 +1517,7 @@ pub fn preview_presentation(
             "suggestion is not a scripture reference".to_string(),
         )));
     };
-    let translation_id = translation_id.unwrap_or_else(|| DEFAULT_TRANSLATION_ID.to_string());
+    let translation_id = translation_id.unwrap_or_else(|| resolve_default_translation_id(&state));
     preview_reference(reference, &translation_id, &app, &state)
 }
 
@@ -1528,7 +1533,7 @@ pub fn preview_scripture(
     state: State<'_, AppState>,
 ) -> Result<PresentationPreview, AppError> {
     let reference = require_non_empty(&reference, "reference").map_err(log_and_return)?;
-    let translation_id = translation_id.unwrap_or_else(|| DEFAULT_TRANSLATION_ID.to_string());
+    let translation_id = translation_id.unwrap_or_else(|| resolve_default_translation_id(&state));
     preview_reference(&reference, &translation_id, &app, &state)
 }
 
@@ -1544,7 +1549,7 @@ pub fn prepare_presentation(
     state: State<'_, AppState>,
 ) -> Result<PresentationItem, AppError> {
     let id = parse_uuid(&suggestion_id).map_err(log_and_return)?;
-    let translation_id = translation_id.unwrap_or_else(|| DEFAULT_TRANSLATION_ID.to_string());
+    let translation_id = translation_id.unwrap_or_else(|| resolve_default_translation_id(&state));
     ensure_translation_selectable(&state, &translation_id).map_err(log_and_return)?;
     let db = state.db.lock().expect("db connection poisoned");
     let suggestion = persistence::get_suggestion(&db, id)
@@ -1609,7 +1614,7 @@ pub fn create_manual_presentation(
     state: State<'_, AppState>,
 ) -> Result<PresentationItem, AppError> {
     let reference = require_non_empty(&reference, "reference").map_err(log_and_return)?;
-    let translation_id = translation_id.unwrap_or_else(|| DEFAULT_TRANSLATION_ID.to_string());
+    let translation_id = translation_id.unwrap_or_else(|| resolve_default_translation_id(&state));
     ensure_translation_selectable(&state, &translation_id).map_err(log_and_return)?;
     let service_id = current_service_id(&state).map_err(log_and_return)?;
 
@@ -1929,8 +1934,9 @@ pub fn resolve_ambiguous_reference(
 ) -> Result<Suggestion, AppError> {
     let book = require_non_empty(&book, "book").map_err(log_and_return)?;
     let service_id = current_service_id(&state).map_err(log_and_return)?;
+    let translation_id = resolve_default_translation_id(&state);
 
-    let reference = ScriptureReference::single(DEFAULT_TRANSLATION_ID, &book, chapter, verse);
+    let reference = ScriptureReference::single(&translation_id, &book, chapter, verse);
     state
         .bible_provider
         .get_verse(&reference)
@@ -1981,15 +1987,9 @@ pub fn resolve_ambiguous_reference(
         confidence,
         raw_text: raw_text.clone(),
     };
-    persistence::persist_scripture_detection(
-        &db,
-        service_id,
-        None,
-        DEFAULT_TRANSLATION_ID,
-        &detection,
-    )
-    .map_err(AppError::from)
-    .map_err(log_and_return)?;
+    persistence::persist_scripture_detection(&db, service_id, None, &translation_id, &detection)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
 
     record_timeline(
         &db,
@@ -2023,7 +2023,7 @@ pub fn correct_scripture_context(
 
     state
         .bible_provider
-        .get_chapter(DEFAULT_TRANSLATION_ID, &book, chapter)
+        .get_chapter(&resolve_default_translation_id(&state), &book, chapter)
         .map_err(AppError::from)
         .map_err(log_and_return)?
         .ok_or_else(|| {
@@ -2077,6 +2077,70 @@ pub fn correct_scripture_context(
     Ok(new_context)
 }
 
+/// Resolves which Bible translation a caller meant when it omitted
+/// `translationId` entirely - the fix for Phase 3.7's "Bible readiness"
+/// root-cause audit finding (docs/phase-3-7-offline-operator-test.md
+/// section 4/5).
+///
+/// `DEFAULT_TRANSLATION_ID` ("KJV") is a Phase 1.2 dev/test-fixture
+/// identifier, registered in the content registry only when
+/// `apply_dev_seed` runs (`lib.rs`: every non-`Production` environment).
+/// A real Windows release build always runs in `Production`, so the dev
+/// seed never applies and `bible:KJV` is never registered there - only
+/// `bible:BSB` (the real production dataset) is. Twelve call sites used to
+/// fall back to (or hardcode outright) the literal `DEFAULT_TRANSLATION_ID`
+/// whenever the frontend omitted `translationId` - not just the Bible
+/// Library/Manual Bible Search commands
+/// (`preview_presentation`/`preview_scripture`/`prepare_presentation`/
+/// `create_manual_presentation`/`search_bible`/`list_bible_books`), but
+/// also the live-microphone and manual-transcript detection pipelines
+/// (`handle_audio_chunk`, `process_test_transcript`) and the operator
+/// correction commands (`edit_suggestion`, `resolve_ambiguous_reference`,
+/// `correct_scripture_context`) - every one of them validates or looks up
+/// a verse/chapter against `state.bible_provider` using this id. Because
+/// `ensure_translation_selectable`/`is_translation_selectable` deliberately
+/// "fail open" for an *unregistered* id (see that function's own docs),
+/// this never produced an error - every one of those commands would
+/// silently query `translation_id = 'KJV'` against a real production
+/// database that only has `'BSB'` rows, returning empty results (or, for
+/// the detection pipelines, silently failing to validate any reference the
+/// pastor or operator actually spoke/typed). That is the exact
+/// contradiction this phase's baseline reported: Diagnostics correctly
+/// showing BSB installed (`get_live_status`'s `bible` field already
+/// resolved `BSB_TRANSLATION_ID` directly, never this default) while the
+/// Bible Library's own search/browse - and, it turned out, Bible detection
+/// itself - silently found nothing.
+///
+/// This resolves the SAME way `get_live_status` already does - real BSB
+/// production id first, the KJV dev-fixture id only as a fallback (so
+/// every existing dev/test-environment test and workflow, which seeds
+/// only KJV, keeps working unchanged) - making it the one place "what
+/// translation did the operator mean by default" is decided, instead of
+/// a stale compile-time literal.
+fn resolve_default_translation_id(state: &State<'_, AppState>) -> String {
+    resolve_default_translation_id_from_registry(state.content_registry.as_ref())
+}
+
+/// The pure, directly-testable core of [`resolve_default_translation_id`] -
+/// split out so this fix's regression test doesn't need a full `AppState`/
+/// `State<'_, AppState>` (this project has no `tauri::test` harness; see
+/// `pipeline.rs`/`presentation.rs`'s docs on keeping command *logic*
+/// independently testable behind a thin command wrapper).
+fn resolve_default_translation_id_from_registry(
+    registry: &dyn cip_core_content::ContentRegistry,
+) -> String {
+    let bsb_id = crate::bible_production_dataset::BSB_TRANSLATION_ID;
+    let registered = registry
+        .get(&content::bible_content_id(bsb_id))
+        .unwrap_or(None)
+        .is_some();
+    if registered {
+        bsb_id.to_string()
+    } else {
+        DEFAULT_TRANSLATION_ID.to_string()
+    }
+}
+
 /// Rejects an explicitly-disabled translation for any Bible operation that
 /// resolves one by id (search, preview, prepare, manual creation) - the
 /// real dataset-milestone counterpart to `is_translation_selectable`,
@@ -2111,7 +2175,7 @@ pub fn search_bible(
     state: State<'_, AppState>,
 ) -> Result<Vec<BibleSearchResult>, AppError> {
     let query = require_non_empty(&query, "query").map_err(log_and_return)?;
-    let translation_id = translation_id.unwrap_or_else(|| DEFAULT_TRANSLATION_ID.to_string());
+    let translation_id = translation_id.unwrap_or_else(|| resolve_default_translation_id(&state));
     ensure_translation_selectable(&state, &translation_id).map_err(log_and_return)?;
     dispatch_bible_search(state.bible_provider.as_ref(), &translation_id, &query)
         .map_err(AppError::from)
@@ -2133,7 +2197,7 @@ pub fn list_bible_books(
     translation_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<BibleBook>, AppError> {
-    let translation_id = translation_id.unwrap_or_else(|| DEFAULT_TRANSLATION_ID.to_string());
+    let translation_id = translation_id.unwrap_or_else(|| resolve_default_translation_id(&state));
     ensure_translation_selectable(&state, &translation_id).map_err(log_and_return)?;
     let mut books = Vec::new();
     for canonical in BOOKS {
@@ -4779,6 +4843,76 @@ mod tests {
             ..enabled
         };
         assert!(!is_translation_selectable(Ok(Some(&disabled))));
+    }
+
+    /// Phase 3.7 root-cause regression: the exact bug behind "Diagnostics
+    /// says BSB installed, but the Bible Library says no Bible content" -
+    /// see `resolve_default_translation_id`'s docs and
+    /// docs/phase-3-7-offline-operator-test.md section 4/5. In a real
+    /// production build (no dev seed - see `lib.rs`'s
+    /// `environment != Production` guard), only `bible:BSB` is ever
+    /// registered, never `bible:KJV`. Before this fix, every command that
+    /// fell back to the literal `DEFAULT_TRANSLATION_ID` ("KJV") on an
+    /// omitted `translationId` silently queried a translation id with zero
+    /// rows in a real production database.
+    #[test]
+    fn resolve_default_translation_id_prefers_bsb_when_registered_like_a_real_production_build() {
+        use cip_core_content::ContentRegistry as _;
+        use cip_database::{open_in_memory, run_migrations};
+        use cip_integrations_content::SqliteContentRegistry;
+
+        // A "production-like" registry: only BSB registered, exactly as a
+        // real Windows release build leaves it (dev seed never applied).
+        let registry = SqliteContentRegistry::new(open_in_memory_migrated());
+        registry
+            .register(&ContentMetadata {
+                id: content::bible_content_id(crate::bible_production_dataset::BSB_TRANSLATION_ID),
+                content_type: ContentType::Bible,
+                name: "Berean Standard Bible".to_string(),
+                version: "bsb-1.0".to_string(),
+                language: "en".to_string(),
+                source: "production".to_string(),
+                publisher: None,
+                copyright: None,
+                license: None,
+                distribution: None,
+                imported_at: chrono::Utc::now(),
+                checksum: None,
+                status: ContentStatus::Enabled,
+                licensing_status: cip_core_content::LicensingStatus::VerifiedPublicDomain,
+            })
+            .unwrap();
+
+        assert_eq!(
+            resolve_default_translation_id_from_registry(&registry),
+            crate::bible_production_dataset::BSB_TRANSLATION_ID,
+            "with BSB registered (a real production build), the default must resolve to BSB, never the KJV dev-fixture id"
+        );
+
+        fn open_in_memory_migrated() -> rusqlite::Connection {
+            let mut conn = open_in_memory().unwrap();
+            run_migrations(&mut conn).unwrap();
+            conn
+        }
+    }
+
+    #[test]
+    fn resolve_default_translation_id_falls_back_to_the_dev_fixture_when_bsb_is_not_registered() {
+        use cip_database::{open_in_memory, run_migrations};
+        use cip_integrations_content::SqliteContentRegistry;
+
+        // A "dev-environment-like" registry: nothing registered at all
+        // (or only KJV, from apply_dev_seed) - the pre-existing
+        // dev/test behavior must be unchanged by this fix.
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        let registry = SqliteContentRegistry::new(conn);
+
+        assert_eq!(
+            resolve_default_translation_id_from_registry(&registry),
+            DEFAULT_TRANSLATION_ID,
+            "with no BSB registration at all, the default must still fall back to the dev fixture id, matching every existing dev/test workflow"
+        );
     }
 
     #[test]

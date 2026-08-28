@@ -1794,6 +1794,254 @@ mod tests {
             .all(|item| item.status == cip_core_presentation::PresentationItemStatus::Prepared));
     }
 
+    /// Phase 3.7's canonical full offline operator acceptance test (spec
+    /// section 19): everything a church operator can prove on a fresh
+    /// Windows install with no Internet, no microphone, no Whisper model,
+    /// and no projector - all through the exact same plain functions the
+    /// real Tauri commands call, never a parallel/fabricated intelligence
+    /// path (spec section 2; this project has no `tauri::test` harness -
+    /// see this module's own docs on why command *logic* stays
+    /// independently testable this way).
+    ///
+    /// Chain: fresh real file-backed database -> import + verify the real
+    /// BSB dataset (never the dev fixture) -> real-text Bible search ->
+    /// save a Scripture reference -> start a service -> submit a manual
+    /// transcript through the SAME pipeline function live speech uses
+    /// (`handle_final_transcript`/`process_transcript_segment` - exactly
+    /// what `commands::process_test_transcript` calls, per spec section 7's
+    /// "manual transcript enters the same production intelligence
+    /// pipeline" requirement) -> operator approves the resulting
+    /// suggestion -> prepare -> activate -> stop the presentation (laptop
+    /// screen only - spec section 6, never a physical projector) -> stop
+    /// the service -> close the database connection and reopen the same
+    /// on-disk file, exactly as a real application restart would (the same
+    /// real-file technique as
+    /// `service_history_survives_a_simulated_application_restart` above,
+    /// extended to also cover the saved Scripture and the presentation
+    /// item) -> verify the saved Scripture, the completed service, and the
+    /// stopped presentation item all survive.
+    #[test]
+    fn phase_3_7_full_offline_operator_chain_acceptance() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("cip-phase-3-7-offline-acceptance.sqlite3");
+        let bsb_translation_id = crate::bible_production_dataset::BSB_TRANSLATION_ID;
+
+        let session_id;
+        let saved_id;
+        let prepared_item_id;
+        let james_2_2_text;
+
+        {
+            let mut conn = cip_database::open(&db_path).unwrap();
+            run_migrations(&mut conn).unwrap();
+
+            // The real, complete BSB dataset, imported exactly as it is at
+            // real application startup (never the tiny KJV dev fixture).
+            let mut provider_conn = open_in_memory().unwrap();
+            run_migrations(&mut provider_conn).unwrap();
+            cip_integrations_bible::import_bible_dataset(
+                &provider_conn,
+                &crate::bible_production_dataset::bsb_dataset(),
+            )
+            .unwrap();
+            let provider = SqliteBibleProvider::new(provider_conn);
+
+            // --- Bible Library: real-text search against the real BSB
+            //     dataset (spec section 5) ------------------------------
+            let results =
+                cip_core_bible::search_bible(&provider, bsb_translation_id, "James 2:2").unwrap();
+            assert_eq!(
+                results.len(),
+                1,
+                "James 2:2 must resolve to exactly one real BSB verse"
+            );
+            let james_2_2 = &results[0];
+            assert_eq!(james_2_2.reference, "JAS 2:2");
+            assert!(
+                !james_2_2.text.is_empty(),
+                "the real BSB verse text must be present"
+            );
+            james_2_2_text = james_2_2.text.clone();
+
+            // --- Bible Library: save Scripture, list it back (spec
+            //     section 5's "save Scripture, reopen saved Scripture") --
+            let saved = crate::persistence::persist_saved_scripture(
+                &conn,
+                Uuid::new_v4(),
+                bsb_translation_id,
+                &james_2_2.book,
+                james_2_2.chapter,
+                james_2_2.verse,
+                None,
+                &james_2_2.reference,
+                Some("Phase 3.7 offline operator acceptance"),
+            )
+            .unwrap();
+            saved_id = saved.id;
+            assert_eq!(
+                crate::persistence::list_saved_scriptures(&conn)
+                    .unwrap()
+                    .len(),
+                1
+            );
+
+            // --- Service lifecycle: start --------------------------------
+            let session = ServiceSession::start("Phase 3.7 Offline Operator Acceptance");
+            session_id = session.id;
+            persist_service(&conn, &session).unwrap();
+
+            // --- Manual Transcript Mode: the SAME production pipeline
+            //     live speech uses (spec section 2/7) - no parallel/fake
+            //     intelligence engine, no duplicated Bible detection -----
+            let mut context = DefaultScriptureContextManager::new(bsb_translation_id);
+            let processed = handle_final_transcript(
+                &conn,
+                &provider,
+                &mut context,
+                session.id,
+                bsb_translation_id,
+                segment("Please turn to James chapter 2 verse 2", 0),
+            )
+            .unwrap();
+            assert_eq!(
+                processed.suggestions.len(),
+                1,
+                "the manual transcript must produce exactly one real suggestion"
+            );
+            assert_eq!(
+                processed.detections[0]
+                    .reference
+                    .as_ref()
+                    .unwrap()
+                    .to_string(),
+                "JAS 2:2",
+                "manual transcript detection must resolve against the real BSB dataset, not a fixture"
+            );
+            let suggestion_id = processed.suggestions[0].id;
+
+            // --- Operator review: approve --------------------------------
+            let approved = crate::persistence::update_suggestion_status(
+                &conn,
+                suggestion_id,
+                cip_core_ai::SuggestionStatus::Approved,
+                None,
+            )
+            .unwrap();
+            assert_eq!(approved.status, cip_core_ai::SuggestionStatus::Approved);
+
+            // --- Presentation: prepare -> activate -> stop, laptop-screen
+            //     only (spec section 6) - build_scripture_slide is the
+            //     exact function both preview and prepare commands call --
+            let (content, _) = crate::presentation::build_scripture_slide(
+                &provider,
+                bsb_translation_id,
+                "JAS 2:2",
+            )
+            .unwrap();
+            assert!(
+                preview_content_is_scripture_text(&content, &james_2_2_text),
+                "the presentation content must carry the exact real BSB verse text"
+            );
+            let item = crate::presentation::persist_prepared_item(
+                &conn,
+                session.id,
+                content,
+                "SCRIPTURE_DEFAULT",
+                Some(suggestion_id),
+            )
+            .unwrap();
+            prepared_item_id = item.id;
+            let (activating_item, _slide) =
+                crate::presentation::prepare_to_activate(&conn, item.id).unwrap();
+            assert_eq!(
+                activating_item.status,
+                cip_core_presentation::PresentationItemStatus::Prepared
+            );
+            let active = crate::presentation::commit_activation(&conn, item.id).unwrap();
+            assert_eq!(
+                active.status,
+                cip_core_presentation::PresentationItemStatus::Active
+            );
+            let stopped = crate::presentation::stop_active_item(&conn, session.id)
+                .unwrap()
+                .expect("an active item was present to stop");
+            assert_eq!(stopped.id, item.id);
+            assert_eq!(
+                stopped.status,
+                cip_core_presentation::PresentationItemStatus::Stopped
+            );
+
+            // --- Service lifecycle: stop ---------------------------------
+            let mut ending_session = session;
+            ending_session.end();
+            crate::persistence::update_service_status(
+                &conn,
+                ending_session.id,
+                ending_session.status,
+                ending_session.ended_at,
+            )
+            .unwrap();
+
+            // "Close/restart the application": drop the connection at the
+            // end of this block, same as the restart tests above.
+        }
+
+        // Reopen the SAME on-disk file, exactly as a fresh application
+        // launch would - nothing carries over from the objects above.
+        let reopened = cip_database::open(&db_path).unwrap();
+
+        let reopened_service = crate::persistence::get_service(&reopened, session_id).unwrap();
+        assert_eq!(
+            reopened_service.status,
+            cip_core_service::ServiceStatus::Ended,
+            "the completed test service must survive a real restart"
+        );
+
+        let history = crate::persistence::list_services(&reopened, None, 50).unwrap();
+        assert!(
+            history.iter().any(|s| s.id == session_id),
+            "the completed test service must appear in service history after restart"
+        );
+
+        let reopened_saved = crate::persistence::list_saved_scriptures(&reopened).unwrap();
+        assert_eq!(reopened_saved.len(), 1);
+        assert_eq!(reopened_saved[0].id, saved_id);
+        assert_eq!(reopened_saved[0].reference_display, "JAS 2:2");
+
+        let reopened_items =
+            crate::persistence::list_presentation_items(&reopened, session_id, None).unwrap();
+        assert_eq!(reopened_items.len(), 1);
+        assert_eq!(reopened_items[0].id, prepared_item_id);
+        assert_eq!(
+            reopened_items[0].status,
+            cip_core_presentation::PresentationItemStatus::Stopped,
+            "the presentation item's final Stopped state must survive restart, never reset to Active"
+        );
+
+        // A completely fresh BibleProvider connection (never the one used
+        // above) proves the saved reference still resolves to the real
+        // BSB text on its own, not a value cached in memory.
+        let mut restart_provider_conn = open_in_memory().unwrap();
+        run_migrations(&mut restart_provider_conn).unwrap();
+        cip_integrations_bible::import_bible_dataset(
+            &restart_provider_conn,
+            &crate::bible_production_dataset::bsb_dataset(),
+        )
+        .unwrap();
+        let restart_provider = SqliteBibleProvider::new(restart_provider_conn);
+        let reference = cip_core_bible::ScriptureReference::single(
+            bsb_translation_id,
+            &reopened_saved[0].book,
+            reopened_saved[0].chapter,
+            reopened_saved[0].verse_start,
+        );
+        let verse_after_restart = restart_provider.get_verse(&reference).unwrap().unwrap();
+        assert_eq!(
+            verse_after_restart.text, james_2_2_text,
+            "the saved Scripture must still resolve to the exact same real BSB text after restart"
+        );
+    }
+
     fn preview_content_is_scripture_text(
         content: &cip_core_presentation::PresentationContent,
         needle: &str,

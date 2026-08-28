@@ -1,0 +1,18 @@
+{
+  "phase": "3.7",
+  "note": "No physical Windows machine was available in this container for Phase 3.7, for the identical reason recorded in pilot-evidence/3.4 through 3.6's windows-ux/ directories. This is not a regression - it is the same constraint every prior phase has reported. Per spec section 41's binding rule, this alone holds the Phase 3.7 gate at HOLD regardless of Environment A/B completeness.",
+  "installer": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "8fd186ffb79ec362365c6e30d2b9894204c8bbff4f9c7672287add09adfca800",
+    "fileSizeBytes": 7107984,
+    "status": "NOT VERIFIED on real Windows hardware - cross-compiled and file(1)-inspected only (Environment A/B)"
+  },
+  "humanOperatorChecklist": "see docs/phase-3-7-offline-operator-test.md section 24 for the exact 28-step procedure a human operator must run on the real target Windows laptop",
+  "requiredForGateToBecomePASS": [
+    "a real Windows 10/11 x64 laptop (target: HP EliteBook)",
+    "Internet disconnected for the duration of the checklist",
+    "no microphone, no Whisper model, no projector/second display required",
+    "a human operator executing docs/phase-3-7-offline-operator-test.md section 24 step by step and recording results/timings"
+  ],
+  "conclusion": "All physical-hardware/human-operator validation for Phase 3.7 remains NOT PERFORMED - not estimated, not simulated, not inferred from code review. FULL OFFLINE OPERATOR TEST: HOLD."
+}

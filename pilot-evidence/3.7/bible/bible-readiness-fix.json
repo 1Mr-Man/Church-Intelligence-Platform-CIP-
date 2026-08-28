@@ -1,0 +1,12 @@
+{
+  "phase": "3.7",
+  "environment": "automated (Environment A)",
+  "timestampUtc": "2026-08-28T07:00:00Z",
+  "commit": "pending (this phase's own commit - see docs/phase-3-7-offline-operator-test.md)",
+  "test": "Bible readiness single source of truth (spec section 4/5)",
+  "finding": "get_live_status correctly resolved BSB_TRANSLATION_ID directly, while 12 other call sites in apps/desktop/src-tauri/src/commands.rs fell back to the DEFAULT_TRANSLATION_ID ('KJV') dev-fixture literal whenever translationId was omitted - never registered in a real Production build, causing silent empty results / failed detection rather than an error (is_translation_selectable fails open for unregistered ids).",
+  "fix": "resolve_default_translation_id(state) / resolve_default_translation_id_from_registry(registry) in commands.rs - BSB-registered-first resolution, mirroring get_live_status's own logic, applied at all 12 call sites",
+  "result": "PASS",
+  "evidenceSource": "cargo test -p cip-desktop commands::tests::resolve_default_translation_id (2 passed, 0 failed); cargo test -p cip-desktop pipeline::tests::phase_3_7_full_offline_operator_chain_acceptance (1 passed) - proves real BSB search/save/detection/presentation against the fix",
+  "limitations": "Environment A only (real SQLite, in-memory and real-file-backed) - not yet verified on a real Windows installation with the real production BSB dataset on disk (Environment C, not performed this phase)"
+}

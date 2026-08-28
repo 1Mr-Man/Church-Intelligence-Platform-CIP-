@@ -1,0 +1,50 @@
+{
+  "environment": "automated",
+  "commands": {
+    "cargo fmt --check": "pass",
+    "cargo check --workspace": "pass",
+    "cargo clippy --workspace --all-targets -- -D warnings": "pass, 0 warnings",
+    "cargo test --workspace (default features)": "779 passed, 0 failed (up from 776 at the Phase 3.6 baseline - 2 new resolve_default_translation_id_* regression tests in commands.rs plus 1 new phase_3_7_full_offline_operator_chain_acceptance test in pipeline.rs)",
+    "cargo check -p cip-desktop --features whisper": "pass",
+    "cargo test -p cip-ai-speech --features whisper": "7 passed, 0 failed",
+    "npm run typecheck (tsc -b)": "pass",
+    "npm run test (vitest run)": "191 passed, 0 failed (unchanged from Phase 3.6 - TestCenter.tsx introduces no new pure/exported logic beyond static scenario data)",
+    "npm run build (vite build)": "pass",
+    "npm run lint (oxlint)": "0 errors, 3 pre-existing warnings (main.tsx fast-refresh, PilotDiagnosticsPanel.tsx and LiveChurchBrain.tsx set-state-in-effect) - unchanged from every prior phase baseline, not introduced by this phase"
+  },
+  "rootCauseFix": {
+    "bug": "DEFAULT_TRANSLATION_ID ('KJV', a Phase 1.2 dev/test-fixture id) was used as a hardcoded fallback in 12 call sites in apps/desktop/src-tauri/src/commands.rs whenever the frontend omitted translationId. In a real Production build (apply_dev_seed never runs), only bible:BSB is registered in the Content Registry, so every one of those call sites silently queried a translation_id that has zero rows - because is_translation_selectable/ensure_translation_selectable deliberately 'fail open' for an unregistered id, this never produced an error, only empty results / failed detection.",
+    "callSitesFixed": [
+      "preview_presentation", "preview_scripture", "prepare_presentation",
+      "create_manual_presentation", "search_bible", "list_bible_books",
+      "handle_audio_chunk (live microphone Bible detection pipeline)",
+      "process_test_transcript (manual transcript Bible detection pipeline)",
+      "edit_suggestion", "resolve_ambiguous_reference (2 internal call sites)",
+      "correct_scripture_context"
+    ],
+    "fix": "new resolve_default_translation_id(state) / resolve_default_translation_id_from_registry(registry) - checks whether bible:BSB is registered first (real production dataset), falls back to the dev-fixture literal only when it is not, mirroring get_live_status's own already-correct resolution logic",
+    "newTests": [
+      "commands::tests::resolve_default_translation_id_prefers_bsb_when_registered_like_a_real_production_build",
+      "commands::tests::resolve_default_translation_id_falls_back_to_the_dev_fixture_when_bsb_is_not_registered"
+    ]
+  },
+  "newBackendSurface": {
+    "migration": "none - no schema change was needed this phase (spec section 14's justification requirement was not met by anything this phase set out to do)",
+    "newTauriCommands": [],
+    "newFrontendSurface": "apps/desktop/src/components/testcenter/TestCenter.tsx (Offline Test Center) - calls only pre-existing Tauri commands (processTestTranscript, analyzeSermonTranscript, analyzeMusicTranscript, analyzeCrossDomain, startService, endService, getLiveStatus, listAudioDevices), no new command, no new intelligence path",
+    "newAcceptanceTest": "apps/desktop/src-tauri/src/pipeline.rs: phase_3_7_full_offline_operator_chain_acceptance - fresh real file-backed SQLite DB -> real BSB import/search -> save Scripture -> manual transcript through handle_final_transcript -> approve -> prepare/activate/stop presentation -> stop service -> close+reopen the same on-disk file (real restart) -> verify service/saved Scripture/presentation item all survive -> fresh BibleProvider connection re-confirms the saved reference's real BSB text",
+    "zeroChangesTo": "Tauri command names/signatures for every pre-existing command, event names/payloads, intelligence engines, cross-domain correlation logic, presentation activation safety, licensing gate, BSB dataset content, every database table"
+  },
+  "offlineDependencyCheck": {
+    "command": "cargo tree --workspace --all-features",
+    "result": "no HTTP client crate in the dependency graph - unchanged from prior phases"
+  },
+  "secretsScan": {
+    "command": "git diff 45f23b4 -- apps/desktop/src apps/desktop/src-tauri database docs | grep -iE \"TODO|FIXME|api[_-]?key|secret|password|BEGIN (RSA|PRIVATE)|dbg!|console\\.log\"",
+    "result": "no matches"
+  },
+  "tauriCapabilitiesCheck": {
+    "command": "git diff 45f23b4 -- apps/desktop/src-tauri/capabilities/ apps/desktop/src-tauri/tauri.conf.json",
+    "result": "empty diff - no capability or CSP change"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "phase": "3.7",
+  "environment": "automated (Environment A, real file-backed SQLite)",
+  "timestampUtc": "2026-08-28T07:00:00Z",
+  "test": "Service History reuse + restart recovery (spec section 13/24)",
+  "method": "A real on-disk SQLite file is used (tempfile::tempdir), not an in-memory connection kept open. The connection is dropped and reopened mid-test, exactly as a real application close/relaunch would.",
+  "verified": [
+    "the completed test service (status Ended) survives restart and appears in service history",
+    "the saved Scripture (James 2:2) survives restart with the same id and reference",
+    "the presentation item's final Stopped status survives restart (never resets to Active)",
+    "a completely fresh BibleProvider connection (built after restart) still resolves the saved reference to the exact same real BSB verse text"
+  ],
+  "result": "PASS",
+  "evidenceSource": "cargo test -p cip-desktop pipeline::tests::phase_3_7_full_offline_operator_chain_acceptance",
+  "limitations": "Environment A only - real Windows filesystem/database-path close-reopen behavior (Environment C) not performed this phase; no database migration was needed or added"
+}

@@ -8,6 +8,7 @@ import { LiveChurchBrain } from "./components/LiveChurchBrain";
 import { BibleLibrary } from "./components/library/BibleLibrary";
 import { MusicLibrary } from "./components/library/MusicLibrary";
 import { HistoryView } from "./components/library/HistoryView";
+import { TestCenter } from "./components/testcenter/TestCenter";
 import { WebRuntimeNotice } from "./components/WebRuntimeNotice";
 import { isTauriRuntime } from "./lib/runtime";
 
@@ -26,13 +27,14 @@ interface FoundationState {
  * operator reaches on purpose, never controls dumped onto the live
  * workspace.
  */
-type AppSection = "live" | "bible" | "music" | "history";
+type AppSection = "live" | "bible" | "music" | "history" | "test-center";
 
 const SECTIONS: Array<{ id: AppSection; label: string }> = [
   { id: "live", label: "Live Service" },
   { id: "bible", label: "Bible" },
   { id: "music", label: "Music" },
   { id: "history", label: "History" },
+  { id: "test-center", label: "Offline Test Center" },
 ];
 
 function App() {
@@ -78,6 +80,7 @@ function App() {
       {section === "bible" && <BibleLibrary />}
       {section === "music" && <MusicLibrary />}
       {section === "history" && <HistoryView />}
+      {section === "test-center" && <TestCenter />}
 
       <details className="foundation-details">
         <summary>Foundation status (Phase 1.0 diagnostics)</summary>

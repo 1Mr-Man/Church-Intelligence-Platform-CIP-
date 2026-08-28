@@ -1,0 +1,67 @@
+{
+  "phase": "3.7",
+  "environment": "Environment A (automated) + Environment B (Xvfb)",
+  "timestampUtc": "2026-08-28T07:00:00Z",
+  "note": "Column definitions match pilot-evidence/3.6/validation-matrix.json's convention: 'code'/'automated'/'realData'/'persistent' are Environment A claims; 'offlineVerified' is Environment B (Xvfb, no network); 'operatorUsable' is Environment A/B (code path + build + Xvfb, never a substitute for real Windows human-operator evidence, which remains NOT PERFORMED for every row - see pilot-evidence/3.7/windows/).",
+  "rows": [
+    {
+      "capability": "Bible Library (browse/search/save/reuse)",
+      "code": true, "automated": true, "realData": true, "persistent": true,
+      "offlineTestableClassification": "FULLY TESTABLE OFFLINE",
+      "evidence": "pipeline::tests::phase_3_7_full_offline_operator_chain_acceptance; content::tests::phase_3_6_bible_library_acceptance_against_the_real_bsb_dataset (pre-existing, re-verified)"
+    },
+    {
+      "capability": "Manual Transcript -> Bible Intelligence",
+      "code": true, "automated": true, "realData": true, "persistent": true,
+      "offlineTestableClassification": "FULLY TESTABLE OFFLINE",
+      "evidence": "pipeline::tests::phase_3_7_full_offline_operator_chain_acceptance - same handle_final_transcript path as live speech"
+    },
+    {
+      "capability": "Sermon Intelligence (manual/test transcript)",
+      "code": true, "automated": true, "realData": "n/a (no dataset dependency)", "persistent": true,
+      "offlineTestableClassification": "FULLY TESTABLE OFFLINE",
+      "evidence": "pre-existing sermon::tests suite (unmodified, still passing); Offline Test Center Sermon scenario calls analyzeSermonTranscript directly"
+    },
+    {
+      "capability": "Service Intelligence (lifecycle + phase/anomaly)",
+      "code": true, "automated": true, "realData": "n/a (no dataset dependency)", "persistent": true,
+      "offlineTestableClassification": "FULLY TESTABLE OFFLINE",
+      "evidence": "pre-existing service::tests suite (unmodified, still passing); pipeline::tests::phase_3_7_full_offline_operator_chain_acceptance exercises start/stop"
+    },
+    {
+      "capability": "Presentation (prepare/activate/stop, laptop screen)",
+      "code": true, "automated": true, "realData": true, "persistent": true,
+      "offlineTestableClassification": "FULLY TESTABLE OFFLINE",
+      "evidence": "pipeline::tests::phase_3_7_full_offline_operator_chain_acceptance"
+    },
+    {
+      "capability": "Service/Presentation History + restart recovery",
+      "code": true, "automated": true, "realData": "n/a", "persistent": true,
+      "offlineTestableClassification": "FULLY TESTABLE OFFLINE",
+      "evidence": "pipeline::tests::phase_3_7_full_offline_operator_chain_acceptance (real file-backed restart)"
+    },
+    {
+      "capability": "Music Library / Music Intelligence (production build)",
+      "code": true, "automated": true, "realData": false, "persistent": "n/a",
+      "offlineTestableClassification": "PARTIALLY TESTABLE OFFLINE",
+      "evidence": "no licensed production dataset exists; dev-fixture-only detection testable in dev/test environment, honestly not in production - see docs/phase-3-7-offline-operator-test.md section 6"
+    },
+    {
+      "capability": "Content Intelligence (ContentCandidate creation)",
+      "code": true, "automated": true, "realData": "n/a", "persistent": false,
+      "offlineTestableClassification": "PARTIALLY TESTABLE OFFLINE",
+      "evidence": "Bible/Sermon-sourced candidates fully offline testable; Music-sourced candidates bounded by Music's own data limitation - see docs/phase-3-7-offline-operator-test.md section 9"
+    },
+    {
+      "capability": "Cross-Domain correlation",
+      "code": true, "automated": true, "realData": "n/a (deterministic rule engine)", "persistent": false,
+      "offlineTestableClassification": "PARTIALLY TESTABLE OFFLINE",
+      "evidence": "Bible/Sermon-anchored correlations fully offline testable; Music-anchored correlations bounded by Music's own data limitation - see docs/phase-3-7-offline-operator-test.md section 10"
+    }
+  ],
+  "offlineDependencyCheck": {
+    "command": "cargo tree --workspace --all-features",
+    "result": "no HTTP client crate in the dependency graph"
+  },
+  "xvfbSmokeTest": "PASS - fresh + idempotent relaunch, environment=Production, no network activity, see pilot-evidence/3.7/software/cip-xvfb-3-7-run1-fresh.log and run2-idempotent.log"
+}
