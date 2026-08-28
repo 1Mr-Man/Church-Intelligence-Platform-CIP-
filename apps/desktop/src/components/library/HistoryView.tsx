@@ -15,7 +15,7 @@
  * live - the historical item this button reads from is never touched.
  */
 import { useEffect, useState } from "react";
-import type { PresentationItem, ServiceSession, Suggestion, TimelineEntry, TranscriptSegment } from "../../domain";
+import type { ContentCandidate, PresentationItem, ServiceSession, Suggestion, TimelineEntry, TranscriptSegment } from "../../domain";
 import * as commands from "../../lib/commands";
 import { formatClockTime } from "../../lib/format";
 import { presentationHeading } from "../../lib/libraryHelpers";
@@ -28,6 +28,7 @@ export function HistoryView() {
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [presentations, setPresentations] = useState<PresentationItem[]>([]);
+  const [savedContent, setSavedContent] = useState<ContentCandidate[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -48,12 +49,14 @@ export function HistoryView() {
       commands.listTranscript(200, service.id),
       commands.listSuggestions(undefined, service.id),
       commands.listPresentationHistory(service.id),
+      commands.listSavedContent(service.id),
     ])
-      .then(([t, tr, s, p]) => {
+      .then(([t, tr, s, p, c]) => {
         setTimeline(t);
         setTranscript(tr);
         setSuggestions(s);
         setPresentations(p);
+        setSavedContent(c);
       })
       .catch((e) => setError(String(e)));
   };
@@ -139,6 +142,25 @@ export function HistoryView() {
                         </button>
                       </div>
                     )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="library-panel">
+            <h2>Saved Content ({savedContent.length})</h2>
+            {savedContent.length === 0 ? (
+              <p className="live-brain__hint">Nothing was accepted as content from this service.</p>
+            ) : (
+              <ul className="library-card-list">
+                {savedContent.map((c) => (
+                  <li key={c.id} className="library-card library-card--bible">
+                    <div className="library-card__header">
+                      <strong>{c.titleOrLabel}</strong>
+                      <span className="library-card__meta">{c.candidateType.replace(/_/g, " ")}</span>
+                    </div>
+                    <p className="library-card__text">{c.workingConcept}</p>
                   </li>
                 ))}
               </ul>

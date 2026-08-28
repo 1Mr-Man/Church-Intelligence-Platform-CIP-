@@ -1,0 +1,20 @@
+{
+  "phase": "2.7.1",
+  "note": "No physical Windows machine was available in this container for Phase 2.7.1, the identical constraint recorded in every prior phase's windows-ux/windows evidence directory. This is not a regression.",
+  "installer": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "7d2834d387a16a7f03347b8b49c27b3e850903aa4720ec21b8db8dff69f0f6b5",
+    "fileSizeBytes": 7124580,
+    "status": "NOT VERIFIED on real Windows hardware - cross-compiled and file(1)-inspected only (Environment A/B)"
+  },
+  "newScreensRequiringRealHardwareValidationWhenAvailable": [
+    "History view's new Saved Content section",
+    "Bible Library's new cross-reference disclaimer line (cosmetic, low risk)"
+  ],
+  "requiredForOfflineOperatorGateToBecomePASS": [
+    "a real Windows 10/11 x64 laptop",
+    "Internet disconnected for the duration of the checklist",
+    "a human operator exercising: accept a Content Candidate from a manual/test transcript, close and reopen CIP, open History, confirm the accepted candidate still appears under Saved Content"
+  ],
+  "conclusion": "All physical-hardware/human-operator validation for Phase 2.7.1 remains NOT PERFORMED - not estimated, not simulated, not inferred from code review."
+}

@@ -684,6 +684,15 @@ export function rejectContentCandidate(candidateId: string): Promise<ContentCand
   return invokeCommand("reject_content_candidate", { candidateId });
 }
 
+/** Phase 2.7.1: every content candidate saved (accepted) for one service,
+ * most recently saved first - durable across a service ending and an
+ * application restart, unlike `listAcceptedContentCandidates` (which only
+ * ever reads the in-memory, currently-active-service queue). The
+ * History view's "Saved Content" section's data source. */
+export function listSavedContent(serviceId: string): Promise<ContentCandidate[]> {
+  return invokeCommand("list_saved_content", { serviceId });
+}
+
 // --- service intelligence (Phase 2.4, per the authoritative Phase 2 roadmap) --
 //
 // Distinct from the cross-domain correlation commands above - see

@@ -46,7 +46,7 @@ use uuid::Uuid;
 pub enum PersistError {
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
-    #[error("failed to encode suggestion payload: {0}")]
+    #[error("failed to encode payload: {0}")]
     Encoding(#[from] serde_json::Error),
     #[error("row {0} not found")]
     NotFound(String),
@@ -1311,6 +1311,54 @@ pub fn delete_saved_scripture(conn: &Connection, id: Uuid) -> Result<bool, Persi
     Ok(affected > 0)
 }
 
+// --- saved content candidates (Phase 2.7.1) --------------------------------
+
+/// Persists a durable copy of an already-accepted `ContentCandidate` -
+/// see `database/migrations/0011_saved_content_candidates.sql` for why
+/// this table exists (the in-memory `ContentCandidateQueue` alone does not
+/// survive a service ending or an application restart). Called exactly
+/// once, at the moment an operator accepts a candidate - never on mere
+/// detection or review.
+pub fn persist_saved_content_candidate(
+    conn: &Connection,
+    candidate: &cip_core_intelligence::ContentCandidate,
+) -> Result<(), PersistError> {
+    let payload = serde_json::to_string(candidate)?;
+    conn.execute(
+        "INSERT INTO saved_content_candidates (id, service_id, candidate_type, payload, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            candidate.id.to_string(),
+            candidate.service_id.to_string(),
+            candidate.candidate_type.label(),
+            payload,
+            candidate.created_at.to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
+/// Every saved content candidate for one service, most recently saved
+/// first - mirrors `list_presentation_items`'s existing
+/// service-scoped-but-never-tied-to-the-live-session shape, so it works
+/// identically whether that service is still active or long since ended.
+pub fn list_saved_content_candidates_for_service(
+    conn: &Connection,
+    service_id: Uuid,
+) -> Result<Vec<cip_core_intelligence::ContentCandidate>, PersistError> {
+    let mut stmt = conn.prepare(
+        "SELECT payload FROM saved_content_candidates WHERE service_id = ?1 ORDER BY created_at DESC",
+    )?;
+    let rows = stmt
+        .query_map(params![service_id.to_string()], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.into_iter()
+        .map(|payload| serde_json::from_str(&payload).map_err(PersistError::from))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2177,5 +2225,81 @@ mod tests {
         // Idempotent: deleting an already-deleted (or never-existed) row
         // reports "nothing was there", never an error.
         assert!(!delete_saved_scripture(&conn, saved.id).unwrap());
+    }
+
+    fn sample_content_candidate(service_id: Uuid) -> cip_core_intelligence::ContentCandidate {
+        use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
+        use cip_core_intelligence::{AssertionLevel, ContentCandidate, ContentCandidateType};
+
+        ContentCandidate::new(
+            service_id,
+            None,
+            vec![Uuid::new_v4()],
+            ContentCandidateType::Theme,
+            "Theme: faithfulness",
+            "Faithfulness in small things",
+            AssertionLevel::Suggested,
+            ConfidenceResult::new(0.8, ConfidenceSource::Model, None),
+            0.6,
+            "sermon-content-v1",
+            "1.0",
+        )
+    }
+
+    #[test]
+    fn saved_content_candidate_create_retrieve_matches_the_committed_row() {
+        let conn = migrated_conn();
+        let session = ServiceSession::start("Content Test");
+        persist_service(&conn, &session).unwrap();
+
+        let candidate = sample_content_candidate(session.id);
+        persist_saved_content_candidate(&conn, &candidate).unwrap();
+
+        let all = list_saved_content_candidates_for_service(&conn, session.id).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0], candidate, "the round-tripped candidate must match the original exactly - provenance/evidence/confidence preserved verbatim");
+    }
+
+    #[test]
+    fn saved_content_candidates_are_scoped_to_their_own_service() {
+        let conn = migrated_conn();
+        let session_a = ServiceSession::start("Service A");
+        persist_service(&conn, &session_a).unwrap();
+        let session_b = ServiceSession::start("Service B");
+        persist_service(&conn, &session_b).unwrap();
+
+        persist_saved_content_candidate(&conn, &sample_content_candidate(session_a.id)).unwrap();
+        persist_saved_content_candidate(&conn, &sample_content_candidate(session_b.id)).unwrap();
+
+        assert_eq!(
+            list_saved_content_candidates_for_service(&conn, session_a.id)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            list_saved_content_candidates_for_service(&conn, session_b.id)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn list_saved_content_candidates_orders_most_recently_saved_first() {
+        let conn = migrated_conn();
+        let session = ServiceSession::start("Content Order Test");
+        persist_service(&conn, &session).unwrap();
+
+        let first = sample_content_candidate(session.id);
+        persist_saved_content_candidate(&conn, &first).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let second = sample_content_candidate(session.id);
+        persist_saved_content_candidate(&conn, &second).unwrap();
+
+        let all = list_saved_content_candidates_for_service(&conn, session.id).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].id, second.id, "most recently saved first");
+        assert_eq!(all[1].id, first.id);
     }
 }

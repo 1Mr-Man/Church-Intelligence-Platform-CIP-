@@ -1,0 +1,15 @@
+{
+  "phase": "2.7.1",
+  "environment": "automated (Environment A, real file-backed SQLite)",
+  "timestampUtc": "2026-08-28T07:45:00Z",
+  "test": "Saved Content persistence + restart recovery (docs/phase-2-7-1-audit.md section E/O)",
+  "method": "A real on-disk SQLite file is used (tempfile::tempdir), not an in-memory connection kept open. The connection is dropped and reopened mid-test, exactly as a real application close/relaunch would.",
+  "verified": [
+    "a ContentCandidate constructed and accepted exactly as commands::accept_content_candidate would produce it is persisted via persist_saved_content_candidate",
+    "after closing and reopening the same on-disk database file, the candidate is still present via list_saved_content_candidates_for_service",
+    "id, status (Accepted), titleOrLabel, confidence.score, and assertionLevel all survive restart unchanged - provenance is never re-derived, only re-read from the persisted JSON payload"
+  ],
+  "result": "PASS",
+  "evidenceSource": "cargo test -p cip-desktop pipeline::tests::phase_2_7_1_saved_content_candidate_survives_a_real_restart",
+  "limitations": "Environment A only - real Windows filesystem/database-path close-reopen behavior (Environment C) not performed this phase. The in-memory content_candidate_queue view (list_accepted_content_candidates, still scoped to the active service) is unchanged and not itself durable - only the new saved_content_candidates table is."
+}

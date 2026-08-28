@@ -4062,6 +4062,15 @@ pub fn list_accepted_content_candidates(
 /// 11/35) - changes only the candidate's own status; has no code path into
 /// `presentation::persist_prepared_item` or anything else that could
 /// publish/schedule/project it.
+///
+/// Phase 2.7.1: also persists a durable copy to `saved_content_candidates`
+/// (see `database/migrations/0011_saved_content_candidates.sql`) - the
+/// audit (`docs/phase-2-7-1-audit.md` section E) found that acceptance
+/// previously only flipped the in-memory `ContentCandidateQueue` entry's
+/// status, so an accepted candidate did not survive the service ending or
+/// an application restart. The in-memory queue itself is untouched by
+/// this addition; `list_accepted_content_candidates` still reads from it
+/// exactly as before for the live-session view.
 #[tauri::command]
 pub fn accept_content_candidate(
     candidate_id: String,
@@ -4084,6 +4093,9 @@ pub fn accept_content_candidate(
             .expect("just-accepted candidate is still present")
     };
     let db = state.db.lock().expect("db connection poisoned");
+    persistence::persist_saved_content_candidate(&db, &updated)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
     record_timeline(
         &db,
         Some(updated.service_id),
@@ -4094,6 +4106,24 @@ pub fn accept_content_candidate(
     drop(db);
     let _ = emit(&app, AppEvent::ContentCandidateAccepted, updated.clone());
     Ok(updated)
+}
+
+/// Every content candidate saved (accepted) for one service, most
+/// recently saved first - reopens what `accept_content_candidate`
+/// persisted, regardless of whether that service is still active or the
+/// application has since restarted. Mirrors `list_presentation_history`'s
+/// exact existing shape/signature (spec section 20: reuse the established
+/// pattern rather than inventing a new one).
+#[tauri::command]
+pub fn list_saved_content(
+    service_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<ContentCandidate>, AppError> {
+    let id = parse_uuid(&service_id).map_err(log_and_return)?;
+    let db = state.db.lock().expect("db connection poisoned");
+    persistence::list_saved_content_candidates_for_service(&db, id)
+        .map_err(AppError::from)
+        .map_err(log_and_return)
 }
 
 /// Explicit operator rejection of a content candidate - never automatic,

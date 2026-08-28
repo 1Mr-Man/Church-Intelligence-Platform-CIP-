@@ -1,0 +1,14 @@
+{
+  "phase": "2.7.1",
+  "environment": "automated (Environment A) + Xvfb (Environment B)",
+  "timestampUtc": "2026-08-28T07:45:00Z",
+  "change": "HistoryView.tsx gained a new 'Saved Content' section per opened service, reading from the new listSavedContent(serviceId) command - reuses the exact same list-card pattern already used for Presentation History, no new UI architecture.",
+  "dataSource": "commands.listSavedContent(service.id), called alongside listTimeline/listTranscript/listSuggestions/listPresentationHistory when a service is opened",
+  "verifiedBy": [
+    "npm run typecheck (tsc -b) - pass",
+    "npm run build (vite build) - pass",
+    "pipeline::tests::phase_2_7_1_saved_content_candidate_survives_a_real_restart - proves the backend data this section reads is durable across restart"
+  ],
+  "result": "PASS",
+  "limitations": "No DOM-level render test exists (this project has no @testing-library/react dependency, per its established testing convention) - verified by typecheck/build correctness and the backend persistence proof, not a rendered-DOM assertion. Real Windows human-operator History usage (Environment C) not performed this phase."
+}

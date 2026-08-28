@@ -397,6 +397,7 @@ pub fn run() {
             commands::list_accepted_content_candidates,
             commands::accept_content_candidate,
             commands::reject_content_candidate,
+            commands::list_saved_content,
             commands::analyze_service_transcript,
             commands::get_service_intelligence_state,
             commands::list_service_transitions,

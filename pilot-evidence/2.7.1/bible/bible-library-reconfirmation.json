@@ -1,0 +1,27 @@
+{
+  "phase": "2.7.1",
+  "environment": "automated (Environment A) + direct dataset inspection",
+  "timestampUtc": "2026-08-28T07:45:00Z",
+  "test": "Bible Library audit re-confirmation (docs/phase-2-7-1-audit.md section C)",
+  "datasetVerifiedDirectly": {
+    "method": "python3 json.load against database/datasets/bsb/bsb.json directly, not merely citing a prior report",
+    "books": 66,
+    "chapters": 1189,
+    "verses": 31086,
+    "licensingStatus": "verified_public_domain"
+  },
+  "crossReferenceCheck": {
+    "command": "grep -rniE \"cross.?reference|related.?verse|xref\" core/bible/ database/ integrations/bible/",
+    "result": "zero matches - no cross-reference data structure exists anywhere in this codebase, confirmed rather than assumed"
+  },
+  "uiChange": "BibleLibrary.tsx now shows an honest one-line disclaimer under every verse's text: 'Cross-references are not available in this installed Bible dataset.' - no fabricated cross-reference data was added anywhere.",
+  "capabilitiesReconfirmedUnchangedAndWorking": [
+    "Browse (Old/New Testament -> book -> chapter -> verses)",
+    "Search (reference or text)",
+    "Saved (list/prepare/remove, verse-range save/prepare)",
+    "Preview (previewScripture)",
+    "Prepare -> Live Service display (createManualPresentation)"
+  ],
+  "result": "PASS",
+  "limitations": "Environment A/direct-inspection only - real Windows human-operator Bible Library usage (Environment C) not performed this phase."
+}

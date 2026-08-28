@@ -169,6 +169,7 @@ export function BibleLibrary() {
           <span className="library-card__meta">{result.translationId}</span>
         </div>
         <p className="library-card__text">{result.text}</p>
+        <p className="live-brain__hint">Cross-references are not available in this installed Bible dataset.</p>
         <div className="library-card__actions">
           <button type="button" disabled={isBusy(`preview-${result.reference}`)} onClick={() => preview(result.reference)}>
             Preview
