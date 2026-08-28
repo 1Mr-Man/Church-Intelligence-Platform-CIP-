@@ -11,6 +11,24 @@
   --shadow:
     rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
 
+  /* Phase 3.5: semantic operator-status colors, shared by every workspace
+     component - deliberately separate from --accent (brand/interactive
+     purple) so "this needs your attention" never competes visually with
+     "click this button". Text/icon labels always accompany color (spec
+     rule: color is reinforcement, never the only signal). */
+  --status-good: #1b5e20;
+  --status-good-bg: #e8f5e9;
+  --status-good-border: #2e7d32;
+  --status-warn: #8a5200;
+  --status-warn-bg: #fff8e1;
+  --status-warn-border: #d9972a;
+  --status-bad: #b00020;
+  --status-bad-bg: #fdecea;
+  --status-bad-border: #c62828;
+  --status-neutral: #5f5f68;
+  --status-neutral-bg: #f1f0f4;
+  --status-neutral-border: #cac9d1;
+
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
@@ -43,6 +61,19 @@
     --social-bg: rgba(47, 48, 58, 0.5);
     --shadow:
       rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
+
+    --status-good: #81c995;
+    --status-good-bg: rgba(46, 125, 50, 0.18);
+    --status-good-border: #4caf6f;
+    --status-warn: #f2c063;
+    --status-warn-bg: rgba(217, 151, 42, 0.16);
+    --status-warn-border: #d9972a;
+    --status-bad: #f28b82;
+    --status-bad-bg: rgba(198, 40, 40, 0.18);
+    --status-bad-border: #e05a5a;
+    --status-neutral: #9ca3af;
+    --status-neutral-bg: rgba(156, 163, 175, 0.12);
+    --status-neutral-border: #4b4d59;
   }
 
   #social .button-icon {

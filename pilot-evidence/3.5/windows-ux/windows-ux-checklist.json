@@ -1,0 +1,26 @@
+{
+  "_schema": "testId, environment, procedure, expectedResult, observedResult, status, evidenceRef, operatorNotes",
+  "note": "Every row requires the actual HP EliteBook 830 G6 (or equivalent Windows 11 machine). No such machine is available in this container - every row is BLOCKED/HOLD, not estimated. Task numbering matches spec section 31/32.",
+  "timingTasks": [
+    { "taskId": "T1", "task": "First launch time (install to usable window)", "environment": "real_hardware", "status": "HOLD", "expectedTime": null, "actualTime": null, "confusion": null, "clicks": null, "result": null },
+    { "taskId": "T2", "task": "Time to understand what to do first", "environment": "real_hardware", "status": "HOLD", "expectedTime": null, "actualTime": null, "confusion": null, "clicks": null, "result": null },
+    { "taskId": "T3", "task": "Time to start a service", "environment": "real_hardware", "status": "HOLD", "expectedTime": null, "actualTime": null, "confusion": null, "clicks": null, "result": null },
+    { "taskId": "T4", "task": "Time to configure microphone", "environment": "real_hardware", "status": "HOLD", "expectedTime": null, "actualTime": null, "confusion": null, "clicks": null, "result": null },
+    { "taskId": "T5", "task": "Time to inspect a detection", "environment": "real_hardware", "status": "HOLD", "expectedTime": null, "actualTime": null, "confusion": null, "clicks": null, "result": null },
+    { "taskId": "T6", "task": "Time to prepare Scripture", "environment": "real_hardware", "status": "HOLD", "expectedTime": null, "actualTime": null, "confusion": null, "clicks": null, "result": null },
+    { "taskId": "T7", "task": "Time to display Scripture", "environment": "real_hardware", "status": "HOLD", "expectedTime": null, "actualTime": null, "confusion": null, "clicks": null, "result": null },
+    { "taskId": "T8", "task": "Time to stop display", "environment": "real_hardware", "status": "HOLD", "expectedTime": null, "actualTime": null, "confusion": null, "clicks": null, "result": null },
+    { "taskId": "T9", "task": "Time to recover from microphone disconnect", "environment": "real_hardware", "status": "HOLD", "expectedTime": null, "actualTime": null, "confusion": null, "clicks": null, "result": null },
+    { "taskId": "T10", "task": "Time to locate Diagnostics", "environment": "real_hardware", "status": "HOLD", "expectedTime": null, "actualTime": null, "confusion": null, "clicks": null, "result": null },
+    { "taskId": "T11", "task": "Time to end service", "environment": "real_hardware", "status": "HOLD", "expectedTime": null, "actualTime": null, "confusion": null, "clicks": null, "result": null }
+  ],
+  "humanUsabilityTasks": [
+    { "taskId": "H1", "prompt": "You are about to start a church service. Show me what you would do.", "environment": "real_hardware", "status": "HOLD", "observed": null },
+    { "taskId": "H2", "prompt": "Scripture has just been detected. Show me what you would do.", "environment": "real_hardware", "status": "HOLD", "observed": null },
+    { "taskId": "H3", "prompt": "You want to put the Scripture on the projector. Show me what you would do.", "environment": "real_hardware", "status": "HOLD", "observed": null },
+    { "taskId": "H4", "prompt": "The microphone disconnects. Show me what you would do.", "environment": "real_hardware", "status": "HOLD", "observed": null },
+    { "taskId": "H5", "prompt": "You want to see technical system information. Show me where you would go.", "environment": "real_hardware", "status": "HOLD", "observed": null },
+    { "taskId": "H6", "prompt": "End the service.", "environment": "real_hardware", "status": "HOLD", "observed": null }
+  ],
+  "conclusion": "No real Windows machine or human operator was available in this container. All timing and usability tasks remain HOLD - not estimated, not simulated, not inferred from code review."
+}

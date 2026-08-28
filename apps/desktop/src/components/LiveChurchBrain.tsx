@@ -39,6 +39,9 @@ import { WorkspaceHeader } from "./workspace/WorkspaceHeader";
 import { PilotDiagnosticsPanel } from "./workspace/PilotDiagnosticsPanel";
 import { AttentionQueue } from "./workspace/AttentionQueue";
 import { IntelligenceFeed } from "./workspace/IntelligenceFeed";
+import { ServiceControlBar } from "./workspace/ServiceControlBar";
+import { SystemStatusStrip } from "./workspace/SystemStatusStrip";
+import { PresentationCard } from "./workspace/PresentationCard";
 import type { UnifiedItemAction } from "./workspace/actions";
 import "./LiveChurchBrain.css";
 import "./workspace/workspace.css";
@@ -97,6 +100,13 @@ function sermonFindingCategory(summary: string): string {
  * presentation item is as far as this phase goes.
  */
 export function LiveChurchBrain() {
+  // Phase 3.5: Operator Mode (default) vs. Diagnostics Mode (spec section
+  // 8). A pure view toggle over data this component already fetches -
+  // nothing here changes what is fetched, only what is rendered. Always
+  // starts in Operator Mode on every launch: a technician who opened
+  // Diagnostics for setup should never accidentally leave a live-service
+  // operator staring at the engineering view after a restart.
+  const [mode, setMode] = useState<"operator" | "diagnostics">("operator");
   const [status, setStatus] = useState<LiveStatus | null>(null);
   const [activeContext, setActiveContext] = useState<ScriptureContext | null>(null);
   const [lastReference, setLastReference] = useState<ScriptureReference | null>(null);
@@ -599,15 +609,58 @@ export function LiveChurchBrain() {
   return (
     <div className="live-brain">
       <header className="live-brain__header">
-        <h1>CIP &mdash; Live Service</h1>
-        {error && (
-          <p className="live-brain__error" role="alert">
-            {error}
-          </p>
-        )}
+        <h1>CIP</h1>
+        <div className="op-mode-toggle" role="group" aria-label="View mode">
+          <button type="button" aria-pressed={mode === "operator"} onClick={() => setMode("operator")}>
+            Operator
+          </button>
+          <button type="button" aria-pressed={mode === "diagnostics"} onClick={() => setMode("diagnostics")}>
+            Diagnostics
+          </button>
+        </div>
       </header>
+      {error && (
+        <p className="live-brain__error" role="alert">
+          {error}
+        </p>
+      )}
 
-      <StatusBar status={status} />
+      <ServiceControlBar
+        isActive={!!status?.service && status.serviceStatus !== "completed"}
+        serviceTitle={serviceTitle}
+        activeTitle={status?.service?.title ?? null}
+        serviceStatus={status?.serviceStatus ?? null}
+        bible={status?.bible ?? null}
+        devices={devices}
+        speechReady={status?.speechStatus === "ready"}
+        appConfig={appConfig}
+        busy={busy}
+        onTitleChange={setServiceTitle}
+        onStart={() =>
+          withBusy("start-service", async () => {
+            await commands.startService(serviceTitle);
+            refreshStatus();
+          })
+        }
+        onPause={() =>
+          withBusy("pause-service", async () => {
+            await commands.pauseService();
+            refreshStatus();
+          })
+        }
+        onResume={() =>
+          withBusy("resume-service", async () => {
+            await commands.resumeService();
+            refreshStatus();
+          })
+        }
+        onEnd={() =>
+          withBusy("end-service", async () => {
+            await commands.endService();
+            refreshStatus();
+          })
+        }
+      />
 
       <WorkspaceHeader
         status={status}
@@ -618,82 +671,52 @@ export function LiveChurchBrain() {
         activeDisplayItem={activeDisplayItem}
         displayWindowOpen={displayWindowOpen}
       />
-      <PilotDiagnosticsPanel />
+      <SystemStatusStrip status={status} deviceCount={devices.length} displayWindowOpen={displayWindowOpen} />
+
       <AttentionQueue items={attentionQueue} busy={busy} onAction={handleUnifiedAction} />
       <IntelligenceFeed items={unifiedFeed} />
 
-      <section className="live-brain__panel">
-        <h2>Service</h2>
-        {!status?.service || status.serviceStatus === "completed" ? (
-          <div className="live-brain__row">
-            <input
-              value={serviceTitle}
-              onChange={(e) => setServiceTitle(e.target.value)}
-              placeholder="Service title"
-              aria-label="Service title"
-            />
-            <button
-              type="button"
-              disabled={isBusy("start-service")}
-              onClick={() =>
-                withBusy("start-service", async () => {
-                  await commands.startService(serviceTitle);
-                  refreshStatus();
-                })
-              }
-            >
-              Start Service
-            </button>
-          </div>
-        ) : (
-          <div className="live-brain__row">
-            <span>
-              {status.service.title} &mdash; <strong>{status.serviceStatus.toUpperCase()}</strong>
-            </span>
-            {status.serviceStatus === "live" && (
-              <button
-                type="button"
-                disabled={isBusy("pause-service")}
-                onClick={() =>
-                  withBusy("pause-service", async () => {
-                    await commands.pauseService();
-                    refreshStatus();
-                  })
-                }
-              >
-                Pause
-              </button>
-            )}
-            {status.serviceStatus === "paused" && (
-              <button
-                type="button"
-                disabled={isBusy("resume-service")}
-                onClick={() =>
-                  withBusy("resume-service", async () => {
-                    await commands.resumeService();
-                    refreshStatus();
-                  })
-                }
-              >
-                Resume
-              </button>
-            )}
-            <button
-              type="button"
-              disabled={isBusy("end-service")}
-              onClick={() =>
-                withBusy("end-service", async () => {
-                  await commands.endService();
-                  refreshStatus();
-                })
-              }
-            >
-              End Service
-            </button>
-          </div>
-        )}
-      </section>
+      <PresentationCard
+        approvedSuggestions={approvedSuggestions}
+        previews={previews}
+        preparedItems={preparedItems}
+        activeDisplayItem={activeDisplayItem}
+        displayWindowOpen={displayWindowOpen}
+        busy={busy}
+        onPreviewApproved={(id) =>
+          withBusy(`preview-${id}`, async () => {
+            const preview = await commands.previewPresentation(id);
+            setPreviews((prev) => ({ ...prev, [id]: preview }));
+          })
+        }
+        onPrepare={(id) =>
+          withBusy(`prepare-${id}`, async () => {
+            await commands.preparePresentation(id);
+          })
+        }
+        onOpenDisplay={() =>
+          withBusy("open-display", async () => {
+            await commands.openPresentationDisplay();
+            setDisplayWindowOpen(true);
+          })
+        }
+        onCloseDisplay={() =>
+          withBusy("close-display", async () => {
+            await commands.closePresentationDisplay();
+            setDisplayWindowOpen(false);
+            setActiveDisplayItem(null);
+          })
+        }
+        onDisplay={(id) => withBusy(`display-${id}`, async () => { await commands.displayPresentation(id); })}
+        onCancel={(id) => withBusy(`cancel-${id}`, async () => { await commands.cancelPresentation(id); })}
+        onStopDisplay={() => withBusy("stop-display", async () => { await commands.clearPresentationDisplay(); })}
+      />
 
+      {mode === "diagnostics" && <PilotDiagnosticsPanel />}
+      {mode === "diagnostics" && <StatusBar status={status} />}
+
+      {mode === "operator" && (
+      <>
       <section className="live-brain__panel">
         <h2>Audio &amp; Speech</h2>
         {status?.speechStatus === "unavailable" && (
@@ -899,7 +922,11 @@ export function LiveChurchBrain() {
           </ul>
         )}
       </section>
+      </>
+      )}
 
+      {mode === "diagnostics" && (
+      <>
       <section className="live-brain__panel">
         <h2>
           Pending Suggestions <span className="live-brain__hint">(A/R/E/P act on the first one)</span>
@@ -945,35 +972,9 @@ export function LiveChurchBrain() {
         )}
       </section>
 
-      {approvedSuggestions.length > 0 && (
-        <section className="live-brain__panel">
-          <h2>Approved &mdash; Ready to Prepare</h2>
-          <p className="live-brain__hint">
-            Approved suggestions never auto-prepare - preview, then explicitly prepare each one.
-          </p>
-          <ul className="live-brain__suggestions">
-            {approvedSuggestions.map((s) => (
-              <ApprovedSuggestionCard
-                key={s.id}
-                suggestion={s}
-                busy={busy}
-                preview={previews[s.id]}
-                onPreview={() =>
-                  withBusy(`preview-${s.id}`, async () => {
-                    const preview = await commands.previewPresentation(s.id);
-                    setPreviews((prev) => ({ ...prev, [s.id]: preview }));
-                  })
-                }
-                onPrepare={() =>
-                  withBusy(`prepare-${s.id}`, async () => {
-                    await commands.preparePresentation(s.id);
-                  })
-                }
-              />
-            ))}
-          </ul>
-        </section>
-      )}
+      {/* "Approved - Ready to Prepare" (pre-3.5) is now the Presentation
+          card, unconditionally visible in Operator Mode above - not
+          duplicated here. */}
 
       <section className="live-brain__panel">
         <h2>Service Timeline</h2>
@@ -1069,118 +1070,9 @@ export function LiveChurchBrain() {
         )}
       </section>
 
-      <section className="live-brain__panel live-brain__panel--current-output">
-        <h2>
-          Current Output{" "}
-          <span className="live-brain__status-dot">
-            &#9679; DISPLAY {displayWindowOpen ? "OPEN" : "CLOSED"}
-          </span>
-        </h2>
-        <p className="live-brain__hint">
-          A local presentation window under direct operator control - never opened or projected automatically. See{" "}
-          <em>docs/presentation.md</em>.
-        </p>
-        <div className="live-brain__row">
-          <button
-            type="button"
-            disabled={isBusy("open-display")}
-            onClick={() =>
-              withBusy("open-display", async () => {
-                await commands.openPresentationDisplay();
-                setDisplayWindowOpen(true);
-              })
-            }
-          >
-            Open Display
-          </button>
-          <button
-            type="button"
-            disabled={!displayWindowOpen || isBusy("close-display")}
-            onClick={() =>
-              withBusy("close-display", async () => {
-                await commands.closePresentationDisplay();
-                setDisplayWindowOpen(false);
-                setActiveDisplayItem(null);
-              })
-            }
-          >
-            Close Display
-          </button>
-        </div>
-
-        {activeDisplayItem && (
-          <div className="live-brain__suggestion-card live-brain__suggestion-card--active">
-            <div className="live-brain__suggestion-header">
-              <strong>
-                {activeDisplayItem.content.type === "scripture"
-                  ? activeDisplayItem.content.reference
-                  : activeDisplayItem.content.title}
-              </strong>
-              <span className="live-brain__status-dot">&#9679; ACTIVE &mdash; ON SCREEN</span>
-            </div>
-            <div className="live-brain__row">
-              <button
-                type="button"
-                disabled={isBusy("stop-display")}
-                onClick={() =>
-                  withBusy("stop-display", async () => {
-                    await commands.clearPresentationDisplay();
-                  })
-                }
-              >
-                Stop
-              </button>
-            </div>
-          </div>
-        )}
-
-        {preparedItems.length === 0 ? (
-          <p className="live-brain__hint">NOTHING PREPARED &mdash; CIP never prepares or projects content automatically.</p>
-        ) : (
-          <ul className="live-brain__prepared-items">
-            {preparedItems.map((item) => (
-              <li key={item.id}>
-                <div className="live-brain__suggestion-header">
-                  <strong>{item.content.type === "scripture" ? item.content.reference : item.content.title}</strong>
-                  <span className="live-brain__status-dot">
-                    &#9679; PREPARED{item.sourceSuggestionId ? " (automatic)" : " (manual)"}
-                  </span>
-                </div>
-                {item.content.type === "scripture" && (
-                  <p className="live-brain__preview-heading">
-                    {item.content.text} <span className="live-brain__confidence">({item.content.translationId})</span>
-                  </p>
-                )}
-                <div className="live-brain__row">
-                  <button
-                    type="button"
-                    disabled={!!activeDisplayItem || isBusy(`display-${item.id}`)}
-                    title={activeDisplayItem ? "Stop the currently active item before displaying another" : undefined}
-                    onClick={() =>
-                      withBusy(`display-${item.id}`, async () => {
-                        await commands.displayPresentation(item.id);
-                      })
-                    }
-                  >
-                    Display
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isBusy(`cancel-${item.id}`)}
-                    onClick={() =>
-                      withBusy(`cancel-${item.id}`, async () => {
-                        await commands.cancelPresentation(item.id);
-                      })
-                    }
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      {/* "Current Output" (pre-3.5) is now also folded into the
+          Presentation card, unconditionally visible in Operator Mode
+          above. */}
 
       <details className="live-brain__panel">
         <summary>
@@ -2186,6 +2078,8 @@ export function LiveChurchBrain() {
           </>
         )}
       </section>
+      </>
+      )}
     </div>
   );
 }
@@ -2378,35 +2272,3 @@ function SuggestionCard({
  * the workspace mockup. Never appears until the operator has explicitly
  * approved it; disappears once prepared (see the `PresentationPrepared`
  * event handler). */
-function ApprovedSuggestionCard({
-  suggestion,
-  busy,
-  preview,
-  onPreview,
-  onPrepare,
-}: {
-  suggestion: Suggestion;
-  busy: string | null;
-  preview: PresentationPreview | undefined;
-  onPreview: () => void;
-  onPrepare: () => void;
-}) {
-  const reference = suggestion.kind.type === "scripture" ? suggestion.kind.reference : suggestion.kind.label;
-  return (
-    <li className="live-brain__suggestion-card">
-      <div className="live-brain__suggestion-header">
-        <strong>{reference}</strong>
-        <span className="live-brain__confidence">Approved</span>
-      </div>
-      <div className="live-brain__row">
-        <button type="button" disabled={busy === `preview-${suggestion.id}`} onClick={onPreview}>
-          Preview
-        </button>
-        <button type="button" disabled={busy === `prepare-${suggestion.id}`} onClick={onPrepare}>
-          Prepare
-        </button>
-      </div>
-      {preview && <PreviewPane preview={preview} />}
-    </li>
-  );
-}

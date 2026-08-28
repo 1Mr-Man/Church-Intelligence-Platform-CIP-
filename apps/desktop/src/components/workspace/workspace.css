@@ -112,3 +112,243 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Phase 3.5: Operator Mode redesign                                   */
+/* ------------------------------------------------------------------ */
+
+/* Service control bar (spec section 6/10 Priority 1). Two visual states
+   driven entirely by existing `status` data, never a new one: the "no
+   service yet" hero (large, unmistakable call to action) and the
+   "service live/paused" compact bar. */
+.op-hero {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem 1.75rem;
+  margin-bottom: 1.25rem;
+  text-align: center;
+  background: linear-gradient(180deg, var(--status-neutral-bg), transparent);
+}
+
+.op-hero__eyebrow {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.6;
+  margin: 0 0 0.35rem;
+}
+
+.op-hero__title {
+  font-size: 1.6rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+  color: var(--text-h);
+}
+
+.op-hero__body {
+  max-width: 42rem;
+  margin: 0 auto 1.25rem;
+  opacity: 0.8;
+  line-height: 1.5;
+}
+
+.op-hero__form {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+
+.op-hero__form input {
+  min-width: 18rem;
+  padding: 0.6rem 0.85rem;
+  font-size: 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.op-service-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.9rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.op-service-bar__identity {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.op-service-bar__title {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.op-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid currentColor;
+}
+
+.op-badge::before {
+  content: "";
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.op-badge--good { color: var(--status-good); background: var(--status-good-bg); }
+.op-badge--warn { color: var(--status-warn); background: var(--status-warn-bg); }
+.op-badge--bad { color: var(--status-bad); background: var(--status-bad-bg); }
+.op-badge--neutral { color: var(--status-neutral); background: var(--status-neutral-bg); }
+
+/* Readiness / compact system strip (spec section 6 + Priority 6). Human
+   labels only - no "tauri"/"database: connected" wording ever appears
+   here (that stays in Diagnostics' StatusBar). */
+.op-readiness {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.6rem 1.5rem;
+}
+
+.op-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 1.25rem;
+}
+
+.op-status-strip__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.op-status-strip__icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.op-status-strip__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  flex: none;
+}
+
+.op-status-strip__item--good .op-status-strip__dot { background: var(--status-good-border); }
+.op-status-strip__item--warn .op-status-strip__dot { background: var(--status-warn-border); }
+.op-status-strip__item--bad .op-status-strip__dot { background: var(--status-bad-border); }
+.op-status-strip__item--neutral .op-status-strip__dot { background: var(--status-neutral-border); }
+
+/* Presentation card (spec section 11/12 Priority 4) - the single most
+   important church-facing surface in the app. Deliberately the largest,
+   highest-contrast card in Operator Mode. PREPARED and ACTIVE are always
+   distinct badges (never merged into one "ready" word) so an operator can
+   never mistake "queued" for "on the projector right now" (spec's hard
+   safety rule). */
+.op-presentation {
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  padding: 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.op-presentation--active {
+  border-color: var(--status-good-border);
+}
+
+.op-presentation__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.op-presentation__header h2 {
+  margin: 0;
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.7;
+}
+
+.op-presentation__empty {
+  text-align: center;
+  padding: 1.5rem 1rem;
+  opacity: 0.65;
+}
+
+.op-presentation__item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.1rem 1.25rem;
+  margin-top: 0.75rem;
+}
+
+.op-presentation__item--active {
+  border-color: var(--status-good-border);
+  background: var(--status-good-bg);
+}
+
+.op-presentation__scripture {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--text-h);
+  margin: 0 0 0.4rem;
+}
+
+.op-presentation__text {
+  font-size: 1.1rem;
+  line-height: 1.5;
+  margin: 0 0 0.75rem;
+  font-style: italic;
+}
+
+.op-presentation__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.op-presentation__actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 720px) {
+  .op-hero {
+    padding: 1.5rem 1.1rem;
+  }
+  .op-presentation__scripture {
+    font-size: 1.3rem;
+  }
+}

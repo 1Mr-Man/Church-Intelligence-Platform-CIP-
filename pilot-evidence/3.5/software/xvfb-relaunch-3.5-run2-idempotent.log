@@ -1,0 +1,11 @@
+libEGL warning: DRI3 error: Could not get DRI3 device
+libEGL warning: Ensure your X server supports DRI3 to get accelerated rendering
+[2026-08-28][00:34:26][cip::app][INFO] starting CIP desktop (environment: Production, data_dir: /tmp/cip-xvfb-3.5/org.churchintelligence.cip)
+[2026-08-28][00:34:26][cip::database][INFO] 0 migration(s) applied
+[2026-08-28][00:34:27][cip::database][INFO] BSB production Bible dataset: 66 book(s), 1189 chapter(s), 31086 verse(s) total (0 imported, 31086 already present)
+[2026-08-28][00:34:27][cip::app][INFO] sermon intelligence engine initialized (deterministic, offline)
+[2026-08-28][00:34:27][cip::app][INFO] service intelligence engine initialized (deterministic, offline)
+[2026-08-28][00:34:27][cip::app][INFO] sermon foundation initialized (deterministic, offline, no engine registration)
+[2026-08-28][00:34:27][cip::app][INFO] content intelligence initialized (deterministic, offline, no engine registration)
+[2026-08-28][00:34:27][cip::speech][INFO] built without the `whisper` feature; live transcription is unavailable (manual operation still works)
+[2026-08-28][00:34:27][cip::music][INFO] acoustic recognizer status: Unavailable (configured model directory does not exist: /tmp/cip-xvfb-3.5/org.churchintelligence.cip/models/acoustic)

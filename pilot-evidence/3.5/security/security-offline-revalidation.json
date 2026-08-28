@@ -1,0 +1,44 @@
+{
+  "environment": "automated",
+  "scope": "Phase 3.5 touched apps/desktop/src/** (frontend TSX/CSS) and docs/** only. This file re-verifies the spec's mandatory security/offline regression list against that diff.",
+  "checks": {
+    "secretsOrCredentials": {
+      "command": "git diff fe081c8 -- apps/desktop/src docs | grep -iE \"api[_-]?key|secret|password|token|BEGIN (RSA|PRIVATE)\"",
+      "result": "no matches"
+    },
+    "accidentalExternalNetworkCalls": {
+      "command": "git diff fe081c8 -- apps/desktop/src | grep -iE \"fetch\\(|axios|XMLHttpRequest|https?://\"",
+      "result": "no matches - the 3 new components (ServiceControlBar, SystemStatusStrip, PresentationCard) are pure presentational, they call only existing lib/commands.ts wrappers over Tauri invoke(), never a network API directly"
+    },
+    "licensingGateIntact": {
+      "method": "no file under core/bible, core/content, integrations/bible, or the licensing gate module was modified this phase (git diff fe081c8 -- core/ integrations/ is empty)",
+      "result": "unchanged from Phase 3.4 - see pilot-evidence/3.4/licensing/licensing-revalidation.json"
+    },
+    "noCopyrightedBibleTranslationIntroduced": {
+      "method": "no dataset/import file changed this phase",
+      "result": "unchanged - only BSB remains configured, per pilot-evidence/3.4/licensing/licensing-revalidation.json"
+    },
+    "tauriCapabilitiesUnchanged": {
+      "command": "git diff fe081c8 -- apps/desktop/src-tauri/capabilities/",
+      "result": "empty diff - default.json and display.json unchanged"
+    },
+    "noDangerousShellCommands": {
+      "command": "grep -rn \"shell::\" apps/desktop/src-tauri/src/",
+      "result": "no matches - shell plugin not used anywhere in the backend, before or after this phase"
+    },
+    "noUnrestrictedFilesystemAccess": {
+      "method": "no src-tauri file changed this phase; fs capability scope unchanged from Phase 3.4",
+      "result": "unchanged"
+    },
+    "noSensitiveDebugLogging": {
+      "command": "git diff fe081c8 -- apps/desktop/src | grep -iE \"console\\.log|dbg!\"",
+      "result": "no matches"
+    },
+    "noTelemetryAdded": {
+      "method": "no new outbound call, no analytics/telemetry library added to package.json this phase",
+      "command": "git diff fe081c8 -- apps/desktop/package.json",
+      "result": "empty diff"
+    }
+  },
+  "conclusion": "All Phase 3.5 changes are presentational (React components + CSS + docs). No security- or offline-relevant regression was introduced. Full hardware-dependent security items (e.g. real network isolation on the physical machine) remain covered by pilot-evidence/3.4/security/security-revalidation.json and pilot-evidence/3.4/offline/offline-revalidation.json, unchanged and still applicable since no backend/runtime code changed this phase."
+}

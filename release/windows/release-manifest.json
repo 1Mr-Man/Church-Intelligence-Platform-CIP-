@@ -1,37 +1,39 @@
 {
   "applicationName": "Church Intelligence Platform",
   "cipVersion": "0.1.0",
-  "gitCommit": "1a7a8a4b50936e5fb4fbfdb6bde6f2074934ae30",
-  "gitCommitShort": "1a7a8a4",
+  "gitCommit": "fe081c8911536e607dc72336ff3e7afc3417a21b",
+  "gitCommitShort": "fe081c8",
   "gitBranch": "claude/cip-foundation-init-i85g87",
+  "gitCommitNote": "This is the source tree commit the Phase 3.5 rebuild was performed against (working tree at the time of build, prior to the Phase 3.5 commit that adds this very manifest). The Phase 3.5 UI changes are frontend-only (apps/desktop/src/**) - see docs/phase-3-5-operator-ux.md for the exact diff.",
   "targetArchitecture": "x86_64 (x64)",
   "targetPlatform": "Windows 11 x64",
   "installer": {
     "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
     "installerType": "NSIS self-extracting installer (.exe)",
-    "fileSizeBytes": 7078276,
-    "sha256": "53c1bc7f3c9a36c21ed29b3d8eebb8906f8a1eb417334116a2831052e762ccb4",
-    "buildTimestampUtc": "2026-08-27T23:34:00Z",
-    "packagedIntoReleaseTimestampUtc": "2026-08-27T23:51:50Z"
+    "fileSizeBytes": 7072367,
+    "sha256": "5f8994eae1937cc3c71223cd491050c4f6023fe1c149af6a9273f81e444aae19",
+    "buildTimestampUtc": "2026-08-28T00:35:54Z",
+    "packagedIntoReleaseTimestampUtc": "2026-08-28T00:39:00Z"
   },
   "architectureVerification": {
-    "outerInstallerStub": "PE32 executable (GUI) Intel 80386, Nullsoft Installer self-extracting archive - a standard 32-bit NSIS bootstrapper; this is normal NSIS behavior on Windows and does NOT mean the installed application is 32-bit",
-    "installedApplicationBinary": "cip-desktop.exe: PE32+ executable (GUI) x86-64, confirmed via `file` and `objdump -f` (file format pei-x86-64, architecture i386:x86-64) - the actual application that runs after installation is genuinely x64",
-    "method": "file(1) and x86_64-w64-mingw32-objdump -f, run directly against both the installer and the embedded application binary in this build environment"
+    "outerInstallerStub": "PE32 executable (GUI) Intel 80386 (stripped to external PDB), Nullsoft Installer self-extracting archive - a standard 32-bit NSIS bootstrapper; this is normal NSIS behavior on Windows and does NOT mean the installed application is 32-bit",
+    "installedApplicationBinary": "cip-desktop.exe: PE32+ executable (GUI) x86-64 (stripped to external PDB), confirmed via `file` against target/x86_64-pc-windows-gnu/release/cip-desktop.exe - the actual application that runs after installation is genuinely x64",
+    "method": "file(1) run directly against both the installer and the embedded application binary in this build environment"
   },
   "provenance": {
-    "builtDuring": "Phase 3.4 (Windows Release Candidate & Physical Hardware Qualification)",
-    "buildEnvironment": "cross-compiled from Linux using rustup target x86_64-pc-windows-gnu, gcc-mingw-w64 13, and nsis 3.09 - see docs/phase-3-4-windows-pilot.md and pilot-evidence/3.4/release/release-manifest-3.4.json",
-    "sourceCodeChangedToProduceThisArtifact": false,
-    "note": "This exact artifact (identical SHA-256, identical file size) was built and recorded during Phase 3.4 at commit 1a7a8a4. It was re-verified (not rebuilt) for this task: git status showed a clean tree at the expected Phase 3.4 HEAD, so the existing build output was confirmed still present and checksummed against the value already recorded in pilot-evidence/3.4/release/release-manifest-3.4.json before being copied here. No production source code was modified to produce this release."
+    "builtDuring": "Phase 3.5 (Professional Church Operator UX & First-Use Interface Redesign) - rebuilt to package the new Operator/Diagnostics mode frontend",
+    "buildEnvironment": "cross-compiled from Linux using rustup target x86_64-pc-windows-gnu, gcc-mingw-w64, and nsis (makensis) - identical toolchain to Phase 3.4, see docs/phase-3-4-windows-pilot.md for the original toolchain setup and docs/phase-3-5-operator-ux.md for what changed this phase",
+    "sourceCodeChangedToProduceThisArtifact": true,
+    "note": "This artifact supersedes the Phase 3.4 installer (previously SHA-256 53c1bc7f...) because the frontend UI changed (Operator/Diagnostics mode split, ServiceControlBar, SystemStatusStrip, PresentationCard). No Rust/backend source file changed this phase - see pilot-evidence/3.5/software/automated-regression.json. This is a freshly compiled build (`cargo build --release --target x86_64-pc-windows-gnu` via `tauri build`), not a copy of a prior artifact."
   },
-  "releaseCandidateStatement": "This is the Phase 3.4 SOFTWARE RELEASE CANDIDATE for Windows x64. It is a real, verifiable build artifact - not a placeholder, not a simulation, not a fabrication.",
-  "physicalHardwareStatement": "Physical hardware qualification has NOT been performed in the build environment. This installer has not been installed, launched, or tested on any real Windows machine, including the target HP EliteBook 830 G6. No real microphone, no real Whisper transcription, no real second display/projector, and no real operator workflow has been exercised against this artifact. Xvfb, simulated audio, virtual displays, automated tests, and cross-compilation success are Environment A/B evidence only and are never substituted for Environment C (real hardware) evidence anywhere in this project's documentation.",
+  "releaseCandidateStatement": "This is the Phase 3.5 SOFTWARE RELEASE CANDIDATE for Windows x64 (Operator UX redesign). It is a real, verifiable build artifact - not a placeholder, not a simulation, not a fabrication. Its UX status is HOLD pending physical hardware validation - see docs/phase-3-5-operator-ux.md.",
+  "physicalHardwareStatement": "Physical hardware qualification has NOT been performed in the build environment. This installer has not been installed, launched, or tested on any real Windows machine, including the target HP EliteBook 830 G6. No real microphone, no real Whisper transcription, no real second display/projector, and no real operator workflow has been exercised against this artifact. Xvfb, simulated audio, virtual displays, automated tests, and cross-compilation success are Environment A/B evidence only and are never substituted for Environment C (real hardware) evidence anywhere in this project's documentation. See pilot-evidence/3.5/windows-ux/windows-ux-checklist.json for the full HOLD breakdown of every timing/usability task.",
   "githubReleaseStatus": "NOT CONFIGURED - no .github/workflows directory exists in this repository, and no GitHub Release has been created for this artifact. This installer is available only via this repository's working tree (release/windows/), not via GitHub Releases or any CI/CD pipeline.",
   "obtainingWithoutDeveloperTooling": "The file at release/windows/Church Intelligence Platform_0.1.0_x64-setup.exe can be copied/transferred directly (e.g. via a git clone of this repository, a direct file download, or a USB drive) to the target Windows machine and run there. Running the installer on Windows requires none of: Claude Code, Rust, Cargo, Node.js, npm, or the CIP source tree - only the .exe file itself.",
   "knownLimitations": [
     "UNSIGNED release candidate - Windows SmartScreen will show an 'unknown publisher' warning on first run",
     "Cross-compiled from Linux, never launch-tested on real Windows hardware",
-    "See docs/phase-3-4-windows-pilot.md and pilot-evidence/3.4/ for the full Environment A/B/C evidence breakdown"
+    "UX claims (Operator Mode, first-use flow, presentation visibility) are PROVEN_AUTOMATED/PROVEN_XVFB only in this build - VERIFIED_WINDOWS and VERIFIED_PHYSICAL_HARDWARE remain HOLD",
+    "See docs/phase-3-5-operator-ux.md and pilot-evidence/3.5/ for the full Environment A/B/C evidence breakdown"
   ]
 }
