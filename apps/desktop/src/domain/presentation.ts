@@ -54,8 +54,13 @@ export interface PresentationDisplayPayload {
 }
 
 /** The `get_presentation_display_state` response - the operator UI's sync
- * point on mount, never assumed from local state alone. */
+ * point on mount, never assumed from local state alone. `activeSlide`
+ * (Phase 3.8.2) lets the display window itself hydrate on mount instead
+ * of depending solely on catching `PRESENTATION_STARTED` live - closing a
+ * real race where the event can fire before the display window's own
+ * JavaScript has loaded and subscribed. */
 export interface PresentationDisplayState {
   windowOpen: boolean;
   activeItem: PresentationItem | null;
+  activeSlide: RenderedSlide | null;
 }

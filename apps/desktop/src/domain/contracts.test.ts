@@ -263,9 +263,10 @@ describe("domain contracts", () => {
   });
 
   it("constructs a PresentationDisplayState with no active item and a closed window", () => {
-    const state: PresentationDisplayState = { windowOpen: false, activeItem: null };
+    const state: PresentationDisplayState = { windowOpen: false, activeItem: null, activeSlide: null };
     expect(state.windowOpen).toBe(false);
     expect(state.activeItem).toBeNull();
+    expect(state.activeSlide).toBeNull();
   });
 
   it("constructs a TimelineEntry describing a service-lifecycle event", () => {

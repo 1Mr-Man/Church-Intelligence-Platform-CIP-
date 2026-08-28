@@ -1,0 +1,22 @@
+{
+  "phase": "3.8.2",
+  "note": "No physical Windows machine was available in this container for Phase 3.8.2. The operator's Phase 3.8.1 Windows testing (Evidence A-D) was against the PRIOR build - this checklist covers verifying the rebuilt Phase 3.8.2 artifact, not a repeat of that prior test.",
+  "installer": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "dedc7b2b89bafcb1598cab50beda2f951b802180f0c2806a1016f516e7154945",
+    "fileSizeBytes": 7130135,
+    "status": "NOT VERIFIED on real Windows hardware - cross-compiled and file(1)-inspected only (Environment A/B)"
+  },
+  "hardBlockerPerOperatorSpec": "The operator's own stated bar for this phase: the same Windows laptop that produced 'Not Responding' must successfully replay a real sermon transcript, produce real intelligence, approve a real Scripture detection, display it, close the display, reopen it, and display another Scripture. This has NOT occurred in this session.",
+  "requiredForGateToBecomePASS": [
+    "a real Windows 10/11 x64 laptop (the operator's HP EliteBook)",
+    "Internet disconnected for the duration of the checklist",
+    "install and launch this rebuilt installer specifically (SHA-256 above), not the prior Phase 3.8.1 build",
+    "import a real, long sermon transcript and start replay via the combined Start Service & Replay action - confirm no 'start a service first' dead-end and no unreasonable segment count",
+    "observe Bible/Sermon Intelligence/Needs Attention update progressively as replay runs",
+    "approve a real Bible detection, Prepare it, Display it - confirm the display window actually shows the Scripture, not a blank/Not Responding window",
+    "Stop, Close the display, Reopen it, Display a different prepared item - confirm no blank window, no stale slide, no AlreadyActive error, no duplicate display window",
+    "End the service, open History, verify the replayed service and its presentation history are present"
+  ],
+  "conclusion": "All physical-hardware/human-operator validation for Phase 3.8.2 remains NOT PERFORMED - not estimated, not simulated, not inferred from code review, and not carried over from the prior build's Environment C usage."
+}

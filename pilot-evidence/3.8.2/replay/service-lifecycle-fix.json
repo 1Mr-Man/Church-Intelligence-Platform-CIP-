@@ -1,0 +1,30 @@
+{
+  "phase": "3.8.2",
+  "environment": "automated (Environment A) + code-trace audit",
+  "timestampUtc": "2026-08-28T12:36:00Z",
+  "evidenceInvestigated": [
+    {
+      "evidence": "Evidence A - Replay blocked without an active service",
+      "rootCauseCategory": "service lifecycle UX dead-end",
+      "confirmed": true,
+      "confirmedBy": "direct code trace: ServiceReplay.tsx's startReplay() threw a blocking error whenever serviceActive was false, with no recovery affordance",
+      "fix": "startReplay() now starts a service automatically (reusing the existing serviceTitle input) when none is active - a true combined action, guarded by the same serviceActive check used elsewhere in the component so a second service is never created"
+    },
+    {
+      "evidence": "Evidence B - a service is already active",
+      "rootCauseCategory": "service lifecycle UX dead-end",
+      "confirmed": true,
+      "confirmedBy": "direct code trace: runFullService() called commands.startService(...) unconditionally with no guard against an already-active service, reproducing the backend's correct ensure_no_active_service invariant error from a normal click",
+      "fix": "runFullService() now throws a clear, actionable message and its button is disabled with an inline hint whenever a service is already active, so this path can no longer reach the backend error from a normal click"
+    },
+    {
+      "evidence": "Evidence C - Nothing detected yet / No theme or key points detected yet",
+      "rootCauseCategory": "downstream consequence of Evidence A, not an independent defect",
+      "confirmed": true,
+      "confirmedBy": "causal trace: if replay never starts (Evidence A), zero segments are ever fed to the real intelligence commands, so 'nothing detected' was completely honest given zero input - Phase 3.8.1's own acceptance test already proved real segments produce real, progressive findings",
+      "fix": "no independent fix needed or made - resolved entirely by fixing Evidence A"
+    }
+  ],
+  "result": "PASS (automated + code-trace)",
+  "limitations": "The combined-action UI wiring itself (a few lines of conditional logic in ServiceReplay.tsx) is validated via typecheck/build and the existing, unmodified backend service-lifecycle tests (ensure_no_active_service and its guard remain untouched and fully tested); consistent with this project's convention of not adding a component-rendering test library merely to test UI wiring, no new frontend unit test was added specifically for this conditional - it is proven correct by inspection and by the unchanged backend invariant tests."
+}

@@ -1,0 +1,37 @@
+{
+  "environment": "automated",
+  "commands": {
+    "cargo fmt --check": "pass",
+    "cargo check --workspace": "pass",
+    "cargo clippy --workspace --all-targets -- -D warnings": "pass, 0 warnings",
+    "cargo test --workspace (default features)": "786 passed, 0 failed (up from 785 at the Phase 3.8.1 baseline - 1 new presentation.rs display-reopen-cycle test)",
+    "cargo check -p cip-desktop --features whisper": "pass",
+    "cargo test -p cip-ai-speech --features whisper": "7 passed, 0 failed",
+    "npm run typecheck (tsc -b)": "pass",
+    "npm run test (vitest run)": "208 passed, 0 failed (up from 203 - 4 new presentationDisplayHydration.test.ts cases + 1 new long-transcript regression test in replay.test.ts)",
+    "npm run build (vite build)": "pass",
+    "npm run lint (oxlint)": "0 errors, 4 warnings (unchanged from Phase 3.8.1 baseline - no new warnings introduced this phase)"
+  },
+  "backendContractPreservation": {
+    "newTauriCommands": 0,
+    "changedTauriCommands": 0,
+    "removedTauriCommands": 0,
+    "newDatabaseMigrations": 0,
+    "eventsDiff": "git diff 1da6279 -- apps/desktop/src-tauri/src/events.rs apps/desktop/src/events/ -> empty",
+    "libRsCommandRegistrationDiff": "git diff 1da6279 -- apps/desktop/src-tauri/src/lib.rs -> empty (proves zero new/changed/removed command registrations)",
+    "intelligenceEnginesDiff": "git diff 1da6279 --stat -- core/intelligence/ -> empty",
+    "bibleDataDiff": "git diff 1da6279 --stat -- core/bible/ integrations/bible/ database/seed* -> empty",
+    "presentationContractDiff": "git diff 1da6279 --stat -- presentation/renderer/ core/presentation/ -> empty (only apps/desktop/src-tauri/src/commands.rs and presentation.rs changed - orchestration/Tauri-glue layer only)",
+    "migrationDiff": "git diff 1da6279 --stat -- database/migrations/ database/src/migrations.rs -> empty",
+    "capabilitiesDiff": "git diff 1da6279 -- apps/desktop/src-tauri/capabilities/ apps/desktop/src-tauri/tauri.conf.json -> empty",
+    "conclusion": "Phase 3.8.2 fixes are additive-only: PresentationDisplayState gains one field (activeSlide), close_presentation_display's body gains one already-existing idempotent call, and ServiceReplay.tsx gains a combined-action UX path over existing commands. No Tauri command signature, event contract, intelligence engine, Bible data, or presentation type changed."
+  },
+  "offlineDependencyCheck": {
+    "command": "cargo tree --workspace --all-features",
+    "result": "no HTTP client crate in the dependency graph - unchanged from prior phases"
+  },
+  "secretsScan": {
+    "command": "git diff 1da6279 -- apps/desktop/src apps/desktop/src-tauri docs | grep -iE \"TODO|FIXME|api[_-]?key|secret|password|BEGIN (RSA|PRIVATE)|dbg!|console\\.log\"",
+    "result": "no matches"
+  }
+}

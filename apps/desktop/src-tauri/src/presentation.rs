@@ -629,4 +629,61 @@ mod tests {
         .unwrap();
         assert!(still_active.is_empty());
     }
+
+    /// Phase 3.8.2 - directly encodes the spec's "Display Window Reopen
+    /// Test": Display, Stop, Close, Reopen, Display another, repeated
+    /// three times, with no manual intervention between cycles. This is
+    /// the invariant `commands::close_presentation_display`'s new
+    /// synchronous-reconciliation fix depends on: `stop_active_item` must
+    /// always leave the way clear for the very next `prepare_to_activate`
+    /// to succeed, with no leftover `Active` row - the exact race that
+    /// used to be possible when reconciliation only happened
+    /// asynchronously via the display window's `Destroyed` event. Cannot
+    /// exercise the Tauri command layer itself (no `tauri::test` harness
+    /// in this project - see this module's own docs), so this proves the
+    /// invariant at the one layer this project's tests can reach.
+    #[test]
+    fn three_display_stop_close_reopen_cycles_never_leave_a_stale_active_item() {
+        let conn = migrated_conn();
+        let session = ServiceSession::start("Reopen Cycle Test");
+        persistence::persist_service(&conn, &session).unwrap();
+
+        for cycle in 1..=3 {
+            let item = prepared_item(&conn, session.id, &format!("slide {cycle}"));
+
+            // Display.
+            let (_, _slide) = prepare_to_activate(&conn, item.id).unwrap();
+            commit_activation(&conn, item.id).unwrap();
+
+            // Stop + Close, synchronously reconciled - mirrors
+            // `close_presentation_display`'s new call order.
+            let stopped = stop_active_item(&conn, session.id).unwrap();
+            assert_eq!(
+                stopped.map(|i| i.id),
+                Some(item.id),
+                "cycle {cycle}: stop must resolve the item just displayed"
+            );
+
+            // Reopen: nothing must be left Active for the *next* cycle's
+            // prepare_to_activate to trip over.
+            let still_active = persistence::list_presentation_items(
+                &conn,
+                session.id,
+                Some(PresentationItemStatus::Active),
+            )
+            .unwrap();
+            assert!(
+                still_active.is_empty(),
+                "cycle {cycle}: no stale Active item may remain after Stop + Close"
+            );
+        }
+
+        // Three cycles, three distinct historical Stopped rows - never
+        // fewer (a dropped cycle) and never an orphaned Active row.
+        let all = persistence::list_presentation_items(&conn, session.id, None).unwrap();
+        assert_eq!(all.len(), 3);
+        assert!(all
+            .iter()
+            .all(|i| i.status == PresentationItemStatus::Stopped));
+    }
 }

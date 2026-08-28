@@ -1,0 +1,30 @@
+{
+  "phase": "3.8.2",
+  "environment": "automated (Environment A) + code-trace audit",
+  "timestampUtc": "2026-08-28T12:36:00Z",
+  "defectsInvestigated": [
+    {
+      "evidence": "Evidence D - CIP Presentation Display (Not Responding)",
+      "rootCauseCategory": "display window initial-state race",
+      "confirmed": true,
+      "confirmedBy": "direct code trace: display_presentation opens the display window then immediately commits activation and emits PRESENTATION_STARTED in Rust; PresentationDisplay.tsx had no state source other than that live event listener, which its own JavaScript subscribes to only after loading asynchronously on the new webview - an event fired before that subscription completes was lost permanently",
+      "fix": "PresentationDisplayState (get_presentation_display_state's existing response type) gains activeSlide: Option<RenderedSlide>, computed via the same already-tested render_content function; PresentationDisplay.tsx pulls this once on mount",
+      "test": "apps/desktop/src/components/presentationDisplayHydration.test.ts (4 tests) - the pure hydration-decision logic"
+    },
+    {
+      "evidence": "Related to Evidence D - display window reopen failures",
+      "rootCauseCategory": "close/reopen race",
+      "confirmed": true,
+      "confirmedBy": "direct code trace: close_presentation_display only closed the window; the active item's Stopped reconciliation only happened via the window's own asynchronous Destroyed event handler, which is not guaranteed to complete before the command returns to the frontend",
+      "fix": "close_presentation_display now calls the existing, already-idempotent clear_active_presentation synchronously before closing the window",
+      "test": "apps/desktop/src-tauri/src/presentation.rs::three_display_stop_close_reopen_cycles_never_leave_a_stale_active_item"
+    }
+  ],
+  "notVerified": {
+    "claim": "the exact mechanism behind the literal Windows 'Not Responding' title-bar text",
+    "reason": "this environment has no WinDbg, ETW, or physical Windows access to inspect a hung window's message loop; the fixes above address the most plausible proximate causes (provable independently by code reading) but this session does not claim to have reproduced or confirmed the exact Windows-side failure mode",
+    "requiredToConfirm": "a real Windows re-test of this rebuilt artifact, per the phase's own final gate"
+  },
+  "result": "PASS (automated invariants only)",
+  "limitations": "Both fixes are Tauri-command-layer glue (AppHandle/WebviewWindow orchestration) which this project has no tauri::test harness for (a pre-existing, documented convention). The tests above prove the underlying invariants at the layer this project's automated tests can reach; the actual Tauri command ordering and any Windows-specific WebView2 behavior remain unverified without a physical Windows re-test."
+}

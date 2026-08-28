@@ -99,6 +99,38 @@ describe("segmentTranscript", () => {
       "just one clause with no terminal punctuation",
     ]);
   });
+
+  it("REGRESSION (Phase 3.8.2): a realistically long, single-block transcript segments into a manageable number of bounded pieces, quickly", () => {
+    // Simulates the worst case for segmentation - a real transcript export
+    // with no blank-line paragraph breaks at all, comparable in scale to
+    // the operator's real ~52-minute sermon (the actual file was not
+    // supplied to this environment - see docs/phase-3-8-2-audit.md section
+    // I item 7 - so this is a project-authored synthetic transcript of
+    // similar word count, not a copy of the real one). Roughly 7,000 words
+    // / ~42,000 characters, one giant paragraph, no timestamps.
+    const sentence = (n: number) =>
+      `In this part of the message we consider point number ${n} about walking faithfully with God every day.`;
+    const longTranscript = Array.from({ length: 400 }, (_, i) => sentence(i + 1)).join(" ");
+    expect(longTranscript.length).toBeGreaterThan(30000);
+
+    const start = performance.now();
+    const segments = segmentTranscript(longTranscript);
+    const elapsedMs = performance.now() - start;
+
+    // Not 1-2 giant blocks (the original defect) and not thousands of
+    // microscopic ones (the spec's other explicit constraint) - a few
+    // hundred bounded, speech-sized chunks.
+    expect(segments.length).toBeGreaterThan(50);
+    expect(segments.length).toBeLessThan(1000);
+    for (const segment of segments) {
+      expect(segment.text.length).toBeLessThanOrEqual(220);
+    }
+    segments.forEach((segment, i) => expect(segment.sequence).toBe(i));
+
+    // Synchronous, single-pass segmentation must never noticeably block
+    // the UI thread even at this scale.
+    expect(elapsedMs).toBeLessThan(500);
+  });
 });
 
 describe("delayForSpeed", () => {

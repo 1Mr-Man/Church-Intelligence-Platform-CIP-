@@ -44,7 +44,7 @@ use cip_core_service::{
 };
 use cip_integrations_bible::{BibleDatasetInput, ImportReport};
 use cip_integrations_music::{ImportReport as MusicImportReport, MusicDatasetInput};
-use cip_presentation_renderer::{RenderedSlide, SCRIPTURE_DEFAULT_TEMPLATE};
+use cip_presentation_renderer::{render_content, RenderedSlide, SCRIPTURE_DEFAULT_TEMPLATE};
 use rusqlite::Connection;
 use serde::Serialize;
 use std::sync::atomic::Ordering;
@@ -1752,14 +1752,27 @@ pub fn open_presentation_display(
         .map_err(log_and_return)
 }
 
-/// Whether the display window currently exists, and which item (if any) is
-/// currently `Active` for the active service - the operator UI's sync
-/// point on mount, never assumed from local state alone.
+/// Whether the display window currently exists, which item (if any) is
+/// currently `Active` for the active service, and that item already
+/// rendered - the operator UI's sync point on mount, never assumed from
+/// local state alone.
+///
+/// `active_slide` (Phase 3.8.2) exists specifically so the display window
+/// itself can hydrate on mount rather than depending solely on catching
+/// the `PRESENTATION_STARTED` event live: `WebviewWindowBuilder::build()`
+/// returning in Rust does not mean the new window's JavaScript has loaded
+/// and subscribed to events yet, so an event emitted immediately after
+/// window creation (exactly what `display_presentation` does) can be
+/// missed entirely, leaving the display permanently blank. Computed via
+/// the same pure, deterministic `render_content` `display_presentation`
+/// already calls for the live-event payload - no second rendering system,
+/// no new command.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresentationDisplayState {
     pub window_open: bool,
     pub active_item: Option<PresentationItem>,
+    pub active_slide: Option<RenderedSlide>,
 }
 
 #[tauri::command]
@@ -1782,9 +1795,20 @@ pub fn get_presentation_display_state(
         }
         Err(_) => None,
     };
+    let active_slide = active_item.as_ref().and_then(|item| {
+        render_content(&item.content)
+            .map_err(|e| {
+                log::warn!(
+                    target: crate::logging::LogCategory::Presentation.target(),
+                    "failed to re-render the active presentation item for display hydration: {e}"
+                );
+            })
+            .ok()
+    });
     Ok(PresentationDisplayState {
         window_open: presentation_display::is_display_window_open(&app),
         active_item,
+        active_slide,
     })
 }
 
@@ -1894,15 +1918,28 @@ pub(crate) fn clear_active_presentation(
 }
 
 /// Closes the presentation display window outright (as opposed to
-/// `clear_presentation_display`, which blanks it but leaves it open) -
-/// stops any active item first via the same `Destroyed`-event
-/// reconciliation a manual close triggers, so this and a manual close
-/// always leave identical state.
+/// `clear_presentation_display`, which blanks it but leaves it open).
+///
+/// Phase 3.8.2: reconciles the active item to `Stopped` *synchronously*,
+/// before closing the window, rather than relying solely on the window's
+/// own `Destroyed`-event handler. `window.close()` returns to this
+/// command once the close is requested, not necessarily once the OS has
+/// finished destroying the window and fired `Destroyed` - so a fast
+/// operator (or scripted) Close-then-Reopen-and-Display-another sequence
+/// could previously race ahead of that async reconciliation and hit
+/// `PresentationError::AlreadyActive` on the new item's
+/// `prepare_to_activate`, even though the operator had already closed the
+/// display. Calling `clear_active_presentation` here first makes this
+/// command's return the actual synchronization point; the `Destroyed`
+/// handler still exists for a manual OS-level close (Alt+F4, window-manager
+/// close), and is a safe, proven-idempotent no-op here since the item is
+/// already `Stopped` by the time it fires.
 #[tauri::command]
 pub fn close_presentation_display(
     app: AppHandle,
     _state: State<'_, AppState>,
 ) -> Result<(), AppError> {
+    clear_active_presentation(&app).map_err(log_and_return)?;
     presentation_display::close_display_window(&app)
         .map_err(|e| {
             AppError::from(presentation::PresentationError::DisplayUnavailable(

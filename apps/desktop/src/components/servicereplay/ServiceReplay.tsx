@@ -496,6 +496,11 @@ export function ServiceReplay() {
 
   const runFullService = () =>
     withBusy("full-service", async () => {
+      if (serviceActive) {
+        throw new Error(
+          "End the currently active service first - Full Service starts its own dedicated demo service and must not run inside another one.",
+        );
+      }
       await commands.startService("Offline Test Service — Full Run");
       appendLog("Started full-service scenario.");
       for (const step of FULL_SERVICE_STEPS) {
@@ -572,12 +577,20 @@ export function ServiceReplay() {
 
   const startReplay = () =>
     withBusy("replay-start", async () => {
-      if (!serviceActive) {
-        throw new Error("Start a service first - Service Replay needs an active service, exactly like real speech would.");
-      }
       const parsed = segmentTranscript(transcriptText);
       if (parsed.length === 0) {
         throw new Error("Enter or load a transcript before starting replay.");
+      }
+      // Combined action: Service Replay needs an active service, exactly
+      // like real speech would, but the operator should never hit a dead
+      // end for pressing the one button this screen is built around.
+      // Never starts a second service if one is already active - the same
+      // `serviceActive` guard this component uses everywhere else.
+      if (!serviceActive) {
+        await commands.startService(serviceTitle);
+        appendLog(`Started service "${serviceTitle}".`);
+        setAlreadyActive(false);
+        refreshReadiness();
       }
       setSegments(parsed);
       setCurrentIndex(0);
@@ -779,7 +792,7 @@ export function ServiceReplay() {
 
           {!replayPlaying ? (
             <button type="button" className="op-button--primary" disabled={isBusy("replay-start") || !transcriptText.trim()} onClick={startReplay}>
-              Start Replay
+              {serviceActive ? "Start Replay" : "Start Service & Replay"}
             </button>
           ) : replayPaused ? (
             <button type="button" className="op-button--primary" onClick={resumeReplay}>
@@ -937,9 +950,15 @@ export function ServiceReplay() {
             <p className="library-card__text">
               Runs a complete deterministic sequence: Start Service → Welcome → Worship → Scripture →
               Sermon → Prayer → Closing → Stop Service. Ends with a real, reviewable entry in History.
+              {serviceActive && " End the currently active service first - this starts its own dedicated demo service."}
             </p>
             <div className="library-card__actions">
-              <button type="button" className="op-button--primary" disabled={isBusy("full-service")} onClick={runFullService}>
+              <button
+                type="button"
+                className="op-button--primary"
+                disabled={isBusy("full-service") || serviceActive}
+                onClick={runFullService}
+              >
                 Run Full Service
               </button>
             </div>
