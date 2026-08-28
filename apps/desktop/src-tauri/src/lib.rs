@@ -32,31 +32,68 @@ use tauri::Manager;
 /// is compiled in *and* a model file is actually present at the
 /// configured path, `NullSpeechEngine` otherwise. Missing/no model is
 /// never fatal - see `docs/live-speech.md`'s "model absence" section.
+///
+/// Phase 3.8.6: also returns a [`state::SpeechDiagnostics`] snapshot of
+/// what this attempt actually observed - previously the real
+/// `SpeechEngineError` text from a failed load was logged with
+/// `log::warn!` and then discarded, so no command could ever report *why*
+/// live transcription was unavailable on a build that does have the
+/// `whisper` feature compiled in. Nothing about engine selection itself
+/// changes: a missing/invalid model still falls back to `NullSpeechEngine`,
+/// never fatal.
 #[cfg_attr(not(feature = "whisper"), allow(unused_variables))]
-fn create_speech_engine(config: &AppConfig) -> Box<dyn SpeechEngine> {
+fn create_speech_engine(config: &AppConfig) -> (Box<dyn SpeechEngine>, state::SpeechDiagnostics) {
+    let feature_compiled = cfg!(feature = "whisper");
     #[cfg(feature = "whisper")]
-    {
+    let result: (Box<dyn SpeechEngine>, state::SpeechDiagnostics) = {
         let model_path = &config.whisper_model_path;
         match cip_ai_speech::WhisperSpeechEngine::load(model_path) {
             Ok(engine) => {
                 log::info!(target: LogCategory::Speech.target(), "loaded local speech model from {}", model_path.display());
-                return Box::new(engine);
+                (
+                    Box::new(engine),
+                    state::SpeechDiagnostics {
+                        feature_compiled,
+                        model_load_attempted: true,
+                        model_loaded: true,
+                        model_load_error: None,
+                        ..Default::default()
+                    },
+                )
             }
             Err(e) => {
                 log::warn!(
                     target: LogCategory::Speech.target(),
                     "local speech model not available ({e}); live transcription is unavailable until one is configured"
                 );
+                (
+                    Box::new(cip_ai_speech::NullSpeechEngine),
+                    state::SpeechDiagnostics {
+                        feature_compiled,
+                        model_load_attempted: true,
+                        model_loaded: false,
+                        model_load_error: Some(e.to_string()),
+                        ..Default::default()
+                    },
+                )
             }
         }
-    }
+    };
     #[cfg(not(feature = "whisper"))]
-    log::info!(
-        target: LogCategory::Speech.target(),
-        "built without the `whisper` feature; live transcription is unavailable (manual operation still works)"
-    );
-
-    Box::new(cip_ai_speech::NullSpeechEngine)
+    let result: (Box<dyn SpeechEngine>, state::SpeechDiagnostics) = {
+        log::info!(
+            target: LogCategory::Speech.target(),
+            "built without the `whisper` feature; live transcription is unavailable (manual operation still works)"
+        );
+        (
+            Box::new(cip_ai_speech::NullSpeechEngine),
+            state::SpeechDiagnostics {
+                feature_compiled,
+                ..Default::default()
+            },
+        )
+    };
+    result
 }
 
 /// Choose an `AcousticMusicRecognizer` (Phase 2.2): `LocalAcousticMusicRecognizer`,
@@ -281,7 +318,7 @@ pub fn run() {
 
             let audio_engine: Box<dyn cip_core_service::AudioEngine> =
                 Box::new(cip_integrations_audio::CpalAudioEngine::new());
-            let speech_engine = create_speech_engine(&config);
+            let (speech_engine, speech_diagnostics) = create_speech_engine(&config);
 
             // Phase 2.2: a fourth independent Music read path, dedicated
             // to acoustic analysis - same "every independent read path
@@ -307,6 +344,7 @@ pub fn run() {
                 music_provider,
                 audio_engine,
                 speech_engine,
+                speech_diagnostics,
                 acoustic_music_engine,
                 acoustic_recognizer,
             ));

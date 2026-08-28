@@ -1,0 +1,38 @@
+{
+  "phase": "3.8.6",
+  "note": "No physical Windows machine, no real audio hardware, and no real Whisper model file were available in this container for Phase 3.8.6. This checklist is for the operator to run against the rebuilt whisper-enabled installer below and report back real results for.",
+  "installer": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "26739280b7cc4ef750d73a7d04248cf00533b7ff5623720f8ad1621f5e3f9441",
+    "fileSizeBytes": 7613226,
+    "status": "NOT VERIFIED on real Windows hardware. This build genuinely contains the Whisper feature (see pilot-evidence/3.8.6/build/windows-whisper-build-evidence.json for concrete proof: cargo tree, embedded binary strings, size) - but that is Environment A evidence only. No model file is bundled (see release-manifest.json's modelPackagingStatement) - the operator must supply one before transcription can be tested at all."
+  },
+  "hardBlockerPerOperatorSpec": "Only the real-world chain Microphone Array -> SIGNAL CAPTURED -> Whisper inference -> REAL TRANSCRIPT -> Bible detection proves the Whisper pipeline is operational. That physical Windows/real-audio/real-model test has NOT occurred in this session.",
+  "requiredForGateToBecomePASS": [
+    "a real Windows 10/11 x64 machine with real input devices available",
+    "a real ggml/gguf Whisper model file, obtained by the operator (this container's network access to the standard model host is blocked) and placed at %APPDATA%\\org.churchintelligence.cip\\models\\ggml-tiny.en.bin (or pointed to via CIP_WHISPER_MODEL_PATH)",
+    "install and launch this rebuilt whisper-enabled installer specifically (SHA-256 above), not a prior build",
+    "1) Open System Diagnostics (the existing Pilot Diagnostics panel, now extended). Confirm 'Feature compiled: YES'. 2) Confirm 'Model loaded: YES' - if NO, the panel now shows the real underlying error text; report it exactly",
+    "3) Start Service. 4) Select a real input device (e.g. Stereo Mix). 5) Click Start Listening - confirm the button is not blocked and 'Speech engine ready: YES' appears in diagnostics",
+    "6) Speak or play audio through the device - confirm the input level indicator shows SIGNAL CAPTURED (from Phase 3.8.5) AND, in System Diagnostics, that 'Audio chunks received' increments with a real sample rate/count shown",
+    "7) Play a controlled test phrase: 'Turn to Matthew chapter 6 verse 9.' Confirm a real transcript segment appears (not empty/garbage - this specifically tests whether the sample-rate resampling fix from this phase actually produced correct-sounding audio for Whisper)",
+    "8) Confirm real MAT 6:9 Bible detection fires from that transcript. 9) If applicable, confirm Sermon Intelligence findings appear. Do NOT use automatic presentation as the first acceptance test",
+    "10) In System Diagnostics, confirm 'Inferences: N succeeded / N attempted' matches what was said, and that no unexpected 'Last error' text appears",
+    "capture screenshots of System Diagnostics before/after, and report which of the 12 final-gate items below did/did not pass, with any real error text observed"
+  ],
+  "finalGateFields": {
+    "WINDOWS_DEVICE_ENUMERATION": "NOT_VERIFIED",
+    "AUDIO_DEVICE_SELECTION": "NOT_VERIFIED",
+    "AUDIOENGINE_START": "NOT_VERIFIED",
+    "CPAL_STREAM": "NOT_VERIFIED",
+    "INPUT_LEVEL": "NOT_VERIFIED",
+    "AUDIO_CHUNK_FLOW": "NOT_VERIFIED",
+    "WHISPER_INITIALIZATION": "NOT_VERIFIED",
+    "SPEECH_FEED": "NOT_VERIFIED",
+    "TRANSCRIPT": "NOT_VERIFIED",
+    "BIBLE_DETECTION": "NOT_VERIFIED",
+    "SERMON_INTELLIGENCE": "NOT_VERIFIED",
+    "OFFLINE_OPERATION": "NOT_VERIFIED"
+  },
+  "conclusion": "All physical-hardware/real-audio/real-model validation for Phase 3.8.6 remains NOT PERFORMED - not estimated, not simulated, not inferred from code review, and not carried over from any prior phase's Environment C usage. The fixes applied this phase (genuine Whisper compilation, sample-rate resampling, real diagnostics) are justified by direct code tracing, real build evidence, and a full-green automated regression suite (Environment A) only."
+}

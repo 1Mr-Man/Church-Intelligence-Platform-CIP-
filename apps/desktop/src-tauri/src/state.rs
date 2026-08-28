@@ -35,6 +35,45 @@ use std::sync::Mutex;
 /// UI work, not a Bible Intelligence Core limitation.
 pub const DEFAULT_TRANSLATION_ID: &str = "KJV";
 
+/// Phase 3.8.6: retains what `create_speech_engine` (startup model load)
+/// and `handle_audio_chunk` (per-chunk inference) already observe about
+/// the speech pipeline, instead of discarding it after logging - see
+/// `commands::PilotDiagnostics`'s `speech` field for the operator-facing
+/// view. Never a second source of truth: every field mirrors a real event
+/// that already happened, using the same `SpeechEngineError` text
+/// `WhisperSpeechEngine` already produces.
+#[derive(Debug, Default, Clone)]
+pub struct SpeechDiagnostics {
+    /// Whether this binary was compiled with the `whisper` Cargo feature.
+    pub feature_compiled: bool,
+    /// Whether `create_speech_engine` attempted `WhisperSpeechEngine::load`
+    /// at startup (only happens when `feature_compiled` is true).
+    pub model_load_attempted: bool,
+    /// Whether that attempt succeeded - distinct from "a file exists at
+    /// the configured path" (`WhisperModelDiagnostic::Present`), which
+    /// only proves the file is readable, not that it parsed as a valid
+    /// ggml/gguf model.
+    pub model_loaded: bool,
+    /// The real error text from a failed load attempt, if any.
+    pub model_load_error: Option<String>,
+    /// Total `AudioChunk`s delivered to the speech engine so far this
+    /// process (across every `start_listening` call, not just the
+    /// current one - a simple running counter, not per-session).
+    pub chunks_received: u64,
+    pub last_chunk_sample_rate_hz: Option<u32>,
+    pub last_chunk_sample_count: Option<usize>,
+    /// `None` when the engine's `required_sample_rate_hz()` was `None`
+    /// (no resampling needed) or matched the chunk's own rate already.
+    pub last_resampled_sample_count: Option<usize>,
+    pub inferences_attempted: u64,
+    pub inferences_succeeded: u64,
+    /// The real error text from the most recent `feed_audio` failure -
+    /// mirrors `AppState::speech_error` but retained here even after a
+    /// later success clears that field, so a diagnostics read always has
+    /// something to show once at least one failure has occurred.
+    pub last_error: Option<String>,
+}
+
 pub struct AppState {
     pub config: AppConfig,
     pub db: Mutex<rusqlite::Connection>,
@@ -78,6 +117,10 @@ pub struct AppState {
     pub audio_error: Mutex<Option<String>>,
     /// Same as `audio_error`, for the speech engine (`SpeechStatusKind::Error`).
     pub speech_error: Mutex<Option<String>>,
+    /// Phase 3.8.6: the retained diagnostic detail `speech_error` alone
+    /// cannot carry (feature/model-load state, chunk/inference counters).
+    /// See `SpeechDiagnostics`'s own docs.
+    pub speech_diagnostics: Mutex<SpeechDiagnostics>,
     /// A dedicated `MusicIntelligenceEngine` instance for acoustic
     /// analysis (Phase 2.2), with its own `MusicProvider` connection -
     /// mirroring the existing "every independent read path gets its own
@@ -176,6 +219,7 @@ impl AppState {
         music_provider: Box<dyn MusicProvider>,
         audio_engine: Box<dyn AudioEngine>,
         speech_engine: Box<dyn SpeechEngine>,
+        speech_diagnostics: SpeechDiagnostics,
         acoustic_music_engine: MusicIntelligenceEngine,
         acoustic_recognizer: Box<dyn AcousticMusicRecognizer>,
     ) -> Self {
@@ -196,6 +240,7 @@ impl AppState {
             transcript_sequence: AtomicU64::new(0),
             audio_error: Mutex::new(None),
             speech_error: Mutex::new(None),
+            speech_diagnostics: Mutex::new(speech_diagnostics),
             acoustic_music_engine,
             acoustic_recognizer: Mutex::new(acoustic_recognizer),
             current_song: Mutex::new(None),

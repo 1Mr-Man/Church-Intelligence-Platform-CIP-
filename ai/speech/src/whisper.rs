@@ -158,6 +158,10 @@ impl SpeechEngine for WhisperSpeechEngine {
     fn flush(&mut self) -> Result<Vec<TranscriptSegment>, SpeechEngineError> {
         self.run_inference()
     }
+
+    fn required_sample_rate_hz(&self) -> Option<u32> {
+        Some(SAMPLE_RATE_HZ)
+    }
 }
 
 #[cfg(test)]

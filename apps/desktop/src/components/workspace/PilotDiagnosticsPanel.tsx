@@ -89,6 +89,40 @@ export function PilotDiagnosticsPanel() {
             <dd>{whisperModelSummary(diagnostics)}</dd>
           </div>
           <div>
+            <dt>Whisper diagnostics</dt>
+            <dd>
+              <div>Feature compiled: {diagnostics.speech.featureCompiled ? "YES" : "NO"}</div>
+              <div>
+                Model loaded:{" "}
+                {diagnostics.speech.modelLoadAttempted
+                  ? diagnostics.speech.modelLoaded
+                    ? "YES"
+                    : `NO (${diagnostics.speech.modelLoadError ?? "unknown reason"})`
+                  : "not attempted"}
+              </div>
+              <div>Speech engine ready: {diagnostics.speech.engineReady ? "YES" : "NO"}</div>
+              <div>
+                Audio chunks received: {diagnostics.speech.chunksReceived}
+                {diagnostics.speech.lastChunkSampleRateHz != null && (
+                  <>
+                    {" "}
+                    (last: {diagnostics.speech.lastChunkSampleCount} samples @{" "}
+                    {diagnostics.speech.lastChunkSampleRateHz} Hz
+                    {diagnostics.speech.lastResampledSampleCount != null
+                      ? `, resampled to ${diagnostics.speech.lastResampledSampleCount} samples`
+                      : ""}
+                    )
+                  </>
+                )}
+              </div>
+              <div>
+                Inferences: {diagnostics.speech.inferencesSucceeded} succeeded /{" "}
+                {diagnostics.speech.inferencesAttempted} attempted
+              </div>
+              {diagnostics.speech.lastError && <div>Last error: {diagnostics.speech.lastError}</div>}
+            </dd>
+          </div>
+          <div>
             <dt>Displays</dt>
             <dd>
               {diagnostics.displays.length} detected

@@ -65,6 +65,22 @@ pub trait SpeechEngine: Send + Sync {
 
     /// Flush any buffered audio and finalize the current segment.
     fn flush(&mut self) -> Result<Vec<TranscriptSegment>, SpeechEngineError>;
+
+    /// The sample rate (Hz) `feed_audio` requires its input already
+    /// resampled to, if this engine has a fixed requirement. `None`
+    /// (the default) means the engine accepts whatever rate it is given -
+    /// true of every engine that does not actually process sample
+    /// content (`NullSpeechEngine`, `ScriptedSpeechEngine`).
+    ///
+    /// `AudioEngine` implementations deliver chunks at the capture
+    /// device's own native rate and never resample themselves (see
+    /// `integrations/audio`'s module docs) - a caller feeding a real
+    /// engine's `feed_audio` is responsible for converting from the
+    /// chunk's reported rate to this one first. Phase 3.8.6 added this
+    /// method after finding that call site was not converting at all.
+    fn required_sample_rate_hz(&self) -> Option<u32> {
+        None
+    }
 }
 
 #[cfg(test)]

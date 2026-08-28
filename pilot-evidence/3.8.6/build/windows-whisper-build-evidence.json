@@ -1,0 +1,56 @@
+{
+  "phase": "3.8.6",
+  "summary": "Concrete, directly-inspected evidence that the Windows installer built this phase genuinely contains the Whisper (whisper.cpp/ggml) code path - not merely a Cargo.lock entry or a feature flag that silently no-oped.",
+  "buildCommand": "cargo build --target x86_64-pc-windows-gnu -p cip-desktop --features whisper --release, followed by (cd apps/desktop && npx tauri build --target x86_64-pc-windows-gnu --features whisper) - see scripts/build-windows-whisper.sh for the full repeatable process including the two toolchain fixes required",
+  "cargoTreeProof": {
+    "command": "cargo tree -p cip-desktop --target x86_64-pc-windows-gnu --features whisper -i whisper-rs",
+    "result": "whisper-rs v0.14.4 -> cip-ai-speech v0.1.0 -> cip-desktop v0.1.0",
+    "controlCheck": "The same command without --features whisper shows nothing - whisper-rs is an optional dependency, completely absent from the graph otherwise (confirmed both ways this phase)"
+  },
+  "embeddedBinary": {
+    "path": "target/x86_64-pc-windows-gnu/release/cip-desktop.exe",
+    "fileCommand": "PE32+ executable (GUI) x86-64 (stripped to external PDB), for MS Windows, 11 sections",
+    "sizeBytes": 33776623,
+    "note": "The Phase 3.8.5 non-whisper embedded binary's exact uncompressed size was not separately recorded, so no direct byte-for-byte before/after comparison is claimed - the symbol-strings proof below is the stronger, unambiguous evidence of what changed"
+  },
+  "symbolStringsProof": {
+    "command": "strings target/x86_64-pc-windows-gnu/release/cip-desktop.exe | grep -iE 'ggml|whisper\\.cpp|whisper_full|GGML_VERSION'",
+    "sampleMatches": [
+      "whisper_full_with_state",
+      "whisper_full_parallel",
+      "ggml_backend_init",
+      "ggml_backend_set_n_threads",
+      "ggml_backend_score",
+      "%s: ggml_init() failed",
+      "/home/user/Church-Intelligence-Platform-CIP-/target/x86_64-pc-windows-gnu/release/build/whisper-rs-sys-497ef864de2fffc9/out/whisper.cpp/src/whisper.cpp",
+      "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/whisper-rs-0.14.4/src/ggml_logging_hook.rs",
+      "ggml-tiny.en.bin (the configured default model filename constant, also present)"
+    ],
+    "conclusion": "Direct evidence of real whisper.cpp/ggml object code and build-time source paths compiled into the shipped binary, not merely metadata"
+  },
+  "installer": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "fileSizeBytes": 7613226,
+    "sha256": "26739280b7cc4ef750d73a7d04248cf00533b7ff5623720f8ad1621f5e3f9441",
+    "priorNonWhisperInstallerSizeBytes": 7140776,
+    "priorNonWhisperInstallerSha256": "70ea056359a1dbc738b9b84bd7f2e8bbe6d6a0088bb858aeac47cddaad04b813",
+    "sizeIncreaseBytes": 472450,
+    "note": "A real, measurable increase in the NSIS-compressed installer despite compression, consistent with a genuinely larger embedded binary"
+  },
+  "toolchainDefectsFoundAndFixed": [
+    {
+      "defect": "whisper.cpp's vendored ggml CMake build (ggml/CMakeLists.txt) unconditionally does set(CMAKE_STATIC_LIBRARY_PREFIX \"\") for any Windows target, assuming MSVC-style unprefixed .lib naming. The actual linker is MinGW's GNU ld (via x86_64-w64-mingw32-gcc), which requires Unix libX.a naming for a plain -lX flag.",
+      "symptom": "error: could not find native static library `ggml`, perhaps an -L flag is missing? (while compiling whisper-rs-sys itself, before cip-desktop's own build.rs ever runs)",
+      "evidence": "Directly inspected the CMake install output: out/lib/libwhisper.a (correct) alongside out/lib/ggml.a, out/lib/ggml-base.a, out/lib/ggml-cpu.a (missing prefix) - confirmed via ls and via grep of ggml/CMakeLists.txt lines 37-38 in the fetched whisper.cpp source tree",
+      "fix": "Copy the three misnamed archives to lib-prefixed names in the same directories the failed compile's own emitted -L flags already pointed at, then retry the build (a two-pass build, not a source patch) - see scripts/build-windows-whisper.sh",
+      "attemptedButRejected": "A downstream build.rs (in apps/desktop/src-tauri) that tried to add the fix automatically was implemented and tested, then removed after confirming it could never work: whisper-rs-sys fails to compile before cip-desktop's own build.rs ever runs, so a downstream crate's build-script directives arrive structurally too late to help. This is a genuine Cargo build-ordering constraint, not a mistake in the attempted fix."
+    },
+    {
+      "defect": "This container's default x86_64-w64-mingw32-gcc/g++ update-alternatives selection is the win32-threading-model variant; whisper.cpp/ggml's build links -lpthread and expects POSIX threading.",
+      "symptom": "linking with `x86_64-w64-mingw32-gcc` failed ... undefined reference to `__mingwthr_key_dtor` (at the final cip-desktop.exe link step)",
+      "evidence": "update-alternatives --list x86_64-w64-mingw32-gcc showed both -win32 and -posix variants already installed (Ubuntu ships both); the active alternative before this fix was -win32",
+      "fix": "update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix (and the g++ equivalent), followed by a clean rebuild of whisper-rs-sys's CMake output so it picks up the new compiler"
+    }
+  ],
+  "conclusion": "Both defects were toolchain/upstream-CMake-configuration issues external to this repository's own source code, discovered and root-caused by directly attempting the build rather than trusting cargo check (which does not perform the final link step and had misleadingly succeeded during the audit phase). Neither fix modifies any vendored dependency source."
+}

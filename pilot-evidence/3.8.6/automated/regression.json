@@ -1,0 +1,34 @@
+{
+  "phase": "3.8.6",
+  "rust": {
+    "fmtCheck": "clean",
+    "clippyDefaultFeatures": "clean (-D warnings)",
+    "clippyWhisperFeature": "clean (-D warnings) - cip-ai-speech + cip-desktop with --features whisper",
+    "testWorkspaceDefaultFeatures": "all suites green, unchanged from Phase 3.8.5 baseline plus 6 new resample_pcm16 unit tests in cip-desktop",
+    "testCipAiSpeechWhisperFeature": "7 passed, 0 failed (unchanged)",
+    "testCipDesktopWhisperFeature": "227 passed, 0 failed",
+    "cargoCheckWindowsGnuDefaultFeatures": "clean",
+    "cargoCheckWindowsGnuWhisperFeature": "clean (also confirms whisper-rs-sys compiles whisper.cpp via the mingw/cmake cross-toolchain)",
+    "windowsWhisperReleaseBuild": "succeeded via cargo build --release --target x86_64-pc-windows-gnu --features whisper after two documented toolchain fixes (see docs/phase-3-8-6-windows-whisper-build.md); npx tauri build --target x86_64-pc-windows-gnu --features whisper succeeded end-to-end, producing a real NSIS installer"
+  },
+  "frontend": {
+    "typecheck": "clean (tsc -b)",
+    "lint": "0 errors; 4 pre-existing warnings unchanged from Phase 3.8.5 baseline",
+    "test": "210 passed, 0 failed (16 test files) - unchanged pass count; the new PilotDiagnostics.speech field is additive to an existing type, exercised via typecheck rather than new dedicated tests",
+    "build": "clean (tsc -b && vite build)"
+  },
+  "newResamplePcm16Tests": [
+    "resample_pcm16_is_a_no_op_when_rates_already_match",
+    "resample_pcm16_is_a_no_op_on_empty_input",
+    "resample_pcm16_downsamples_to_roughly_the_expected_length (48kHz->16kHz, exact 3:1 ratio matching real Windows device rates)",
+    "resample_pcm16_upsamples_to_roughly_the_expected_length",
+    "resample_pcm16_preserves_a_constant_signal",
+    "resample_pcm16_never_panics_on_a_single_sample"
+  ],
+  "codeChangeSummary": {
+    "speechEngineTrait": "core/ai/src/speech_engine.rs: added required_sample_rate_hz() -> Option<u32> as a default trait method (None) - fully backward compatible.",
+    "whisperSpeechEngine": "ai/speech/src/whisper.rs: overrides required_sample_rate_hz() to Some(16_000).",
+    "resampling": "apps/desktop/src-tauri/src/commands.rs: added resample_pcm16() pure function; handle_audio_chunk now resamples chunk.samples from chunk.sample_rate_hz to the engine's required rate (if any and different) before calling feed_audio.",
+    "diagnostics": "state.rs: new SpeechDiagnostics struct + AppState.speech_diagnostics field. lib.rs: create_speech_engine now returns (engine, SpeechDiagnostics) retaining the real model-load error instead of discarding it after logging. commands.rs: PilotDiagnostics gains a `speech: SpeechRuntimeDiagnostics` field, populated in get_pilot_diagnostics. Frontend: appConfig.ts mirrors the new type; PilotDiagnosticsPanel.tsx renders it (feature compiled, model loaded, engine ready, chunks received, last chunk rate/count/resampled count, inferences attempted/succeeded, last error text)."
+  }
+}

@@ -59,9 +59,32 @@ export interface DatabaseDiagnostic {
   writable: boolean;
 }
 
+/**
+ * Phase 3.8.6: what the running process actually observed about the
+ * speech pipeline - distinct from `WhisperModelDiagnostic` (a filesystem
+ * check) in that `modelLoaded` is only `true` after the real engine
+ * parsed the file and initialized a whisper.cpp context. Mirrors
+ * `commands.rs`'s `SpeechRuntimeDiagnostics` one-to-one.
+ */
+export interface SpeechRuntimeDiagnostics {
+  featureCompiled: boolean;
+  modelLoadAttempted: boolean;
+  modelLoaded: boolean;
+  modelLoadError: string | null;
+  engineReady: boolean;
+  chunksReceived: number;
+  lastChunkSampleRateHz: number | null;
+  lastChunkSampleCount: number | null;
+  lastResampledSampleCount: number | null;
+  inferencesAttempted: number;
+  inferencesSucceeded: number;
+  lastError: string | null;
+}
+
 export interface PilotDiagnostics {
   machine: MachineDiagnostic;
   whisperModel: WhisperModelDiagnostic;
+  speech: SpeechRuntimeDiagnostics;
   audioDevices: Array<{ id: string; name: string; isDefault: boolean }>;
   audio: {
     isCapturing: boolean;

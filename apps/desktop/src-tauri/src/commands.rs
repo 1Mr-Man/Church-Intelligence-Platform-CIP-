@@ -315,11 +315,36 @@ pub struct DatabaseDiagnostic {
     pub writable: bool,
 }
 
+/// Phase 3.8.6: what the running process actually observed about the
+/// speech pipeline - distinct from `WhisperModelDiagnostic` (a filesystem
+/// check anyone can run without starting the engine) in that
+/// `model_loaded` is only ever `true` after `WhisperSpeechEngine::load`
+/// genuinely parsed the file and initialized a whisper.cpp context. Every
+/// field here mirrors `state::SpeechDiagnostics` one-to-one - see that
+/// struct's own docs for what each one means and where it's set.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeechRuntimeDiagnostics {
+    pub feature_compiled: bool,
+    pub model_load_attempted: bool,
+    pub model_loaded: bool,
+    pub model_load_error: Option<String>,
+    pub engine_ready: bool,
+    pub chunks_received: u64,
+    pub last_chunk_sample_rate_hz: Option<u32>,
+    pub last_chunk_sample_count: Option<usize>,
+    pub last_resampled_sample_count: Option<usize>,
+    pub inferences_attempted: u64,
+    pub inferences_succeeded: u64,
+    pub last_error: Option<String>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PilotDiagnostics {
     pub machine: MachineDiagnostic,
     pub whisper_model: WhisperModelDiagnostic,
+    pub speech: SpeechRuntimeDiagnostics,
     pub audio_devices: Vec<AudioDevice>,
     pub audio: AudioEngineStatus,
     /// Every display this process can detect. `len() >= 2` is a necessary
@@ -342,6 +367,33 @@ pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> Pilo
     };
 
     let whisper_model = diagnose_whisper_model(&state.config.whisper_model_path);
+
+    let speech = {
+        let diag = state
+            .speech_diagnostics
+            .lock()
+            .expect("speech_diagnostics mutex poisoned")
+            .clone();
+        let engine_ready = state
+            .speech_engine
+            .lock()
+            .expect("speech_engine mutex poisoned")
+            .is_ready();
+        SpeechRuntimeDiagnostics {
+            feature_compiled: diag.feature_compiled,
+            model_load_attempted: diag.model_load_attempted,
+            model_loaded: diag.model_loaded,
+            model_load_error: diag.model_load_error,
+            engine_ready,
+            chunks_received: diag.chunks_received,
+            last_chunk_sample_rate_hz: diag.last_chunk_sample_rate_hz,
+            last_chunk_sample_count: diag.last_chunk_sample_count,
+            last_resampled_sample_count: diag.last_resampled_sample_count,
+            inferences_attempted: diag.inferences_attempted,
+            inferences_succeeded: diag.inferences_succeeded,
+            last_error: diag.last_error,
+        }
+    };
 
     let audio_engine = state
         .audio_engine
@@ -397,6 +449,7 @@ pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> Pilo
     PilotDiagnostics {
         machine,
         whisper_model,
+        speech,
         audio_devices,
         audio,
         displays,
@@ -1037,6 +1090,44 @@ fn spawn_acoustic_worker(app: AppHandle, service_id: Uuid, rx: mpsc::Receiver<Au
     });
 }
 
+/// Phase 3.8.6: linear-interpolation resampler bridging `AudioEngine`'s
+/// device-native sample rate to whatever fixed rate a `SpeechEngine`
+/// requires (see `SpeechEngine::required_sample_rate_hz`). `integrations/audio`
+/// deliberately never resamples itself (see its own module docs) - this is
+/// the one consumer that currently needs a fixed rate, so the conversion
+/// happens here, at the call site, not inside a second audio engine.
+/// Deliberately simple (linear interpolation, not a windowed-sinc
+/// resampler): adequate for feeding a buffering, non-realtime-critical
+/// speech engine, not claimed to be broadcast-quality DSP.
+fn resample_pcm16(samples: &[i16], from_hz: u32, to_hz: u32) -> Vec<i16> {
+    if samples.is_empty() || from_hz == 0 || to_hz == 0 || from_hz == to_hz {
+        return samples.to_vec();
+    }
+    let ratio = f64::from(to_hz) / f64::from(from_hz);
+    // `.max(1)`: a non-empty input must never resample down to a fully
+    // empty buffer (a downsampled single-sample/very-short chunk would
+    // otherwise round to zero output samples) - that would look
+    // indistinguishable from silence to a diagnostics reader, when in
+    // fact real (if brief) input existed.
+    let out_len = (((samples.len() as f64) * ratio).round() as usize).max(1);
+    let last_idx = samples.len() - 1;
+    let mut out = Vec::with_capacity(out_len);
+    for i in 0..out_len {
+        let src_pos = i as f64 / ratio;
+        let idx = (src_pos.floor() as usize).min(last_idx);
+        let frac = src_pos - idx as f64;
+        let s0 = f64::from(samples[idx]);
+        let s1 = f64::from(samples[(idx + 1).min(last_idx)]);
+        let interpolated = s0 + (s1 - s0) * frac;
+        out.push(
+            interpolated
+                .round()
+                .clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16,
+        );
+    }
+    out
+}
+
 /// Runs on the `AudioEngine`'s own capture thread (see
 /// `integrations/audio`'s worker-thread design) - never on a Tauri command
 /// thread. Re-fetches `AppState` from the cloned `AppHandle` rather than
@@ -1051,8 +1142,47 @@ fn handle_audio_chunk(app: &AppHandle, service_id: Uuid, chunk: AudioChunk) {
             .speech_engine
             .lock()
             .expect("speech_engine mutex poisoned");
-        match speech.feed_audio(&chunk.samples) {
-            Ok(segments) => segments,
+
+        // Phase 3.8.6: `AudioEngine` delivers chunks at the device's own
+        // native rate and never resamples (see `integrations/audio`'s
+        // module docs); a speech engine with a fixed rate requirement
+        // (only `WhisperSpeechEngine` has one, at 16kHz) is the consumer
+        // responsible for converting - this is that conversion. Computed
+        // fresh per chunk since `required_sample_rate_hz()` is cheap and
+        // `chunk.sample_rate_hz` can legitimately change across a
+        // stop/start with a different device selected.
+        let target_rate = speech.required_sample_rate_hz();
+        let resampled;
+        let (feed_samples, resampled_len): (&[i16], Option<usize>) = match target_rate {
+            Some(target) if target != chunk.sample_rate_hz && chunk.sample_rate_hz > 0 => {
+                resampled = resample_pcm16(&chunk.samples, chunk.sample_rate_hz, target);
+                let len = resampled.len();
+                (&resampled, Some(len))
+            }
+            _ => (&chunk.samples, None),
+        };
+
+        {
+            let mut diag = state
+                .speech_diagnostics
+                .lock()
+                .expect("speech_diagnostics mutex poisoned");
+            diag.chunks_received += 1;
+            diag.last_chunk_sample_rate_hz = Some(chunk.sample_rate_hz);
+            diag.last_chunk_sample_count = Some(chunk.samples.len());
+            diag.last_resampled_sample_count = resampled_len;
+            diag.inferences_attempted += 1;
+        }
+
+        match speech.feed_audio(feed_samples) {
+            Ok(segments) => {
+                state
+                    .speech_diagnostics
+                    .lock()
+                    .expect("speech_diagnostics mutex poisoned")
+                    .inferences_succeeded += 1;
+                segments
+            }
             Err(e) => {
                 log::error!(target: LogCategory::Speech.target(), "speech engine error: {e}");
                 // Phase 1.3 speech failure recovery: the service stays
@@ -1063,6 +1193,11 @@ fn handle_audio_chunk(app: &AppHandle, service_id: Uuid, chunk: AudioChunk) {
                     .speech_error
                     .lock()
                     .expect("speech_error mutex poisoned") = Some(e.to_string());
+                state
+                    .speech_diagnostics
+                    .lock()
+                    .expect("speech_diagnostics mutex poisoned")
+                    .last_error = Some(e.to_string());
                 let db = state.db.lock().expect("db connection poisoned");
                 record_timeline(
                     &db,
@@ -4851,6 +4986,52 @@ mod tests {
     // covered end to end in `persistence.rs`, `pipeline.rs`, and
     // `timeline.rs`.
 
+    // --- Phase 3.8.6 resampling ------------------------------------------
+
+    #[test]
+    fn resample_pcm16_is_a_no_op_when_rates_already_match() {
+        let samples = vec![1i16, 2, 3, 4, 5];
+        assert_eq!(resample_pcm16(&samples, 16_000, 16_000), samples);
+    }
+
+    #[test]
+    fn resample_pcm16_is_a_no_op_on_empty_input() {
+        assert!(resample_pcm16(&[], 44_100, 16_000).is_empty());
+    }
+
+    #[test]
+    fn resample_pcm16_downsamples_to_roughly_the_expected_length() {
+        // 48kHz -> 16kHz is an exact 3:1 ratio (a real Windows "Stereo
+        // Mix"-class native rate down to Whisper's required rate).
+        let samples: Vec<i16> = (0..48_000).map(|i| (i % 100) as i16).collect();
+        let out = resample_pcm16(&samples, 48_000, 16_000);
+        assert_eq!(out.len(), 16_000);
+    }
+
+    #[test]
+    fn resample_pcm16_upsamples_to_roughly_the_expected_length() {
+        let samples: Vec<i16> = (0..16_000).map(|i| (i % 100) as i16).collect();
+        let out = resample_pcm16(&samples, 16_000, 48_000);
+        assert_eq!(out.len(), 48_000);
+    }
+
+    #[test]
+    fn resample_pcm16_preserves_a_constant_signal() {
+        // A DC-like constant buffer must resample to the same constant -
+        // proves the interpolation doesn't introduce spurious ringing for
+        // the simplest possible input.
+        let samples = vec![1234i16; 44_100];
+        let out = resample_pcm16(&samples, 44_100, 16_000);
+        assert!(out.iter().all(|&s| s == 1234));
+    }
+
+    #[test]
+    fn resample_pcm16_never_panics_on_a_single_sample() {
+        let out = resample_pcm16(&[500], 44_100, 16_000);
+        assert!(!out.is_empty());
+        assert!(out.iter().all(|&s| s == 500));
+    }
+
     // --- Phase 1.3 lifecycle/workflow guards ---------------------------
 
     #[test]
@@ -5241,6 +5422,20 @@ mod tests {
             },
             whisper_model: WhisperModelDiagnostic::Missing {
                 expected_path: "/tmp/ggml-tiny.en.bin".to_string(),
+            },
+            speech: SpeechRuntimeDiagnostics {
+                feature_compiled: false,
+                model_load_attempted: false,
+                model_loaded: false,
+                model_load_error: None,
+                engine_ready: false,
+                chunks_received: 0,
+                last_chunk_sample_rate_hz: None,
+                last_chunk_sample_count: None,
+                last_resampled_sample_count: None,
+                inferences_attempted: 0,
+                inferences_succeeded: 0,
+                last_error: None,
             },
             audio_devices: Vec::new(),
             audio: AudioEngineStatus {

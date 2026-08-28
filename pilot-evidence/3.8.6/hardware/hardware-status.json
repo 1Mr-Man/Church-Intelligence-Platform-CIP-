@@ -1,0 +1,24 @@
+{
+  "phase": "3.8.6",
+  "environmentA": {
+    "description": "Automated Rust + frontend regression suite, direct code tracing (docs/phase-3-8-6-audit.md), and a genuine Windows+whisper build with concrete proof of feature inclusion (pilot-evidence/3.8.6/build/windows-whisper-build-evidence.json)",
+    "status": "PASS - full green, see pilot-evidence/3.8.6/automated/regression.json"
+  },
+  "environmentB": {
+    "description": "Xvfb + xdotool + xwd GUI reproduction (virtual display, no real hardware)",
+    "status": "NOT AVAILABLE THIS SESSION - unchanged from Phase 3.8.5's finding (a session/container limitation, isolated and proven unrelated to code by a controlled test against an unmodified baseline binary in that phase; not re-attempted this phase since nothing about the GUI/webview layer changed - see pilot-evidence/3.8.5/xvfb/environment-b-not-available.json)."
+  },
+  "environmentC": {
+    "description": "Real Windows 10/11 x64 hardware with real audio input devices AND a real local Whisper model file",
+    "status": "NOT VERIFIED - no physical Windows machine, no real audio hardware, and no real Whisper model file are accessible in this container. Every claim about real transcription, real Bible detection from live speech, or real Sermon Intelligence from live speech is NOT VERIFIED and must not be read as PASS.",
+    "requiredForVerification": [
+      "A real Windows 10/11 x64 machine (ideally the same one from Phase 3.8.5's SIGNAL CAPTURED test)",
+      "Install this phase's rebuilt whisper-enabled installer specifically (SHA-256 26739280b7cc4ef750d73a7d04248cf00533b7ff5623720f8ad1621f5e3f9441), not a prior build",
+      "Obtain a real ggml/gguf Whisper model file (e.g. ggml-tiny.en.bin from a source the operator trusts) and place it at %APPDATA%\\org.churchintelligence.cip\\models\\ggml-tiny.en.bin, or set CIP_WHISPER_MODEL_PATH to point elsewhere - this container could not obtain one (huggingface.co is blocked by egress policy, confirmed via a live curl test)",
+      "Start Service, open System Diagnostics, confirm 'Feature compiled: YES' and 'Model loaded: YES' (if 'NO', the real error text is now shown - report it)",
+      "Select a real input device, click Start Listening, confirm 'Speech engine ready: YES' in diagnostics",
+      "Play/speak a controlled test phrase ('Turn to Matthew chapter 6 verse 9.') and confirm: a real transcript segment appears, real MAT 6:9 Bible detection fires, and (if applicable) Sermon Intelligence findings appear - do NOT use automatic presentation as the first acceptance test",
+      "Report back exact PASS/FAIL for each of the 12 final-gate items so this phase's report can be honestly updated - see pilot-evidence/3.8.6/windows/windows-offline-checklist.json"
+    ]
+  }
+}
