@@ -1,0 +1,35 @@
+{
+  "phase": "3.8.4",
+  "trigger": "Real physical Windows evidence: the Phase 3.8.3-rebuilt Presentation Display window appears (a real native window is created) but renders completely WHITE, not black. PresentationDisplay.css sets html,body background to black unconditionally, applied the instant the stylesheet loads regardless of payload state - so a white window means the frontend document never got far enough to apply that stylesheet, reclassifying this from a payload problem to a load/render failure.",
+  "codeAudit": {
+    "vendoredTauriSourceCitation": "tauri-2.11.5/src/webview/webview_window.rs lines 56 and 115 (WebviewWindowBuilder::new and ::build): 'On Windows, this function deadlocks when used in a synchronous command and event handlers, see [the Webview2 issue].' Links to https://github.com/tauri-apps/wry/issues/583. The official Tauri docs' own worked example for 'Create a window in a command' uses async fn, not a plain synchronous command, specifically because of this issue.",
+    "affectedCallSites": [
+      "commands::display_presentation - the command the manual detect->approve->prepare->Display click path actually exercises",
+      "commands::open_presentation_display - the separate 'Open Display' button used by both LiveChurchBrain.tsx and ServiceReplay.tsx"
+    ],
+    "bothWerePlainSynchronousCommandsBeforeThisPhase": true,
+    "whyPhase383DidNotCatchThis": "Phase 3.8.3's Linux/Xvfb end-to-end reproduction was valid evidence for the application-level pipeline (detect->approve->prepare->render->event->hydrate->paint) once a webview has actually loaded. It could not, by construction, reproduce this defect: WebKitGTK (Linux) does not have WRY issue #583's Windows-specific COM/message-pump deadlock, so the exact same synchronous WebviewWindowBuilder::build() call that deadlocks on Windows completes normally on Linux every time - a different, non-overlapping failure class from what Phase 3.8.3 investigated."
+  },
+  "appliedFix": {
+    "description": "Converted display_presentation and open_presentation_display from #[tauri::command] pub fn to #[tauri::command] pub async fn. Names, parameters, and return types unchanged - invoke() in commands.ts already returns a Promise regardless, so the JS command contract required zero changes (confirmed by an unmodified commands.ts and unmodified, still-fully-passing frontend test suite).",
+    "confidence": "strongly supported by first-party Tauri documentation matching this codebase's exact calling pattern and platform, not confirmed by direct reproduction - no physical Windows/WebView2 environment was accessible in this container"
+  },
+  "newDiagnosticCoverage": {
+    "description": "Added an on_page_load handler to the WebviewWindowBuilder in open_display_window, logging PageLoadEvent::Started/Finished with the URL at log::info! - closing the previously-uncovered boundaries C/D/E (does the display webview's document navigation itself ever start/finish). Added main.tsx branch-selection logging (boundary G/H, display window only) and a display-scoped window.onerror/unhandledrejection handler (any otherwise-invisible frontend exception), both routed through the existing Phase 3.8.3 log_display_diagnostic command.",
+    "verifiedFunctional": "Real Xvfb E2E reproduction against the rebuilt binary confirmed all new checkpoints fire correctly and in the expected order: 'page-load-started url=tauri://localhost', 'page-load-finished url=tauri://localhost', 'root-branch-selected', followed by the existing Phase 3.8.3 checkpoints (mounted, effect-ran, hydration-call/result, payload-applied) - a complete, unbroken diagnostic trail from window creation through pixels-ready state, on Linux.",
+    "evidenceFile": "pilot-evidence/3.8.4/e2e/diagnostic-log-checkpoints.log"
+  },
+  "visibleFallbackConsidered": {
+    "added": false,
+    "reasoning": "The spec permits a temporary visible fallback only if necessary to distinguish 'React never mounted' from 'React mounted with no payload.' PresentationDisplay.css's unconditional black background on html,body already makes exactly that distinction visually (black = mounted with no payload; anything else, e.g. white, = never loaded/mounted), and the new on_page_load + main.tsx logging now provides an authoritative log-based signal for the same distinction. No visible content was added that could ever be mistaken for production presentation output."
+  },
+  "regressionOnLinux": {
+    "summary": "Full close->reopen->display-a-different-item cycle re-verified against the rebuilt (async-command) binary: MAT 6:9 displayed correctly, Stop blanked correctly, Close Display closed the window, a second reference (ROM 8:28) was detected/approved/prepared, and Display reopened a fresh window showing the correct new content - zero regression to the already-proven-correct Linux/WebKitGTK behavior.",
+    "evidenceFiles": [
+      "pilot-evidence/3.8.4/e2e/00-async-command-display-mat-6-9.png",
+      "pilot-evidence/3.8.4/e2e/01-main-window-prepared-mat-6-9.png",
+      "pilot-evidence/3.8.4/e2e/02-reopen-rom-8-28.png",
+      "pilot-evidence/3.8.4/e2e/03-main-window-after-close.png"
+    ]
+  }
+}

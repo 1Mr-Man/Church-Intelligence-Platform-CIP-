@@ -1,0 +1,39 @@
+{
+  "environment": "automated",
+  "commands": {
+    "cargo fmt --check": "pass",
+    "cargo check --workspace": "pass",
+    "cargo check --target x86_64-pc-windows-gnu -p cip-desktop": "pass (verifies the Windows-only code paths this Linux container's ordinary cargo check cannot see, including the on_page_load closure and the two now-async commands)",
+    "cargo clippy --workspace --all-targets -- -D warnings": "pass, 0 warnings",
+    "cargo test --workspace (default features)": "786 passed, 0 failed (unchanged from the Phase 3.8.3 baseline - this phase changed how two existing commands execute, not their observable behavior, and added diagnostic-only logging; the fix is proven via real Xvfb end-to-end reproduction, consistent with this project's documented no-tauri::test-harness convention for Tauri-command-layer glue code)",
+    "cargo test -p cip-ai-speech --features whisper": "7 passed, 0 failed",
+    "npm run typecheck (tsc -b)": "pass",
+    "npm run test (vitest run)": "210 passed, 0 failed (unchanged from the Phase 3.8.3 baseline - the JS command contract for display_presentation/open_presentation_display did not change, so no test needed updating)",
+    "npm run build (vite build)": "pass",
+    "npm run lint (oxlint)": "0 errors, 4 pre-existing warnings (unrelated files, unchanged from the Phase 3.8.3 baseline). A real new warning was introduced and fixed during this phase: main.tsx's first draft mutated window.onerror during a component's render body (react(immutability)); fixed by moving the diagnostic/error-handler registration to module scope, executed once before React ever renders, which also resolved the warning."
+  },
+  "backendContractPreservation": {
+    "newTauriCommands": 0,
+    "changedTauriCommandSignatures": 0,
+    "changedTauriCommandExecutionModel": 2,
+    "changedTauriCommandExecutionModelNote": "display_presentation and open_presentation_display changed from #[tauri::command] pub fn to #[tauri::command] pub async fn - names, parameters, and return types are identical; invoke() in commands.ts already returns a Promise for both sync and async Tauri commands, so no frontend code needed to change, confirmed via an unmodified commands.ts and an unmodified full frontend test suite.",
+    "removedTauriCommands": 0,
+    "newDatabaseMigrations": 0,
+    "eventsDiff": "git diff 36b7a9b -- apps/desktop/src-tauri/src/events.rs apps/desktop/src/events/ -> empty",
+    "libRsDiff": "git diff 36b7a9b -- apps/desktop/src-tauri/src/lib.rs -> empty (no new command registration was needed this phase)",
+    "intelligenceEnginesDiff": "git diff 36b7a9b --stat -- core/intelligence/ -> empty",
+    "bibleDataDiff": "git diff 36b7a9b --stat -- core/bible/ integrations/bible/ database/seed* -> empty",
+    "presentationRendererDiff": "git diff 36b7a9b --stat -- presentation/renderer/ core/presentation/ -> empty (RenderedSlide and the Prepared->Active->Stopped lifecycle are byte-for-byte unchanged; only presentation_display.rs and commands.rs changed, both orchestration/Tauri-glue layer only)",
+    "migrationDiff": "git diff 36b7a9b --stat -- database/migrations/ database/src/migrations.rs -> empty",
+    "capabilitiesDiff": "git diff 36b7a9b -- apps/desktop/src-tauri/capabilities/ apps/desktop/src-tauri/tauri.conf.json -> empty",
+    "conclusion": "Phase 3.8.4's changes are exclusively a change to WHEN/HOW two existing commands execute (synchronous -> async, per Tauri's own documented Windows guidance for WebviewWindowBuilder), plus additive diagnostic logging (an on_page_load handler, and frontend branch-selection/exception logging routed through the existing Phase 3.8.3 log_display_diagnostic command). No Tauri command signature, event contract, intelligence engine, Bible data, renderer, or presentation lifecycle changed."
+  },
+  "offlineDependencyCheck": {
+    "command": "cargo tree --workspace --all-features",
+    "result": "no HTTP client crate in the dependency graph - unchanged from prior phases"
+  },
+  "secretsScan": {
+    "command": "git diff 36b7a9b -- apps/desktop/src apps/desktop/src-tauri docs | grep -iE \"TODO|FIXME|api[_-]?key|secret|password|BEGIN (RSA|PRIVATE)\"",
+    "result": "no matches"
+  }
+}

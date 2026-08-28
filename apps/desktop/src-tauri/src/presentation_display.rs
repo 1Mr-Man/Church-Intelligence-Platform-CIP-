@@ -29,6 +29,7 @@
 //! only ever listens for `PRESENTATION_STARTED`/`PRESENTATION_STOPPED`
 //! events, the same public event bus every other window already uses.
 
+use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 /// The display window's Tauri label - distinct from `"main"` (the
@@ -55,6 +56,25 @@ pub fn is_display_window_open(app: &AppHandle) -> bool {
 /// reconciled the same way an explicit Stop action would be - via
 /// [`crate::commands::clear_active_presentation`], so persistence never
 /// disagrees with what the operator can actually see.
+///
+/// # Phase 3.8.4: callers MUST be `async fn` Tauri commands on Windows
+///
+/// This function's `WebviewWindowBuilder::build()` call is a documented
+/// Tauri/WRY known issue on Windows
+/// (<https://github.com/tauri-apps/wry/issues/583>, referenced directly
+/// from the vendored `tauri` crate's own doc comments on
+/// `WebviewWindowBuilder::new`/`build`): calling it from a synchronous
+/// `#[tauri::command] fn` (as opposed to `async fn`) deadlocks the
+/// WebView2 control's initialization on Windows specifically - the native
+/// window frame can still appear (created by the OS), but the webview
+/// inside it never finishes navigating, leaving WebView2's own default
+/// *white* background rather than this app's CSS (which never gets a
+/// chance to run). This function itself stays synchronous (it is not
+/// `.await`ed anywhere); the requirement is on its *callers*
+/// (`commands::display_presentation`, `commands::open_presentation_display`),
+/// which are `async fn` for exactly this reason - see
+/// `docs/phase-3-8-4-audit.md` section D for the real Windows evidence and
+/// the exact vendored-source citation this is based on.
 pub fn open_display_window(app: &AppHandle) -> tauri::Result<()> {
     if let Some(existing) = app.get_webview_window(DISPLAY_WINDOW_LABEL) {
         existing.show()?;
@@ -71,6 +91,23 @@ pub fn open_display_window(app: &AppHandle) -> tauri::Result<()> {
     .inner_size(1280.0, 720.0)
     .resizable(true)
     .visible(true)
+    // Phase 3.8.4 TEMPORARY DIAGNOSTIC: the only way to observe, from
+    // Rust, whether the display webview's document navigation itself
+    // ever starts/finishes - boundaries C/D/E of the operator's audit.
+    // Without this, "the window appears but stays blank" was
+    // indistinguishable between "navigation never happened" and
+    // "navigation finished but the frontend never ran."
+    .on_page_load(|_webview, payload| {
+        let event_name = match payload.event() {
+            PageLoadEvent::Started => "page-load-started",
+            PageLoadEvent::Finished => "page-load-finished",
+        };
+        log::info!(
+            target: crate::logging::LogCategory::Presentation.target(),
+            "[diagnostic] display window: {event_name} url={}",
+            payload.url()
+        );
+    })
     .build()?;
 
     log::info!(

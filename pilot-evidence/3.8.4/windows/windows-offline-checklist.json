@@ -1,0 +1,32 @@
+{
+  "phase": "3.8.4",
+  "note": "No physical Windows machine was available in this container for Phase 3.8.4. The operator's Phase 3.8.3 Windows testing (the display window appearing but rendering completely white) was against the PRIOR build - this checklist covers verifying the rebuilt Phase 3.8.4 artifact, not a repeat of that prior test.",
+  "installer": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "26d27aa44e87391f9fec2f10430cf9fcc4b209c4dfc8f3425553bf7d3b7de11c",
+    "fileSizeBytes": 7139780,
+    "status": "NOT VERIFIED on real Windows hardware - cross-compiled, file(1)-inspected, and Windows-target cargo-check-verified only (Environment A/B)"
+  },
+  "hardBlockerPerOperatorSpec": "Do not mark Windows PASS unless actual Scripture pixels are visible in the secondary display window on the real Windows laptop. That physical Windows test has NOT occurred in this session.",
+  "requiredForGateToBecomePASS": [
+    "a real Windows 10/11 x64 laptop (the same one that produced the white-display report)",
+    "Internet disconnected for the duration of the checklist",
+    "install and launch this rebuilt installer specifically (SHA-256 above), not the prior Phase 3.8.3 build",
+    "1) Start Service. 2) Manual transcript input: 'Turn to Matthew chapter 6 verse 9.' 3) Verify real MAT 6:9 detection. 4) Approve. 5) Prepare. 6) Display. 7) Verify the secondary Windows display contains actual BSB MAT 6:9 text (not white, not black-and-empty)",
+    "8) Stop. 9) Close display. 10) Prepare ROM 8:28 through the existing manual pipeline. 11) Display again. 12) Verify actual BSB ROM 8:28 text",
+    "13) Close/reopen display. 14) Display MAT 6:9 again. 15) Verify rendering",
+    "capture screenshots at each boundary; if the display remains white, capture the app's log file (RUST_LOG not required - all checkpoints log at Info level by default) and report which checkpoints did/did not appear, per docs/phase-3-8-4-presentation-display-rendering.md"
+  ],
+  "finalGateFields": {
+    "WINDOW_CREATION": "NOT_VERIFIED",
+    "PAGE_LOAD": "NOT_VERIFIED",
+    "REACT_MOUNT": "NOT_VERIFIED",
+    "CSS_LOAD": "NOT_VERIFIED",
+    "HYDRATION": "NOT_VERIFIED",
+    "PRESENTATION_EVENT": "NOT_VERIFIED",
+    "MAT_6_9_DISPLAY": "NOT_VERIFIED",
+    "ROM_8_28_DISPLAY": "NOT_VERIFIED",
+    "CLOSE_REOPEN": "NOT_VERIFIED"
+  },
+  "conclusion": "All physical-hardware/human-operator validation for Phase 3.8.4 remains NOT PERFORMED - not estimated, not simulated, not inferred from code review, and not carried over from the prior build's Environment C usage."
+}

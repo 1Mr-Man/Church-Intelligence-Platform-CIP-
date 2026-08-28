@@ -1,0 +1,39 @@
+libEGL warning: DRI3 error: Could not get DRI3 device
+libEGL warning: Ensure your X server supports DRI3 to get accelerated rendering
+[2026-08-28][16:30:51][cip::app][INFO] starting CIP desktop (environment: Production, data_dir: /tmp/cip-384-home/.local/share/org.churchintelligence.cip)
+[2026-08-28][16:30:51][cip::database][INFO] 11 migration(s) applied
+[2026-08-28][16:30:52][cip::database][INFO] BSB production Bible dataset: 66 book(s), 1189 chapter(s), 31086 verse(s) total (31086 imported, 0 already present)
+[2026-08-28][16:30:52][cip::app][INFO] sermon intelligence engine initialized (deterministic, offline)
+[2026-08-28][16:30:52][cip::app][INFO] service intelligence engine initialized (deterministic, offline)
+[2026-08-28][16:30:52][cip::app][INFO] sermon foundation initialized (deterministic, offline, no engine registration)
+[2026-08-28][16:30:52][cip::app][INFO] content intelligence initialized (deterministic, offline, no engine registration)
+[2026-08-28][16:30:52][cip::speech][INFO] built without the `whisper` feature; live transcription is unavailable (manual operation still works)
+[2026-08-28][16:30:52][cip::music][INFO] acoustic recognizer status: Unavailable (configured model directory does not exist: /tmp/cip-384-home/.local/share/org.churchintelligence.cip/models/acoustic)
+[2026-08-28][16:31:02][cip::presentation][INFO] [diagnostic] get_presentation_display_state (checkpoint 5/6): windowOpen=false activeItem=false activeSlide=false
+[2026-08-28][16:31:02][cip::app][ERROR] no sermon is currently active - start one first
+[2026-08-28][16:31:02][cip::error][ERROR] no sermon is currently active - start one first
+[2026-08-28][16:31:45][cip::presentation][INFO] [diagnostic] display_presentation: render_content produced heading="MAT 6:9" bodyLines=3 footer=Some("BSB") (checkpoint 13)
+[2026-08-28][16:31:45][cip::presentation][INFO] [diagnostic] display window created (checkpoint 1)
+[2026-08-28][16:31:45][cip::presentation][INFO] [diagnostic] display_presentation: about to emit PresentationStarted for item fbfd10ff-2d70-4fea-8b70-822c86569e1f (checkpoint 14 - lifecycle ordering: window opened -> activation committed -> event emitted now)
+[2026-08-28][16:31:45][cip::presentation][INFO] [diagnostic] display window: page-load-started url=tauri://localhost
+[2026-08-28][16:31:45][cip::presentation][INFO] [diagnostic] display window: page-load-finished url=tauri://localhost
+[2026-08-28][16:31:45][cip::presentation][INFO] [diagnostic] display window: root-branch-selected - display label detected, rendering PresentationDisplay
+[2026-08-28][16:31:45][cip::presentation][INFO] [diagnostic] display window: mounted - PresentationDisplay component mounted (checkpoint 3)
+[2026-08-28][16:31:45][cip::presentation][INFO] [diagnostic] display window: effect-ran - useEffect body executing (checkpoint 4)
+[2026-08-28][16:31:45][cip::presentation][INFO] [diagnostic] display window: hydration-call - calling getPresentationDisplayState (checkpoint 5)
+[2026-08-28][16:31:45][cip::presentation][INFO] [diagnostic] get_presentation_display_state (checkpoint 5/6): windowOpen=true activeItem=true activeSlide=true
+[2026-08-28][16:31:45][cip::presentation][INFO] [diagnostic] display window: hydration-result - windowOpen=true activeItem=true activeSlide=true (checkpoint 6)
+[2026-08-28][16:31:45][cip::presentation][INFO] [diagnostic] display window: payload-applied - source=hydration heading=MAT 6:9 bodyLines=3 footer=BSB (checkpoints 9-12)
+[2026-08-28][16:32:31][cip::presentation][INFO] [diagnostic] display window: presentation-stopped-received - PresentationStopped event received (checkpoint 8)
+[2026-08-28][16:33:18][cip::presentation][INFO] [diagnostic] display_presentation: render_content produced heading="ROM 8:28" bodyLines=4 footer=Some("BSB") (checkpoint 13)
+[2026-08-28][16:33:18][cip::presentation][INFO] [diagnostic] display window created (checkpoint 1)
+[2026-08-28][16:33:18][cip::presentation][INFO] [diagnostic] display_presentation: about to emit PresentationStarted for item 27736d36-daa8-4726-8b40-4f8a1a1beccd (checkpoint 14 - lifecycle ordering: window opened -> activation committed -> event emitted now)
+[2026-08-28][16:33:19][cip::presentation][INFO] [diagnostic] display window: page-load-started url=tauri://localhost
+[2026-08-28][16:33:19][cip::presentation][INFO] [diagnostic] display window: page-load-finished url=tauri://localhost
+[2026-08-28][16:33:19][cip::presentation][INFO] [diagnostic] display window: root-branch-selected - display label detected, rendering PresentationDisplay
+[2026-08-28][16:33:19][cip::presentation][INFO] [diagnostic] display window: mounted - PresentationDisplay component mounted (checkpoint 3)
+[2026-08-28][16:33:19][cip::presentation][INFO] [diagnostic] display window: effect-ran - useEffect body executing (checkpoint 4)
+[2026-08-28][16:33:19][cip::presentation][INFO] [diagnostic] display window: hydration-call - calling getPresentationDisplayState (checkpoint 5)
+[2026-08-28][16:33:19][cip::presentation][INFO] [diagnostic] get_presentation_display_state (checkpoint 5/6): windowOpen=true activeItem=true activeSlide=true
+[2026-08-28][16:33:19][cip::presentation][INFO] [diagnostic] display window: hydration-result - windowOpen=true activeItem=true activeSlide=true (checkpoint 6)
+[2026-08-28][16:33:19][cip::presentation][INFO] [diagnostic] display window: payload-applied - source=hydration heading=ROM 8:28 bodyLines=4 footer=BSB (checkpoints 9-12)

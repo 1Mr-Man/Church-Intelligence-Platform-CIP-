@@ -1738,8 +1738,19 @@ pub fn cancel_presentation(
 /// useful on its own for positioning it on a projector/second monitor
 /// before anything is ready to show, and called automatically by
 /// `display_presentation` when needed.
+///
+/// Phase 3.8.4: `async fn`, not a plain synchronous command - real
+/// Windows testing showed the display window appearing but staying
+/// completely white (WebView2's own default background, never this
+/// app's CSS). The vendored Tauri crate's own docs on
+/// `WebviewWindowBuilder::new`/`build` name this exact scenario as a
+/// documented deadlock on Windows when called from a synchronous command
+/// (https://github.com/tauri-apps/wry/issues/583); this command's name,
+/// parameters, and return type are unchanged, so the JS command contract
+/// in `commands.ts` requires no changes - `invoke()` already returns a
+/// `Promise` regardless. See `docs/phase-3-8-4-audit.md` section D.
 #[tauri::command]
-pub fn open_presentation_display(
+pub async fn open_presentation_display(
     app: AppHandle,
     _state: State<'_, AppState>,
 ) -> Result<(), AppError> {
@@ -1824,8 +1835,15 @@ pub fn get_presentation_display_state(
 /// the other way around (spec section 8/28: an item is never marked
 /// `Active` before the real display operation has actually succeeded, and
 /// nothing but this explicit operator action may cross that boundary).
+///
+/// Phase 3.8.4: `async fn` for the same reason as
+/// `open_presentation_display` above - this command is the one the
+/// manual detect->approve->prepare->Display click path actually exercises,
+/// and it calls the same `open_display_window` whose window creation
+/// deadlocks on Windows when invoked from a synchronous command. See
+/// `docs/phase-3-8-4-audit.md` section D.
 #[tauri::command]
-pub fn display_presentation(
+pub async fn display_presentation(
     item_id: String,
     app: AppHandle,
     state: State<'_, AppState>,

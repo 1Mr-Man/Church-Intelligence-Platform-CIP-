@@ -1,0 +1,15 @@
+{
+  "phase": "3.8.4",
+  "note": "This phase was triggered by real physical Windows evidence (the Presentation Display window appearing but rendering completely white). Nothing here is, or could be, simulated - a fresh physical Windows re-test of this rebuilt artifact has not occurred in this session.",
+  "realMicrophone": { "status": "NOT_VERIFIED", "reason": "no physical microphone was connected/tested in this build environment" },
+  "realWhisper": { "status": "NOT_VERIFIED", "reason": "no real speech recognition was exercised against real audio in this build environment" },
+  "realProjectorOrSecondDisplay": { "status": "NOT_VERIFIED", "reason": "no physical second display/projector was connected/tested in this build environment" },
+  "realWebView2Runtime": { "status": "NOT_VERIFIED", "reason": "no real Windows/WebView2 runtime was available in this build environment; the applied async-command fix targets a documented Tauri/WRY Windows-specific deadlock (github.com/tauri-apps/wry/issues/583) but could not be exercised against the real WebView2 engine here" },
+  "realChurchService": { "status": "NOT_VERIFIED", "reason": "no real church service was run" },
+  "humanOperatorUx": { "status": "NOT_VERIFIED", "reason": "no human operator performed the fixed detect-approve-prepare-display workflow against this rebuilt artifact in this build environment" },
+  "realWindowsMachine": { "status": "NOT_VERIFIED", "reason": "no physical Windows machine was accessible to Claude Code in this build environment; this rebuilt installer has not yet been re-tested on the operator's own Windows laptop - the hard blocker the operator specified for this phase's gate" },
+  "whiteDisplayRootCause": {
+    "status": "STRONGLY_SUPPORTED_NOT_CONFIRMED",
+    "reason": "The vendored Tauri 2.11.5 crate's own doc comments explicitly document a Windows-specific deadlock in WebviewWindowBuilder::new/build when called from a synchronous #[tauri::command], citing https://github.com/tauri-apps/wry/issues/583. Both Tauri commands in this codebase that create the display window (display_presentation, open_presentation_display) were exactly that: plain synchronous commands. This is architecturally consistent with every piece of evidence gathered across Phases 3.8.3-3.8.4: Linux/WebKitGTK (which has no such deadlock) has rendered correctly in every Xvfb reproduction across both phases, while real Windows hardware has shown a blank/white display both times it was tested. A window frame can still be created by the OS while the WebView2 control inside it deadlocks before ever navigating, which produces exactly WebView2's own default white background - never the app's own CSS (which sets html,body to black unconditionally, but never gets a chance to run). The fix (converting both commands to async fn, per Tauri's own documented guidance) has not been confirmed by direct reproduction on real Windows/WebView2, since no such environment is accessible in this container."
+  }
+}

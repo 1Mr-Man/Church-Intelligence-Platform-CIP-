@@ -25,17 +25,9 @@ import { useEffect, useState } from "react";
 import type { PresentationDisplayPayload } from "../domain";
 import * as commands from "../lib/commands";
 import * as liveEvents from "../lib/liveEvents";
+import { logCheckpoint } from "./presentationDiagnostics";
 import { resolveHydratedPayload } from "./presentationDisplayHydration";
 import "./PresentationDisplay.css";
-
-/** Phase 3.8.3 TEMPORARY DIAGNOSTIC: best-effort, never awaited, never
- * throws to the caller - routes a checkpoint into the log file via
- * `log_display_diagnostic`. Silently does nothing if the call itself
- * fails (e.g. outside the Tauri runtime), since diagnostics must never be
- * able to affect the actual display. */
-function logCheckpoint(stage: string, detail: string) {
-  commands.logDisplayDiagnostic(stage, detail).catch(() => {});
-}
 
 export function PresentationDisplay() {
   const [payload, setPayload] = useState<PresentationDisplayPayload | null>(null);
