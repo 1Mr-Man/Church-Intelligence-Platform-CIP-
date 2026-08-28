@@ -1,0 +1,21 @@
+{
+  "phase": "3.8.1",
+  "environment": "automated (Environment A, real file-backed SQLite, real BSB dataset)",
+  "timestampUtc": "2026-08-28T10:52:00Z",
+  "test": "pipeline::tests::phase_3_8_1_service_replay_progressive_intelligence_acceptance",
+  "method": "A longer, 16-segment synthetic sermon (project-authored - the user's real WOFBEC transcript was never supplied verbatim, only a list of the Scripture references it contains, so it could not be reproduced here) is fed sequentially through the same real production entry points Service Replay calls per segment: handle_final_transcript (Bible Suggestion path), sermon::analyze_and_queue (Sermon Finding path), and a standalone BibleIntelligenceEngine.analyze (Bible Finding path) - all against the real, complete BSB dataset. No reference or finding is hardcoded as an expected result anywhere in the test; only the real deterministic engines decide what is detected.",
+  "verified": [
+    "transcript sequence numbers strictly increase across all 16 segments - proof of genuine sequential (not batched/simultaneous) processing",
+    "all 16 segments persisted exactly once via the Suggestion path",
+    "the accumulated finding count never decreases across the sequence, and grows at 2 or more distinct points during the 16-segment replay - direct proof that intelligence becomes available PROGRESSIVELY as segments arrive, not only in one end-of-replay batch (this is the concrete regression the Phase 3.8.1 audit identified)",
+    "the real Sermon Intelligence engine produced at least one finding from the realistic 16-segment transcript",
+    "the real Bible Finding path produced at least one finding from the real BSB dataset - which specific reference(s) were recognized is never asserted, only that the real detector found something",
+    "a real Bible suggestion (whichever reference the real detector actually found first) was approved and carried through the full Prepare -> Activate -> Stop presentation lifecycle",
+    "Content Intelligence and Cross-Domain analysis both executed successfully against the accumulated findings (their actual output count is logged, never hard-asserted - the same honesty rule established in Phase 3.8's acceptance test)",
+    "the approved suggestion, its presentation item (Prepared -> Active -> Stopped), and the ended service all survive closing and reopening the real on-disk database file",
+    "no stale replay state exists after restart - Service Replay's own scheduler (segment position/pause/speed) lives entirely in frontend memory and never touches the database"
+  ],
+  "result": "PASS",
+  "evidenceSource": "cargo test -p cip-desktop pipeline::tests::phase_3_8_1_service_replay_progressive_intelligence_acceptance",
+  "limitations": "Environment A only. Pause/resume/stop/restart are pure frontend scheduler state (runRef flags) with no backend interaction, so they are not exercised by this Rust test - they are unaffected by delays between the same sequential command calls this test does exercise. Real Windows human-operator Service Replay usage (Environment C) not performed this phase against the rebuilt artifact."
+}

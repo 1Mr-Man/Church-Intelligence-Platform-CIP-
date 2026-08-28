@@ -1,0 +1,21 @@
+{
+  "phase": "3.8.1",
+  "note": "No physical Windows machine was available in this container for Phase 3.8.1, the identical constraint recorded in every prior phase's windows/hardware evidence directory. This is not a regression. The user's Phase 3.8 Windows test (which reported the 2-segment collapse and missing intelligence display) was performed against the PRIOR installer, not this rebuilt one.",
+  "installer": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "a5c17483876a1ddfa2d3c2e1b5a6a7ef4c1c73e86e0949b146dd91f0c0f3cf2f",
+    "fileSizeBytes": 7127913,
+    "status": "NOT VERIFIED on real Windows hardware - cross-compiled and file(1)-inspected only (Environment A/B)"
+  },
+  "fixedScreensRequiringRealHardwareValidationWhenAvailable": [
+    "Service Replay transcript import with a real multi-minute (30+ minute) sermon transcript - confirm it is no longer reduced to 2 segments",
+    "Service Replay's real-time Scripture / Sermon Intelligence / Needs Attention / Presentation display while a replay is actively running",
+    "The 'a service is already active' inline recovery affordance"
+  ],
+  "requiredForGateToBecomePASS": [
+    "a real Windows 10/11 x64 laptop (the user's HP EliteBook)",
+    "Internet disconnected for the duration of the checklist",
+    "a human operator loading a real, long (30+ minute) sermon transcript into Service Replay, confirming it segments into many reasonably-sized pieces (not 2 giant ones and not hundreds of one-sentence ones), starting replay, and observing Scripture detections / Sermon Intelligence / Needs Attention / Presentation update on-screen as segments arrive - not only after replay finishes"
+  ],
+  "conclusion": "All physical-hardware/human-operator validation for Phase 3.8.1 remains NOT PERFORMED against this rebuilt artifact - not estimated, not simulated, not inferred from code review."
+}

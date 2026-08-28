@@ -1,0 +1,10 @@
+{
+  "phase": "3.8.1",
+  "note": "Spec section 38 (Phase 3.8) and the same principle carried into Phase 3.8.1: 'If real hardware is unavailable: use status: NOT_VERIFIED, not PASS.' This directory exists to hold that honest status separately from simulated (Environment A/B) evidence - nothing here is, or could be, simulated.",
+  "realMicrophone": { "status": "NOT_VERIFIED", "reason": "no physical microphone was connected/tested in this build environment" },
+  "realWhisper": { "status": "NOT_VERIFIED", "reason": "no real speech recognition was exercised against real audio in this build environment" },
+  "realProjectorOrSecondDisplay": { "status": "NOT_VERIFIED", "reason": "no physical second display/projector was connected/tested in this build environment" },
+  "realChurchService": { "status": "NOT_VERIFIED", "reason": "no real church service was run" },
+  "humanOperatorUx": { "status": "NOT_VERIFIED", "reason": "no human operator performed the fixed Service Replay workflow against this rebuilt artifact in this build environment - the user's own Phase 3.8 Windows testing was against the prior, unfixed installer, which is what surfaced the defects this phase addresses" },
+  "realWindowsMachine": { "status": "NOT_VERIFIED", "reason": "no physical Windows machine was accessible to Claude Code in this build environment; this rebuilt installer has not yet been tested on the user's HP EliteBook" }
+}

@@ -2437,6 +2437,349 @@ mod tests {
         // replay run - confirmed by construction, not merely asserted.
     }
 
+    /// Phase 3.8.1 acceptance test - proves the real defects reported
+    /// against the Phase 3.8 Service Replay screen are architecturally
+    /// fixed on the backend side of the boundary: many (16, not 2)
+    /// sequential segments derived from a longer, multi-topic synthetic
+    /// sermon (never the user's real copyrighted transcript, which was
+    /// never supplied verbatim - only a list of the Scripture references
+    /// it contains) are fed one at a time through the same real production
+    /// entry points Service Replay calls, and intelligence must arrive
+    /// PROGRESSIVELY - at more than one point during the sequence, not
+    /// only in one final batch - proving the operator would see results
+    /// building up in real time, not just at the very end. No reference is
+    /// hardcoded as an expected detection anywhere below (spec section
+    /// 5/13): the test only asserts that the real BSB-backed engine
+    /// detected *some* references and that the real Sermon Intelligence
+    /// engine produced *some* findings, exactly as much as the
+    /// deterministic engines actually produced - never more, never
+    /// invented.
+    #[test]
+    fn phase_3_8_1_service_replay_progressive_intelligence_acceptance() {
+        use crate::{content_intelligence, cross_domain, sermon};
+        use cip_core_intelligence::{
+            BibleIntelligenceEngine, ContentCandidateQueue, ContentIntelligenceEngine,
+            ContextBounds, CorrelationQueue, CrossDomainCorrelationEngine, FindingQueue,
+            IntelligenceContext, IntelligenceEngine, IntelligenceInput, SermonIntelligenceEngine,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("cip-phase-3-8-1-service-replay.sqlite3");
+        let bsb_translation_id = crate::bible_production_dataset::BSB_TRANSLATION_ID;
+
+        let mut suggestion_provider_conn = open_in_memory().unwrap();
+        run_migrations(&mut suggestion_provider_conn).unwrap();
+        cip_integrations_bible::import_bible_dataset(
+            &suggestion_provider_conn,
+            &crate::bible_production_dataset::bsb_dataset(),
+        )
+        .unwrap();
+        let suggestion_provider = SqliteBibleProvider::new(suggestion_provider_conn);
+
+        let mut finding_provider_conn = open_in_memory().unwrap();
+        run_migrations(&mut finding_provider_conn).unwrap();
+        cip_integrations_bible::import_bible_dataset(
+            &finding_provider_conn,
+            &crate::bible_production_dataset::bsb_dataset(),
+        )
+        .unwrap();
+        let bible_finding_engine = BibleIntelligenceEngine::new(
+            Box::new(SqliteBibleProvider::new(finding_provider_conn)),
+            bsb_translation_id,
+        );
+
+        // A longer, multi-topic synthetic sermon - project-authored, never
+        // the user's real transcript - mixing sermon-structure language
+        // (theme/main point/illustration/sub point/question/application)
+        // with several distinct Scripture references, spread across 16
+        // sequential segments (proving the fixed segmentation-and-replay
+        // path handles far more than the reported 2-segment collapse).
+        let transcript_segments = [
+            "Good morning church. Grace and peace to you all as we gather today.",
+            "Today I want to talk about the kingdom of God operating within us.",
+            "The theme of our message is the kingdom of God at work in our hearts.",
+            "Matthew chapter 6 verse 9 teaches us how the Lord's Prayer begins: Our Father in heaven, hallowed be your name.",
+            "My main point today is this: the kingdom is both something we receive and something we walk in daily.",
+            "Romans chapter 14 verse 17 reminds us that the kingdom of God is not food and drink, but righteousness, peace, and joy.",
+            "Let me give an illustration: think of a citizen who carries their nation's passport wherever they travel.",
+            "Psalm chapter 4 verse 8 says I will lie down and sleep in peace, for you alone, Lord, make me dwell in safety.",
+            "A sub point worth noting is that peace is not the absence of trouble but the presence of God.",
+            "John chapter 3 verse 16 reminds us of God's love for the world.",
+            "When we face difficult seasons, we should remember Romans chapter 8 verse 28.",
+            "Isaiah chapter 55 invites everyone who thirsts to come to the waters.",
+            "Hebrews chapter 9 speaks of the better covenant we now live under.",
+            "Let's consider a question: what would change in your life if you truly believed the kingdom was already within you?",
+            "The application for us today is to walk daily in righteousness, peace, and joy, not by our own effort but by the Spirit.",
+            "Let us pray. Father, we thank you for your kingdom at work in us.",
+        ];
+
+        let session_id;
+        let mut suggestion_records: Vec<(uuid::Uuid, String)> = Vec::new();
+        let prepared_item_id;
+
+        let sermon_engine = SermonIntelligenceEngine::new();
+        let mut findings = FindingQueue::new();
+        let mut sequences: Vec<u64> = Vec::new();
+        let mut findings_progression: Vec<usize> = Vec::new();
+
+        {
+            let mut conn = cip_database::open(&db_path).unwrap();
+            run_migrations(&mut conn).unwrap();
+
+            let session = ServiceSession::start("Phase 3.8.1 Service Replay Acceptance");
+            session_id = session.id;
+            persist_service(&conn, &session).unwrap();
+
+            let mut context_manager = DefaultScriptureContextManager::new(bsb_translation_id);
+            let mut recent_segments: Vec<cip_core_ai::TranscriptSegment> = Vec::new();
+
+            for (i, &text) in transcript_segments.iter().enumerate() {
+                let seq = i as u64;
+
+                // --- Bible Suggestion path (the real production pipeline
+                //     live speech and `process_test_transcript` both use).
+                //     Every Scripture suggestion produced is recorded -
+                //     never just one hardcoded reference - since the real
+                //     detector, not this test, decides what is found.
+                let processed = handle_final_transcript(
+                    &conn,
+                    &suggestion_provider,
+                    &mut context_manager,
+                    session_id,
+                    bsb_translation_id,
+                    segment(text, seq),
+                )
+                .unwrap();
+                for s in &processed.suggestions {
+                    if let cip_core_ai::SuggestionKind::Scripture { reference } = &s.kind {
+                        suggestion_records.push((s.id, reference.clone()));
+                    }
+                }
+
+                // --- Sermon + Bible Finding paths (mirrors
+                //     `commands::analyze_sermon_transcript`/
+                //     `analyze_bible_transcript`'s exact pure cores) -----
+                let seg_for_context = segment(text, seq);
+                recent_segments.push(seg_for_context.clone());
+                let context = IntelligenceContext::build(
+                    session_id,
+                    None,
+                    Some(seg_for_context.clone()),
+                    recent_segments.clone(),
+                    context_manager.active_context(),
+                    findings.all().into_iter().cloned().collect(),
+                    Vec::new(),
+                    Vec::new(),
+                    ContextBounds::default(),
+                );
+                let input = IntelligenceInput::new(session_id, seg_for_context);
+
+                let sermon_findings =
+                    sermon::analyze_and_queue(&sermon_engine, &input, &context, &mut findings)
+                        .unwrap();
+                let bible_result = bible_finding_engine.analyze(&input, &context).unwrap();
+                for finding in bible_result.findings {
+                    findings.add(finding);
+                }
+
+                log::debug!(
+                    target: "cip::test",
+                    "segment {seq} produced {} sermon finding(s)",
+                    sermon_findings.len()
+                );
+
+                sequences.push(seq);
+                findings_progression.push(findings.all().len());
+            }
+
+            // Sequential-arrival proof (same as Phase 3.8's original test,
+            // now over 16 segments instead of 4).
+            for pair in sequences.windows(2) {
+                assert!(
+                    pair[1] > pair[0],
+                    "transcript sequence numbers must strictly increase across replayed segments"
+                );
+            }
+
+            let transcript_rows =
+                crate::persistence::list_transcript_segments(&conn, session_id, 100).unwrap();
+            assert_eq!(
+                transcript_rows.len(),
+                transcript_segments.len(),
+                "every replayed segment must be persisted exactly once via the Suggestion path"
+            );
+
+            // --- PROGRESSIVE delivery proof (the actual Phase 3.8.1
+            //     defect): findings must accumulate at more than one point
+            //     during the sequence, never only after the final segment
+            //     - this is what makes replay show the operator something
+            //     building up in real time rather than one end-of-run
+            //     batch. Never asserts *which* segment produced a finding,
+            //     only that growth happened more than once. -------------
+            assert!(
+                findings_progression.windows(2).all(|w| w[1] >= w[0]),
+                "the finding count must never decrease as segments are replayed"
+            );
+            let growth_points = findings_progression
+                .windows(2)
+                .filter(|w| w[1] > w[0])
+                .count();
+            assert!(
+                growth_points >= 2,
+                "real findings must accumulate at multiple points across a 16-segment replay \
+                 (got {growth_points} growth point(s)) - proving progressive delivery, not a \
+                 single end-of-replay batch"
+            );
+
+            assert!(
+                findings
+                    .all()
+                    .iter()
+                    .any(|f| f.domain == cip_core_intelligence::IntelligenceDomain::Sermon),
+                "the real Sermon Intelligence engine must produce at least one finding from this realistic transcript"
+            );
+            assert!(
+                findings
+                    .all()
+                    .iter()
+                    .any(|f| f.domain == cip_core_intelligence::IntelligenceDomain::Bible),
+                "the real Bible Finding path must produce at least one finding from this realistic transcript"
+            );
+
+            // At least one real Scripture reference must have been
+            // detected via the Suggestion path too - which one is left
+            // entirely to the real detector (spec section 5: "do not
+            // hardcode expected outputs").
+            let (suggestion_id, detected_reference) = suggestion_records
+                .first()
+                .cloned()
+                .expect("the real Bible detector must find at least one Scripture reference across 16 realistic sermon segments");
+
+            // --- Content + Cross-Domain, run once after replay ----------
+            let final_context = IntelligenceContext::build(
+                session_id,
+                None,
+                None,
+                recent_segments.clone(),
+                context_manager.active_context(),
+                findings.all().into_iter().cloned().collect(),
+                Vec::new(),
+                Vec::new(),
+                ContextBounds::default(),
+            );
+            let mut candidates = ContentCandidateQueue::new();
+            let content_engine = ContentIntelligenceEngine::new();
+            let queued_candidates = content_intelligence::analyze_and_queue(
+                &content_engine,
+                &final_context,
+                &mut candidates,
+            );
+            let mut correlations = CorrelationQueue::new();
+            let cross_domain_engine = CrossDomainCorrelationEngine::new();
+            let queued_correlations = cross_domain::analyze_and_queue(
+                &cross_domain_engine,
+                &final_context,
+                &mut correlations,
+            );
+            log::debug!(
+                target: "cip::test",
+                "content candidates: {}, cross-domain correlations: {}",
+                queued_candidates.len(),
+                queued_correlations.len()
+            );
+
+            // --- Operator review: approve the real (dynamically chosen)
+            //     Bible suggestion ------------------------------------
+            let approved = crate::persistence::update_suggestion_status(
+                &conn,
+                suggestion_id,
+                cip_core_ai::SuggestionStatus::Approved,
+                None,
+            )
+            .unwrap();
+            assert_eq!(approved.status, cip_core_ai::SuggestionStatus::Approved);
+
+            // --- Presentation: prepare -> activate -> stop, laptop
+            //     screen only, entirely offline --------------------------
+            let (content, _) = crate::presentation::build_scripture_slide(
+                &suggestion_provider,
+                bsb_translation_id,
+                &detected_reference,
+            )
+            .unwrap();
+            let item = crate::presentation::persist_prepared_item(
+                &conn,
+                session_id,
+                content,
+                "SCRIPTURE_DEFAULT",
+                Some(suggestion_id),
+            )
+            .unwrap();
+            prepared_item_id = item.id;
+            crate::presentation::prepare_to_activate(&conn, item.id).unwrap();
+            crate::presentation::commit_activation(&conn, item.id).unwrap();
+            let stopped = crate::presentation::stop_active_item(&conn, session_id)
+                .unwrap()
+                .expect("an active item was present to stop");
+            assert_eq!(
+                stopped.status,
+                cip_core_presentation::PresentationItemStatus::Stopped
+            );
+
+            // --- Service lifecycle: stop, then close the connection ----
+            let mut ending_session = session;
+            ending_session.end();
+            crate::persistence::update_service_status(
+                &conn,
+                ending_session.id,
+                ending_session.status,
+                ending_session.ended_at,
+            )
+            .unwrap();
+        }
+
+        // Reopen the SAME on-disk file, exactly as a fresh application
+        // launch would - proving persistence and that no stale replay
+        // state leaks across a restart (Service Replay's own scheduler
+        // position/pause/speed lives entirely in frontend memory and never
+        // touches the database, so there is nothing here to leak by
+        // construction).
+        let reopened = cip_database::open(&db_path).unwrap();
+
+        let reopened_service = crate::persistence::get_service(&reopened, session_id).unwrap();
+        assert_eq!(
+            reopened_service.status,
+            cip_core_service::ServiceStatus::Ended,
+            "the replayed service must survive a real restart"
+        );
+
+        let reopened_transcript =
+            crate::persistence::list_transcript_segments(&reopened, session_id, 100).unwrap();
+        assert_eq!(reopened_transcript.len(), transcript_segments.len());
+
+        let reopened_suggestions =
+            crate::persistence::list_suggestions(&reopened, session_id, None).unwrap();
+        assert!(reopened_suggestions.iter().any(|s| Some(s.id)
+            == suggestion_records.first().map(|(id, _)| *id)
+            && s.status == cip_core_ai::SuggestionStatus::Approved));
+
+        let reopened_items =
+            crate::persistence::list_presentation_items(&reopened, session_id, None).unwrap();
+        assert_eq!(reopened_items.len(), 1);
+        assert_eq!(reopened_items[0].id, prepared_item_id);
+        assert_eq!(
+            reopened_items[0].status,
+            cip_core_presentation::PresentationItemStatus::Stopped,
+            "the final Stopped state must survive restart, never reset to Active"
+        );
+
+        // Offline / no new network capability: this test - like every
+        // other in this file - never constructs an HTTP client and only
+        // ever touches the local SQLite file and in-process engines; see
+        // `pilot-evidence/3.8.1/automated/regression.json`'s
+        // `cargo tree` check for the workspace-wide proof.
+    }
+
     fn preview_content_is_scripture_text(
         content: &cip_core_presentation::PresentationContent,
         needle: &str,

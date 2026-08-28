@@ -1,8 +1,10 @@
 /**
- * Service Replay (Phase 3.8). The professional, operator-facing successor
- * to Phase 3.7's Offline Test Center - reorganized, not replaced (spec
- * section 36): every scenario/manual-entry capability that screen already
- * had is preserved here, plus real sequential transcript replay.
+ * Service Replay (Phase 3.8, revised Phase 3.8.1). The professional,
+ * operator-facing successor to Phase 3.7's Offline Test Center -
+ * reorganized, not replaced (spec section 36): every scenario/manual-entry
+ * capability that screen already had is preserved here, plus real
+ * sequential transcript replay AND (new in 3.8.1) the same real-time
+ * operator intelligence display already proven on the Live Service tab.
  *
  * CORE RULE (spec section 13): Replay is an INPUT ADAPTER, never an
  * intelligence engine. Every action below calls an *existing* production
@@ -24,14 +26,45 @@
  * separate, smaller-grain "Manual Transcript" box (a single line, not a
  * scheduled sequence) also on this screen.
  *
- * Results are reviewed on the Live Service tab (Attention Queue/
- * Intelligence Feed) exactly as they already are for live speech and
- * manual entry - this component deliberately does not duplicate that
- * display.
+ * PHASE 3.8.1 FIX (docs/phase-3-8-1-audit.md sections C/F): every command
+ * above already returns real results AND emits the same events
+ * (`SuggestionCreated`, `ScriptureDetected`, `SermonFindingDetected`,
+ * `SermonStateChanged`, ...) that `LiveChurchBrain.tsx` ("Live Service")
+ * already subscribes to and renders - the defect was never a missing
+ * backend capability, only that nothing on THIS screen ever fetched or
+ * subscribed to that same, already-correct state while an operator was
+ * watching a replay run. This component now mounts the same
+ * `commands.list*`/`liveEvents.on*` read model `LiveChurchBrain.tsx` uses,
+ * and renders it through the same, unmodified presentational components
+ * (`WorkspaceHeader`, `SystemStatusStrip`, `AttentionQueue`,
+ * `IntelligenceFeed`, `PresentationCard`) - not a second display, a second
+ * mount of the one that already works. `LiveChurchBrain.tsx` itself is
+ * untouched.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  ContentCandidate,
+  IntelligenceCorrelation,
+  IntelligenceFinding,
+  LiveStatus,
+  PresentationItem,
+  PresentationPreview,
+  SermonFoundationSummary,
+  SermonStateSnapshot,
+  ServiceIntelligenceSummary,
+  Suggestion,
+} from "../../domain";
 import * as commands from "../../lib/commands";
-import { delayForSpeed, segmentTranscript, type ReplaySpeed } from "./replay";
+import * as liveEvents from "../../lib/liveEvents";
+import { buildAttentionQueue } from "../../lib/attentionQueue";
+import { buildUnifiedFeed } from "../../lib/unifiedFeed";
+import { WorkspaceHeader } from "../workspace/WorkspaceHeader";
+import { SystemStatusStrip } from "../workspace/SystemStatusStrip";
+import { AttentionQueue } from "../workspace/AttentionQueue";
+import { IntelligenceFeed } from "../workspace/IntelligenceFeed";
+import { PresentationCard } from "../workspace/PresentationCard";
+import type { UnifiedItemAction } from "../workspace/actions";
+import { delayForSpeed, segmentTranscript, type ReplaySegment, type ReplaySpeed } from "./replay";
 
 interface Scenario {
   id: string;
@@ -48,7 +81,7 @@ const SCENARIOS: Scenario[] = [
     label: "1 · Scripture",
     domain: "Bible",
     steps: [{ description: "Bible pipeline", text: "Please turn to James chapter 2 verse 2.", kind: "bible" }],
-    expects: "Expected: a Bible detection/suggestion for James 2:2, reviewable in Live Service's Attention Queue.",
+    expects: "Expected: a Bible detection/suggestion for James 2:2, reviewable below in Needs Attention.",
   },
   {
     id: "scripture-context",
@@ -74,7 +107,7 @@ const SCENARIOS: Scenario[] = [
         kind: "sermon",
       },
     ],
-    expects: "Expected: Sermon Intelligence theme/point findings, reviewable in Diagnostics → Sermon Intelligence.",
+    expects: "Expected: Sermon Intelligence theme/point findings, reviewable below in Sermon Intelligence.",
   },
   {
     id: "multi-domain",
@@ -99,7 +132,7 @@ const SCENARIOS: Scenario[] = [
     domain: "Bible → Presentation",
     steps: [{ description: "Bible pipeline", text: "Turn to John chapter 3 verse 16.", kind: "bible" }],
     expects:
-      "Expected: a Bible suggestion for John 3:16 - approve it in the Attention Queue, then Prepare/Display it from the Presentation card, all without any microphone.",
+      "Expected: a Bible suggestion for John 3:16 - approve it below, then Prepare/Display it from the Presentation card, all without any microphone.",
   },
 ];
 
@@ -130,6 +163,8 @@ Today I want us to move from fear to faith.
 
 Let us pray.`;
 
+const ALREADY_ACTIVE_MESSAGE = "a service is already active - end it before starting a new one";
+
 function ReadinessRow({ label, ready, optional }: { label: string; ready: boolean; optional?: boolean }) {
   const tone = ready ? "good" : optional ? "warn" : "bad";
   return (
@@ -138,6 +173,15 @@ function ReadinessRow({ label, ready, optional }: { label: string; ready: boolea
       {label} {ready ? "Ready" : optional ? "Optional — not configured" : "Not ready"}
     </span>
   );
+}
+
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 }
 
 interface ReplayRunState {
@@ -153,38 +197,239 @@ export function ServiceReplay() {
   const [speechReady, setSpeechReady] = useState(false);
   const [serviceActive, setServiceActive] = useState(false);
   const [serviceTitle, setServiceTitle] = useState("Service Replay");
+  const [status, setStatus] = useState<LiveStatus | null>(null);
   const [manualText, setManualText] = useState("");
   const [log, setLog] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [alreadyActive, setAlreadyActive] = useState(false);
 
   const [transcriptText, setTranscriptText] = useState("");
-  const [segments, setSegments] = useState<string[]>([]);
+  const [segments, setSegments] = useState<ReplaySegment[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentlyHearing, setCurrentlyHearing] = useState<ReplaySegment | null>(null);
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replayPaused, setReplayPaused] = useState(false);
   const [speed, setSpeed] = useState<ReplaySpeed>(1);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
   const runRef = useRef<ReplayRunState>({ playing: false, paused: false, cancelled: false, index: 0 });
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // --- Operator workspace read model (Phase 3.8.1) --------------------
+  // The same state LiveChurchBrain.tsx already fetches/subscribes to for
+  // the active service, mounted here too so Scripture/Sermon/Attention/
+  // Presentation are visible on THIS screen while a replay runs, instead
+  // of only on the separate Live Service tab.
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [approvedSuggestions, setApprovedSuggestions] = useState<Suggestion[]>([]);
+  const [musicFindings, setMusicFindings] = useState<IntelligenceFinding[]>([]);
+  const [sermonFindings, setSermonFindings] = useState<IntelligenceFinding[]>([]);
+  const [sermonState, setSermonState] = useState<SermonStateSnapshot | null>(null);
+  const [sermonFoundation, setSermonFoundation] = useState<SermonFoundationSummary | null>(null);
+  const [crossDomainCorrelations, setCrossDomainCorrelations] = useState<IntelligenceCorrelation[]>([]);
+  const [contentCandidates, setContentCandidates] = useState<ContentCandidate[]>([]);
+  const [serviceTransitions, setServiceTransitions] = useState<IntelligenceFinding[]>([]);
+  const [serviceAnomalies, setServiceAnomalies] = useState<IntelligenceFinding[]>([]);
+  const [serviceIntel, setServiceIntel] = useState<ServiceIntelligenceSummary | null>(null);
+  const [preparedItems, setPreparedItems] = useState<PresentationItem[]>([]);
+  const [activeDisplayItem, setActiveDisplayItem] = useState<PresentationItem | null>(null);
+  const [displayWindowOpen, setDisplayWindowOpen] = useState(false);
+  const [previews, setPreviews] = useState<Record<string, PresentationPreview>>({});
+  const [deviceCount, setDeviceCount] = useState(0);
+  const [workspaceBusy, setWorkspaceBusy] = useState<string | null>(null);
 
   const refreshReadiness = () => {
     commands
       .getLiveStatus()
-      .then((status) => {
-        setBibleReady(!!status.bible && status.bible.status === "enabled");
-        setSpeechReady(status.speechStatus === "ready");
-        setServiceActive(!!status.service && status.serviceStatus !== "completed");
+      .then((s) => {
+        setStatus(s);
+        setBibleReady(!!s.bible && s.bible.status === "enabled");
+        setSpeechReady(s.speechStatus === "ready");
+        setServiceActive(!!s.service && s.serviceStatus !== "completed");
       })
       .catch(() => {});
     commands
       .listAudioDevices()
-      .then((devices) => setMicReady(devices.length > 0))
+      .then((devices) => {
+        setMicReady(devices.length > 0);
+        setDeviceCount(devices.length);
+      })
       .catch(() => {});
+    commands.getServiceIntelligenceState().then(setServiceIntel).catch(() => {});
   };
 
   useEffect(() => {
     refreshReadiness();
+    const interval = window.setInterval(refreshReadiness, 3000);
+    return () => window.clearInterval(interval);
   }, []);
+
+  // Elapsed time ticks while a replay run is active.
+  useEffect(() => {
+    if (startedAt === null) return;
+    const interval = window.setInterval(() => setElapsedMs(Date.now() - startedAt), 1000);
+    return () => window.clearInterval(interval);
+  }, [startedAt]);
+
+  const activeServiceId = status?.service?.id;
+  useEffect(() => {
+    if (!activeServiceId) {
+      setSuggestions([]);
+      setApprovedSuggestions([]);
+      setMusicFindings([]);
+      setSermonFindings([]);
+      setSermonState(null);
+      setSermonFoundation(null);
+      setCrossDomainCorrelations([]);
+      setContentCandidates([]);
+      setServiceTransitions([]);
+      setServiceAnomalies([]);
+      setPreparedItems([]);
+      setActiveDisplayItem(null);
+      setDisplayWindowOpen(false);
+      return;
+    }
+    commands.listSuggestions("pending").then(setSuggestions).catch(() => {});
+    commands.listSuggestions("approved").then(setApprovedSuggestions).catch(() => {});
+    commands.listMusicFindings().then(setMusicFindings).catch(() => {});
+    commands.listSermonFindings().then(setSermonFindings).catch(() => {});
+    commands.getSermonState().then(setSermonState).catch(() => {});
+    commands.getSermonFoundationState().then(setSermonFoundation).catch(() => {});
+    commands.listCrossDomainCorrelations().then(setCrossDomainCorrelations).catch(() => {});
+    commands.listContentCandidates().then(setContentCandidates).catch(() => {});
+    commands.listServiceTransitions().then(setServiceTransitions).catch(() => {});
+    commands.listServiceAnomalies().then(setServiceAnomalies).catch(() => {});
+    commands.listPreparedPresentations().then(setPreparedItems).catch(() => {});
+    commands
+      .getPresentationDisplayState()
+      .then((s) => {
+        setDisplayWindowOpen(s.windowOpen);
+        setActiveDisplayItem(s.activeItem);
+      })
+      .catch(() => {});
+  }, [activeServiceId]);
+
+  // Same live events LiveChurchBrain.tsx subscribes to - this is a second
+  // mount of the existing read model, not a second event system.
+  useEffect(() => {
+    const subscriptions = [
+      liveEvents.onSuggestionCreated((s) => setSuggestions((prev) => [s, ...prev])),
+      liveEvents.onSuggestionApproved((s) => {
+        setSuggestions((prev) => prev.filter((x) => x.id !== s.id));
+        setApprovedSuggestions((prev) => [s, ...prev]);
+      }),
+      liveEvents.onSuggestionRejected((s) => setSuggestions((prev) => prev.filter((x) => x.id !== s.id))),
+      liveEvents.onSuggestionEdited((s) => setSuggestions((prev) => prev.map((x) => (x.id === s.id ? s : x)))),
+      liveEvents.onMusicFindingDetected((f) => setMusicFindings((prev) => [f, ...prev])),
+      liveEvents.onMusicFindingAccepted((f) => setMusicFindings((prev) => prev.filter((x) => x.id !== f.id))),
+      liveEvents.onMusicFindingRejected((f) => setMusicFindings((prev) => prev.filter((x) => x.id !== f.id))),
+      liveEvents.onSermonFindingDetected((f) => setSermonFindings((prev) => [f, ...prev])),
+      liveEvents.onSermonFindingAccepted((f) => setSermonFindings((prev) => prev.filter((x) => x.id !== f.id))),
+      liveEvents.onSermonFindingRejected((f) => setSermonFindings((prev) => prev.filter((x) => x.id !== f.id))),
+      liveEvents.onSermonStateChanged((state) =>
+        setSermonState((prev) => (prev ? { ...prev, state } : { state, theme: null, points: [] })),
+      ),
+      liveEvents.onSermonThemeChanged((theme) => setSermonState((prev) => (prev ? { ...prev, theme } : prev))),
+      liveEvents.onSermonStructureUpdated((points) => setSermonState((prev) => (prev ? { ...prev, points } : prev))),
+      liveEvents.onSermonStarted((sermon) =>
+        setSermonFoundation((prev) => ({ activeSermon: sermon, currentSection: prev?.currentSection ?? null })),
+      ),
+      liveEvents.onSermonSectionChanged((section) =>
+        setSermonFoundation((prev) => (prev ? { ...prev, currentSection: section } : prev)),
+      ),
+      liveEvents.onCrossDomainCorrelationDetected((c) => setCrossDomainCorrelations((prev) => [c, ...prev])),
+      liveEvents.onCrossDomainCorrelationReviewed((c) =>
+        setCrossDomainCorrelations((prev) => prev.map((x) => (x.id === c.id ? c : x))),
+      ),
+      liveEvents.onCrossDomainCorrelationDismissed((c) =>
+        setCrossDomainCorrelations((prev) => prev.filter((x) => x.id !== c.id)),
+      ),
+      liveEvents.onContentCandidateDetected((c) => setContentCandidates((prev) => [c, ...prev])),
+      liveEvents.onContentCandidateAccepted((c) => setContentCandidates((prev) => prev.filter((x) => x.id !== c.id))),
+      liveEvents.onContentCandidateRejected((c) => setContentCandidates((prev) => prev.filter((x) => x.id !== c.id))),
+      liveEvents.onServicePhaseChanged((f) => setServiceTransitions((prev) => [f, ...prev])),
+      liveEvents.onServicePhaseCorrected((f) => setServiceTransitions((prev) => [f, ...prev])),
+      liveEvents.onServiceAnomalyDetected((f) => setServiceAnomalies((prev) => [f, ...prev])),
+      liveEvents.onServiceAnomalyAcknowledged((f) => setServiceAnomalies((prev) => prev.filter((x) => x.id !== f.id))),
+      liveEvents.onPresentationPrepared((item) => {
+        setPreparedItems((prev) => [item, ...prev]);
+        if (item.sourceSuggestionId) {
+          setApprovedSuggestions((prev) => prev.filter((s) => s.id !== item.sourceSuggestionId));
+        }
+      }),
+      liveEvents.onPresentationCancelled((item) => setPreparedItems((prev) => prev.filter((x) => x.id !== item.id))),
+      liveEvents.onPresentationStarted(({ item }) => {
+        setPreparedItems((prev) => prev.filter((x) => x.id !== item.id));
+        setActiveDisplayItem(item);
+        setDisplayWindowOpen(true);
+      }),
+      liveEvents.onPresentationStopped(() => setActiveDisplayItem(null)),
+    ];
+    return () => {
+      subscriptions.forEach((p) => p.then((unlisten) => unlisten()));
+    };
+  }, []);
+
+  const unifiedFeed = useMemo(
+    () =>
+      buildUnifiedFeed({
+        suggestions,
+        musicFindings,
+        sermonFindings,
+        serviceTransitions,
+        serviceAnomalies,
+        contentCandidates,
+        correlations: crossDomainCorrelations,
+      }),
+    [suggestions, musicFindings, sermonFindings, serviceTransitions, serviceAnomalies, contentCandidates, crossDomainCorrelations],
+  );
+  const attentionQueue = useMemo(() => buildAttentionQueue(unifiedFeed), [unifiedFeed]);
+
+  const withWorkspaceBusy = useCallback(async (key: string, action: () => Promise<void>) => {
+    setWorkspaceBusy(key);
+    try {
+      await action();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setWorkspaceBusy(null);
+    }
+  }, []);
+
+  const handleUnifiedAction = useCallback(
+    (item: { id: string; domain: string }, action: UnifiedItemAction) => {
+      const busyKey = `${item.domain}-${action}-${item.id}`;
+      switch (item.domain) {
+        case "bible":
+          if (action === "approve") void withWorkspaceBusy(busyKey, async () => { await commands.approveSuggestion(item.id); });
+          else if (action === "reject") void withWorkspaceBusy(busyKey, async () => { await commands.rejectSuggestion(item.id); });
+          return;
+        case "music":
+          if (action === "accept") void withWorkspaceBusy(busyKey, async () => { await commands.acceptMusicFinding(item.id); });
+          else if (action === "reject") void withWorkspaceBusy(busyKey, async () => { await commands.rejectMusicFinding(item.id); });
+          return;
+        case "sermon":
+          if (action === "accept") void withWorkspaceBusy(busyKey, async () => { await commands.acceptSermonFinding(item.id); });
+          else if (action === "reject") void withWorkspaceBusy(busyKey, async () => { await commands.rejectSermonFinding(item.id); });
+          return;
+        case "service":
+          if (action === "acknowledge") void withWorkspaceBusy(busyKey, async () => { await commands.acknowledgeServiceAnomaly(item.id); });
+          return;
+        case "content":
+          if (action === "accept") void withWorkspaceBusy(busyKey, async () => { await commands.acceptContentCandidate(item.id); });
+          else if (action === "reject") void withWorkspaceBusy(busyKey, async () => { await commands.rejectContentCandidate(item.id); });
+          return;
+        case "correlation":
+          if (action === "review") void withWorkspaceBusy(busyKey, async () => { await commands.reviewCrossDomainCorrelation(item.id); });
+          else if (action === "dismiss") void withWorkspaceBusy(busyKey, async () => { await commands.dismissCrossDomainCorrelation(item.id); });
+          return;
+      }
+    },
+    [withWorkspaceBusy],
+  );
+
+  // --- Test service / manual controls ----------------------------------
 
   const appendLog = (line: string) => setLog((prev) => [`${new Date().toLocaleTimeString()} — ${line}`, ...prev].slice(0, 60));
 
@@ -194,8 +439,13 @@ export function ServiceReplay() {
     try {
       await action();
     } catch (e) {
-      setError(String(e));
-      appendLog(`FAILED: ${String(e)}`);
+      const message = String(e);
+      if (message.includes(ALREADY_ACTIVE_MESSAGE)) {
+        setAlreadyActive(true);
+      } else {
+        setError(message);
+      }
+      appendLog(`FAILED: ${message}`);
     } finally {
       setBusy(null);
     }
@@ -205,6 +455,7 @@ export function ServiceReplay() {
     withBusy("start-service", async () => {
       await commands.startService(serviceTitle);
       appendLog(`Started service "${serviceTitle}".`);
+      setAlreadyActive(false);
       refreshReadiness();
     });
 
@@ -213,6 +464,7 @@ export function ServiceReplay() {
       stopReplay();
       await commands.endService();
       appendLog("Ended service. Review it under History.");
+      setAlreadyActive(false);
       refreshReadiness();
     });
 
@@ -239,7 +491,7 @@ export function ServiceReplay() {
         const correlations = await commands.analyzeCrossDomain();
         appendLog(`Ran cross-domain analysis — ${correlations.length} correlation(s) found.`);
       }
-      appendLog(`Scenario "${scenario.label}" submitted. Review Live Service → Attention Queue / Intelligence Feed.`);
+      appendLog(`Scenario "${scenario.label}" submitted. Review Needs Attention / Intelligence Feed below.`);
     });
 
   const runFullService = () =>
@@ -271,7 +523,7 @@ export function ServiceReplay() {
 
   const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-  const processReplaySegment = async (text: string) => {
+  const processReplaySegment = async (segment: ReplaySegment) => {
     // Three independent, pre-existing production entry points, called in
     // order for the same real text: the Bible Suggestion path (what the
     // operator reviews/approves/prepares/presents), the Bible Finding
@@ -279,11 +531,15 @@ export function ServiceReplay() {
     // Cross-Domain/Content correlation, exactly like `analyzeBibleTranscript`
     // already exists to allow), and the Sermon path. Never a fabricated
     // or duplicated intelligence pathway - each call is the same command
-    // an operator could type into a box themselves.
-    await commands.processTestTranscript(text);
-    await commands.analyzeBibleTranscript(text);
-    await commands.analyzeSermonTranscript(text);
-    appendLog(`Replayed segment: "${text}"`);
+    // an operator could type into a box themselves. Results reach the
+    // screen through the same events/state subscribed to above, not
+    // through these return values directly - identical to how live audio
+    // already works.
+    setCurrentlyHearing(segment);
+    await commands.processTestTranscript(segment.text);
+    await commands.analyzeBibleTranscript(segment.text);
+    await commands.analyzeSermonTranscript(segment.text);
+    appendLog(`Replayed segment${segment.timestampLabel ? ` (${segment.timestampLabel})` : ""}: "${segment.text}"`);
   };
 
   const playLoop = async () => {
@@ -293,9 +549,9 @@ export function ServiceReplay() {
         await sleep(200);
         continue;
       }
-      const text = segments[run.index];
+      const segment = segments[run.index];
       try {
-        await processReplaySegment(text);
+        await processReplaySegment(segment);
       } catch (e) {
         appendLog(`Replay segment failed (continuing): ${String(e)}`);
       }
@@ -307,7 +563,7 @@ export function ServiceReplay() {
       }
     }
     if (!run.cancelled) {
-      appendLog("Service Replay complete. Review Live Service → Attention Queue / Intelligence Feed.");
+      appendLog("Service Replay complete. Review Needs Attention / Intelligence Feed below.");
     }
     run.playing = false;
     setReplayPlaying(false);
@@ -325,6 +581,9 @@ export function ServiceReplay() {
       }
       setSegments(parsed);
       setCurrentIndex(0);
+      setCurrentlyHearing(null);
+      setStartedAt(Date.now());
+      setElapsedMs(0);
       runRef.current = { playing: true, paused: false, cancelled: false, index: 0 };
       setReplayPlaying(true);
       setReplayPaused(false);
@@ -350,6 +609,7 @@ export function ServiceReplay() {
     runRef.current.playing = false;
     setReplayPlaying(false);
     setReplayPaused(false);
+    setStartedAt(null);
     appendLog("Service Replay stopped.");
   };
 
@@ -360,6 +620,9 @@ export function ServiceReplay() {
       await sleep(0);
       runRef.current = { playing: true, paused: false, cancelled: false, index: 0 };
       setCurrentIndex(0);
+      setCurrentlyHearing(null);
+      setStartedAt(Date.now());
+      setElapsedMs(0);
       setReplayPlaying(true);
       setReplayPaused(false);
       appendLog("Service Replay restarted from segment 1.");
@@ -412,6 +675,14 @@ export function ServiceReplay() {
           {error}
         </p>
       )}
+      {alreadyActive && (
+        <p className="live-brain__error" role="alert">
+          A service is already active. End it below before starting a new one.
+          <button type="button" className="op-button--danger" style={{ marginLeft: "0.75rem" }} disabled={isBusy("end-service")} onClick={endTestService}>
+            End Service
+          </button>
+        </p>
+      )}
 
       <section className="library-panel">
         <h2>Core Offline Readiness</h2>
@@ -428,33 +699,32 @@ export function ServiceReplay() {
       </section>
 
       <section className="library-panel">
-        <h2>Test Service</h2>
+        <div className="live-brain__row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+          <h2 style={{ margin: 0 }}>Service Status</h2>
+          <span className="op-badge op-badge--live">Source: SERVICE REPLAY — Simulated live transcript</span>
+        </div>
         {!serviceActive ? (
           <div className="live-brain__row">
-            <input
-              value={serviceTitle}
-              onChange={(e) => setServiceTitle(e.target.value)}
-              aria-label="Test service title"
-            />
+            <input value={serviceTitle} onChange={(e) => setServiceTitle(e.target.value)} aria-label="Test service title" />
             <button type="button" className="op-button--primary" disabled={isBusy("start-service")} onClick={startTestService}>
               Start Service
             </button>
           </div>
         ) : (
           <div className="live-brain__row">
-            <span className="op-badge op-badge--live">● Live — Service Active</span>
+            <span className="op-badge op-badge--live">● ACTIVE — {status?.service?.title ?? serviceTitle}</span>
+            {startedAt !== null && <span className="live-brain__hint">Elapsed {formatElapsed(elapsedMs)}</span>}
             <button type="button" className="op-button--danger" disabled={isBusy("end-service")} onClick={endTestService}>
               End Service
             </button>
           </div>
         )}
+        <p className="live-brain__hint" style={{ marginTop: "0.5rem" }}>
+          Currently hearing: {currentlyHearing ? `"${currentlyHearing.text}"` : "— nothing replayed yet —"}
+        </p>
       </section>
 
       <section className="library-panel">
-        <div className="live-brain__row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
-          <h2 style={{ margin: 0 }}>Service Replay</h2>
-          <span className="op-badge op-badge--live">SERVICE REPLAY — Simulated live transcript</span>
-        </div>
         <p className="live-brain__hint">
           Replay mode simulates a live service from a transcript, feeding it through CIP's real intelligence pipeline
           one segment at a time, in order, exactly as a pastor speaking would arrive. <strong>It does not provide real
@@ -551,6 +821,72 @@ export function ServiceReplay() {
         )}
       </section>
 
+      <WorkspaceHeader status={status} sermonFoundation={sermonFoundation} serviceIntel={serviceIntel} />
+      <SystemStatusStrip status={status} deviceCount={deviceCount} displayWindowOpen={displayWindowOpen} />
+
+      <AttentionQueue items={attentionQueue} busy={workspaceBusy} onAction={handleUnifiedAction} />
+
+      <section className="library-panel">
+        <h2>Sermon Intelligence</h2>
+        {!sermonState?.theme && (!sermonState?.points || sermonState.points.length === 0) ? (
+          <p className="live-brain__hint">No theme or key points detected yet from this replay.</p>
+        ) : (
+          <>
+            {sermonState.theme && (
+              <p>
+                <span className="live-brain__label">Current theme</span> {sermonState.theme.label}
+              </p>
+            )}
+            {sermonState.points && sermonState.points.length > 0 && (
+              <ul className="library-card-list">
+                {sermonState.points.map((point) => (
+                  <li key={point.sequence} className="library-card__text">
+                    {point.rawText}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+        <p className="live-brain__hint" style={{ marginTop: "0.5rem" }}>
+          {sermonFindings.length} sermon finding(s) awaiting review.
+        </p>
+      </section>
+
+      <IntelligenceFeed items={unifiedFeed} />
+
+      <PresentationCard
+        approvedSuggestions={approvedSuggestions}
+        previews={previews}
+        preparedItems={preparedItems}
+        activeDisplayItem={activeDisplayItem}
+        displayWindowOpen={displayWindowOpen}
+        busy={workspaceBusy}
+        onPreviewApproved={(id) =>
+          withWorkspaceBusy(`preview-${id}`, async () => {
+            const preview = await commands.previewPresentation(id);
+            setPreviews((prev) => ({ ...prev, [id]: preview }));
+          })
+        }
+        onPrepare={(id) => withWorkspaceBusy(`prepare-${id}`, async () => { await commands.preparePresentation(id); })}
+        onOpenDisplay={() =>
+          withWorkspaceBusy("open-display", async () => {
+            await commands.openPresentationDisplay();
+            setDisplayWindowOpen(true);
+          })
+        }
+        onCloseDisplay={() =>
+          withWorkspaceBusy("close-display", async () => {
+            await commands.closePresentationDisplay();
+            setDisplayWindowOpen(false);
+            setActiveDisplayItem(null);
+          })
+        }
+        onDisplay={(id) => withWorkspaceBusy(`display-${id}`, async () => { await commands.displayPresentation(id); })}
+        onCancel={(id) => withWorkspaceBusy(`cancel-${id}`, async () => { await commands.cancelPresentation(id); })}
+        onStopDisplay={() => withWorkspaceBusy("stop-display", async () => { await commands.clearPresentationDisplay(); })}
+      />
+
       <section className="library-panel">
         <h2>Manual Transcript</h2>
         <p className="live-brain__hint">
@@ -612,7 +948,7 @@ export function ServiceReplay() {
       </section>
 
       <section className="library-panel">
-        <h2>Activity Log</h2>
+        <h2>Activity</h2>
         {log.length === 0 ? (
           <p className="live-brain__hint">Nothing submitted yet.</p>
         ) : (

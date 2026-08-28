@@ -1,19 +1,19 @@
 {
   "applicationName": "Church Intelligence Platform",
   "cipVersion": "0.1.0",
-  "gitCommit": "d8f6ab51091d8be4b44220c20d07282942fafdbb",
-  "gitCommitShort": "d8f6ab5",
+  "gitCommit": "9eb1ea2eb2f961361db662b5069accf4775bc9bb",
+  "gitCommitShort": "9eb1ea2",
   "gitBranch": "claude/cip-foundation-init-i85g87",
-  "gitCommitNote": "This is the source tree commit (Phase 2.7.1's own commit) the Phase 3.8 rebuild was performed against, before Phase 3.8's own commit (which adds this manifest update) exists. Phase 3.8 adds no database migration; it adds the Service Replay screen (renamed/expanded from the Offline Test Center) and a new multi-segment acceptance test - see docs/phase-3-8-service-replay-operator.md for the exact diff.",
+  "gitCommitNote": "This is the source tree commit (Phase 3.8's own commit) the Phase 3.8.1 rebuild was performed against, before Phase 3.8.1's own commit (which adds this manifest update) exists. Phase 3.8.1 adds no database migration, no new Tauri command; it fixes the reported 2-segment transcript collapse and mounts the real operator intelligence read model on the Service Replay screen - see docs/phase-3-8-1-service-replay-intelligence.md for the exact diff.",
   "targetArchitecture": "x86_64 (x64)",
   "targetPlatform": "Windows 11 x64",
   "installer": {
     "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
     "installerType": "NSIS self-extracting installer (.exe)",
-    "fileSizeBytes": 7126295,
-    "sha256": "4f1a1890d10584c37424a71cfe1e664829c76c40adeafba0aef06a355d891ac4",
-    "buildTimestampUtc": "2026-08-28T09:00:00Z",
-    "packagedIntoReleaseTimestampUtc": "2026-08-28T09:01:00Z"
+    "fileSizeBytes": 7127913,
+    "sha256": "a5c17483876a1ddfa2d3c2e1b5a6a7ef4c1c73e86e0949b146dd91f0c0f3cf2f",
+    "buildTimestampUtc": "2026-08-28T10:53:00Z",
+    "packagedIntoReleaseTimestampUtc": "2026-08-28T10:53:00Z"
   },
   "architectureVerification": {
     "outerInstallerStub": "PE32 executable (GUI) Intel 80386 (stripped to external PDB), Nullsoft Installer self-extracting archive - a standard 32-bit NSIS bootstrapper; this is normal NSIS behavior on Windows and does NOT mean the installed application is 32-bit",
@@ -21,19 +21,20 @@
     "method": "file(1) run directly against both the installer and the embedded application binary in this build environment"
   },
   "provenance": {
-    "builtDuring": "Phase 3.8 (Offline Service Replay + Professional Church Operator Workspace) - rebuilt to package the Service Replay screen (transcript paste/file-load, sequential timed segment scheduling with pause/resume/stop/restart, sample transcript) and its pure segmentation/timing helpers",
-    "buildEnvironment": "cross-compiled from Linux using rustup target x86_64-pc-windows-gnu, gcc-mingw-w64, and nsis (makensis) - identical toolchain to every prior phase, see docs/phase-3-4-windows-pilot.md for the original toolchain setup and docs/phase-3-8-service-replay-operator.md for what changed this phase",
+    "builtDuring": "Phase 3.8.1 (Service Replay Intelligence + Professional Live-Service Operator Workspace) - rebuilt to package the fixed transcript segmentation (bounded chunking + optional timestamp-cue parsing) and the real-time Bible/Sermon/Attention/Presentation display now mounted on the Service Replay screen",
+    "buildEnvironment": "cross-compiled from Linux using rustup target x86_64-pc-windows-gnu, gcc-mingw-w64, and nsis (makensis) - identical toolchain to every prior phase, see docs/phase-3-4-windows-pilot.md for the original toolchain setup and docs/phase-3-8-1-service-replay-intelligence.md for what changed this phase",
     "sourceCodeChangedToProduceThisArtifact": true,
-    "note": "This artifact supersedes the Phase 2.7.1 installer (previously SHA-256 7d2834d387a16a7f03347b8b49c27b3e850903aa4720ec21b8db8dff69f0f6b5) because this phase replaced apps/desktop/src/components/testcenter/TestCenter.tsx with apps/desktop/src/components/servicereplay/ServiceReplay.tsx (+ replay.ts pure logic), renamed the top-level nav entry from 'Offline Test Center' to 'Service Replay', and added zero backend changes (no new Tauri command, no new migration - see the Phase 3.8 audit for why none was justified). This is a freshly compiled build (`cargo build --release --target x86_64-pc-windows-gnu` via `tauri build`), not a copy of a prior artifact."
+    "note": "This artifact supersedes the Phase 3.8 installer (previously SHA-256 4f1a1890d10584c37424a71cfe1e664829c76c40adeafba0aef06a355d891ac4) because this phase rewrote apps/desktop/src/components/servicereplay/replay.ts's segmentation algorithm (fixing the reported 2-segment collapse on a real ~52-minute transcript) and apps/desktop/src/components/servicereplay/ServiceReplay.tsx (mounting the same commands.list*/liveEvents.on* read model and WorkspaceHeader/SystemStatusStrip/AttentionQueue/IntelligenceFeed/PresentationCard components LiveChurchBrain.tsx already used, so the operator sees real Bible/Sermon/Attention/Presentation activity while a replay runs). Zero backend changes (no new Tauri command, no new migration, no new intelligence engine - see docs/phase-3-8-1-audit.md for why none was justified). This is a freshly compiled build (`cargo build --release --target x86_64-pc-windows-gnu` via `tauri build`), not a copy of a prior artifact."
   },
-  "releaseCandidateStatement": "This is the Phase 3.8 SOFTWARE RELEASE CANDIDATE for Windows x64 (Offline Service Replay + Professional Church Operator Workspace). It is a real, verifiable build artifact - not a placeholder, not a simulation, not a fabrication. See docs/phase-3-8-service-replay-operator.md for the full PASS/HOLD breakdown and final gate.",
-  "physicalHardwareStatement": "Physical hardware qualification has NOT been performed in the build environment. This installer has not been installed, launched, or tested on any real Windows machine. No real microphone, no real Whisper transcription, no real second display/projector, and no real human operator workflow has been exercised against this build. Xvfb, simulated audio, virtual displays, automated tests, Service Replay, and cross-compilation success are Environment A/B evidence only and are never substituted for Environment C (real hardware) evidence anywhere in this project's documentation.",
+  "releaseCandidateStatement": "This is the Phase 3.8.1 SOFTWARE RELEASE CANDIDATE for Windows x64 (Service Replay Intelligence + Professional Live-Service Operator Workspace). It is a real, verifiable build artifact - not a placeholder, not a simulation, not a fabrication. See docs/phase-3-8-1-service-replay-intelligence.md for the full PASS/HOLD breakdown and final gate.",
+  "physicalHardwareStatement": "Physical hardware qualification has NOT been performed in the build environment. This installer has not been installed, launched, or tested on any real Windows machine. No real microphone, no real Whisper transcription, no real second display/projector, and no real human operator workflow has been exercised against this build. Xvfb, simulated audio, virtual displays, automated tests, Service Replay, and cross-compilation success are Environment A/B evidence only and are never substituted for Environment C (real hardware) evidence anywhere in this project's documentation. The user's own prior Windows testing (which reported the defects this phase fixes) is real Environment C usage of the PRIOR (Phase 3.8) build, not of this rebuilt artifact - this artifact itself has not yet been tested on that hardware.",
   "githubReleaseStatus": "NOT CONFIGURED - no .github/workflows directory exists in this repository, and no GitHub Release has been created for this artifact. This installer is available only via this repository's working tree (release/windows/), not via GitHub Releases or any CI/CD pipeline.",
   "obtainingWithoutDeveloperTooling": "The file at release/windows/Church Intelligence Platform_0.1.0_x64-setup.exe can be copied/transferred directly (e.g. via a git clone of this repository, a direct file download, or a USB drive) to the target Windows machine and run there. Running the installer on Windows requires none of: Claude Code, Rust, Cargo, Node.js, npm, or the CIP source tree - only the .exe file itself.",
   "knownLimitations": [
     "UNSIGNED release candidate - Windows SmartScreen will show an 'unknown publisher' warning on first run",
-    "Cross-compiled from Linux, never launch-tested on real Windows hardware - Environment C remains not performed, consistent with every prior phase",
+    "Cross-compiled from Linux, never launch-tested on real Windows hardware - Environment C remains not performed for THIS rebuilt artifact, consistent with every prior phase",
     "Music Library is legitimately empty in a production build - no licensed production song dataset exists in this repository; Service Replay's default flow does not exercise Music Intelligence for this reason (the pre-existing Multi-Domain quick scenario still demonstrates it honestly, dev/test dataset only)",
-    "See docs/phase-3-8-service-replay-operator.md and pilot-evidence/3.8/ for the full Environment A/B/C evidence breakdown"
+    "The ground-up visual/UX redesign described aspirationally in the Phase 3.8 spec (color language, responsive card layout, full Diagnostics-panel migration) was deliberately not attempted this phase either - only Service Replay's own real-intelligence display was added, reusing existing Live Service components verbatim",
+    "See docs/phase-3-8-1-service-replay-intelligence.md and pilot-evidence/3.8.1/ for the full Environment A/B/C evidence breakdown"
   ]
 }
