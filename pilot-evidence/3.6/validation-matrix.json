@@ -1,0 +1,113 @@
+{
+  "note": "Code, Automated, and Persistent columns are Environment A (automated) claims - proven by the commands/tests cited. Real Data is Environment A against the actual production BSB dataset specifically (never the dev fixture). Operator Usable is Environment A/B (build succeeds, Xvfb smoke test passes, manual code-path review) - never a substitute for VERIFIED_WINDOWS/VERIFIED_PHYSICAL_HARDWARE, which remain NOT VERIFIED for every row (see pilot-evidence/3.6/windows-ux/).",
+  "rows": [
+    {
+      "capability": "BSB Library (dataset)",
+      "code": true,
+      "automated": true,
+      "realData": true,
+      "persistent": true,
+      "operatorUsable": true,
+      "evidence": "content::tests::phase_real_bible_dataset_full_validation (pre-existing, re-verified this phase) + content::tests::phase_3_6_bible_library_acceptance_against_the_real_bsb_dataset"
+    },
+    {
+      "capability": "Bible Search",
+      "code": true,
+      "automated": true,
+      "realData": true,
+      "persistent": "n/a (read-only)",
+      "operatorUsable": true,
+      "evidence": "search_bible (pre-existing, reused unmodified), BibleLibrary.tsx Search tab"
+    },
+    {
+      "capability": "Bible Browse",
+      "code": true,
+      "automated": true,
+      "realData": true,
+      "persistent": "n/a (read-only)",
+      "operatorUsable": true,
+      "evidence": "list_bible_books (new) + search_bible chapter branch (reused); content::tests::phase_3_6_bible_library_acceptance_against_the_real_bsb_dataset (66 books/39 OT/27 NT/1189 chapters against real BSB)"
+    },
+    {
+      "capability": "Scripture Save",
+      "code": true,
+      "automated": true,
+      "realData": "n/a (bookmark of a reference, not dataset content)",
+      "persistent": true,
+      "operatorUsable": true,
+      "evidence": "save_scripture / persist_saved_scripture; persistence::tests::saved_scripture_create_retrieve_matches_the_committed_row + saved_scripture_supports_a_verse_range"
+    },
+    {
+      "capability": "Scripture Reuse",
+      "code": true,
+      "automated": true,
+      "realData": "n/a",
+      "persistent": true,
+      "operatorUsable": true,
+      "evidence": "list_saved_scriptures + Prepare action (createManualPresentation, pre-existing); HistoryView.tsx's Reuse-in-current-service action"
+    },
+    {
+      "capability": "Music Library",
+      "code": true,
+      "automated": true,
+      "realData": false,
+      "persistent": "n/a (browse-only; no new persistence built)",
+      "operatorUsable": "PARTIAL - honest empty-state and search reuse only; no song detail/browse UI (deliberately deferred, see docs/phase-3-6-church-libraries.md section 24)",
+      "evidence": "MusicLibrary.tsx; no licensed production song dataset exists in this repository"
+    },
+    {
+      "capability": "Song Search",
+      "code": true,
+      "automated": true,
+      "realData": false,
+      "persistent": "n/a",
+      "operatorUsable": true,
+      "evidence": "searchMusic (pre-existing, reused unmodified, now also reachable from Music Library); only the fictional 5-song dev fixture is searchable, honestly labeled as such in docs/music-datasets.md"
+    },
+    {
+      "capability": "Song Save",
+      "code": false,
+      "automated": false,
+      "realData": false,
+      "persistent": false,
+      "operatorUsable": false,
+      "evidence": "Deliberately not built this phase - no real data exists to make it meaningful, and it requires a genuinely new persistence mechanism (unlike Presentation History, nothing existing could be reused). See docs/phase-3-6-church-libraries.md section 24."
+    },
+    {
+      "capability": "Service History",
+      "code": true,
+      "automated": true,
+      "realData": "n/a (operational data, not Bible content)",
+      "persistent": true,
+      "operatorUsable": true,
+      "evidence": "listServiceHistory/getService/listTimeline/listTranscript/listSuggestions (all pre-existing, already service_id-aware); HistoryView.tsx"
+    },
+    {
+      "capability": "Presentation History",
+      "code": true,
+      "automated": true,
+      "realData": "n/a",
+      "persistent": true,
+      "operatorUsable": true,
+      "evidence": "list_presentation_history (new, thin wrapper over pre-existing persistence::list_presentation_items); HistoryView.tsx's Presentation History section"
+    },
+    {
+      "capability": "Saved Content",
+      "code": true,
+      "automated": true,
+      "realData": "n/a",
+      "persistent": false,
+      "operatorUsable": true,
+      "evidence": "Pre-existing (listAcceptedContentCandidates, Phase 2.7/3.0) - audited, confirmed already correct, not modified this phase. Underlying ContentCandidate remains in-memory only by prior deliberate design (unrelated to this phase)."
+    },
+    {
+      "capability": "Cross-Domain Provenance",
+      "code": true,
+      "automated": true,
+      "realData": "n/a (deterministic rule engine, not a dataset)",
+      "persistent": false,
+      "operatorUsable": true,
+      "evidence": "Pre-existing (Phase 2.4/2.9) - IntelligenceCorrelation already carries assertion_level/confidence/evidence/source_finding_ids end-to-end into the Intelligence Feed; audited and confirmed complete, not modified this phase. Correlations are deliberately not persisted (documented pre-existing decision)."
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "note": "No physical Windows machine, screenshot tool, or human operator was available in this container for Phase 3.6, for the identical reason recorded in pilot-evidence/3.5/windows-ux/ and pilot-evidence/3.5.1/windows-ux/. This is not a regression - it is the same constraint every prior hardware-pilot phase (3.1 through 3.5.1) has reported.",
+  "newScreensRequiringRealHardwareValidationWhenAvailable": [
+    "Bible Library (Browse/Search/Saved tabs) - book/chapter tap targets, verse-range tool usability, save/prepare workflow timing",
+    "Music Library - empty-state legibility, search reuse",
+    "History view - service list, presentation/scripture/transcript/timeline detail panels, Reuse-in-current-service action"
+  ],
+  "installer": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "e055d4a492d47bedbc6d75e089bc9cbb8a21e0a450102d0b6d8cdf862255171d",
+    "status": "NOT VERIFIED on real Windows hardware"
+  },
+  "conclusion": "All physical-hardware/human-operator validation for the Phase 3.6 screens remains NOT VERIFIED - not estimated, not simulated, not inferred from code review."
+}

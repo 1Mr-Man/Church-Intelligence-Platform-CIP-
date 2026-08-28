@@ -17,8 +17,10 @@ import type { AppConfig, AppEnvironment, BackupReport, PilotDiagnostics } from "
 import type { ContentCandidate } from "../domain/contentIntelligence";
 import type {
   AudioDevice,
+  BibleBook,
   BibleSearchResult,
   BibleTranslation,
+  SavedScripture,
   ContentMetadata,
   ContentType,
   DomainCapabilityReport,
@@ -233,6 +235,14 @@ export function listPreparedPresentations(): Promise<PresentationItem[]> {
   return invokeCommand("list_prepared_presentations");
 }
 
+/** Presentation History (Phase 3.6): every presentation item ever prepared
+ * for `serviceId` (any status, any past or live service) - the History
+ * view's data source. Unlike {@link listPreparedPresentations}, never
+ * limited to the live service or to still-`Prepared` items. */
+export function listPresentationHistory(serviceId: string): Promise<PresentationItem[]> {
+  return invokeCommand("list_presentation_history", { serviceId });
+}
+
 export function getPresentationItem(itemId: string): Promise<PresentationItem> {
   return invokeCommand("get_presentation_item", { itemId });
 }
@@ -320,6 +330,44 @@ export function correctScriptureContext(book: string, chapter: number): Promise<
  * `cip_core_bible::search::search_bible`'s docs. */
 export function searchBible(query: string, translationId?: string): Promise<BibleSearchResult[]> {
   return invokeCommand("search_bible", { query, translationId: translationId ?? null });
+}
+
+/** The Bible Library's book browser (Phase 3.6): the canonical 66-book
+ * order/testament, each only included if this translation actually has it
+ * imported - see `commands::list_bible_books`'s docs (Rust). */
+export function listBibleBooks(translationId?: string): Promise<BibleBook[]> {
+  return invokeCommand("list_bible_books", { translationId: translationId ?? null });
+}
+
+// --- saved scriptures (Phase 3.6: Church Knowledge Libraries) ---------------
+
+export function saveScripture(input: {
+  translationId: string;
+  book: string;
+  chapter: number;
+  verseStart: number;
+  verseEnd?: number | null;
+  referenceDisplay: string;
+  note?: string | null;
+}): Promise<SavedScripture> {
+  return invokeCommand("save_scripture", {
+    translationId: input.translationId,
+    book: input.book,
+    chapter: input.chapter,
+    verseStart: input.verseStart,
+    verseEnd: input.verseEnd ?? null,
+    referenceDisplay: input.referenceDisplay,
+    note: input.note ?? null,
+  });
+}
+
+/** Every saved scripture, most recently saved first. */
+export function listSavedScriptures(): Promise<SavedScripture[]> {
+  return invokeCommand("list_saved_scriptures");
+}
+
+export function deleteSavedScripture(id: string): Promise<boolean> {
+  return invokeCommand("delete_saved_scripture", { id });
 }
 
 // --- content registry (Phase 1.5) --------------------------------------------

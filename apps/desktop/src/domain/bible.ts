@@ -61,6 +61,22 @@ export interface BibleChapter {
   verses: BibleVerse[];
 }
 
+/** A church-wide, cross-service Scripture bookmark (Phase 3.6 Bible
+ * Library) - mirrors `persistence::SavedScripture` (Rust). Deliberately
+ * not service-scoped: it exists to be found again in a *future* service,
+ * unlike `ScriptureDetection`/`Suggestion`/`PresentationItem`. */
+export interface SavedScripture {
+  id: string;
+  translationId: string;
+  book: string;
+  chapter: number;
+  verseStart: number;
+  verseEnd: number | null;
+  referenceDisplay: string;
+  note: string | null;
+  createdAt: string;
+}
+
 /** One Bible search result (Phase 1.5) - mirrors
  * `cip_core_bible::search::BibleSearchResult` (Rust). Enough to render and
  * act on (Preview/Prepare) without a raw database row. */

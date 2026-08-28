@@ -1,0 +1,37 @@
+{
+  "environment": "automated",
+  "commands": {
+    "cargo fmt --all -- --check": "pass",
+    "cargo check --workspace": "pass",
+    "cargo clippy --workspace --all-targets -- -D warnings": "pass (2 new #[allow] attributes added, matching existing project precedent - clippy::too_many_arguments on save_scripture/row_to_saved_scripture, clippy::type_complexity on saved_scripture_row - identical pattern already used by presentation_item_row/row_to_presentation_item)",
+    "cargo test --workspace (default features)": "776 passed, 0 failed (up from 769 at Phase 3.5.1 baseline - 7 new tests: 4 saved_scriptures persistence tests, 2 presentation.rs verse-range tests, 1 real-BSB-dataset Phase 3.6 acceptance test)",
+    "cargo check -p cip-desktop --features whisper": "pass",
+    "cargo test -p cip-ai-speech --features whisper": "7 passed, 0 failed",
+    "npm run typecheck (tsc -b)": "pass",
+    "npm run test (vitest run)": "191 passed, 0 failed (up from 179 - 12 new libraryHelpers.test.ts tests: referenceFor, parseVerseRange, presentationHeading)",
+    "npm run build (vite build)": "pass",
+    "npm run lint (oxlint)": "0 errors, 3 pre-existing warnings (main.tsx fast-refresh, PilotDiagnosticsPanel.tsx and LiveChurchBrain.tsx set-state-in-effect) - unchanged from Phase 3.5.1 baseline, not introduced by this phase"
+  },
+  "newBackendSurface": {
+    "migration": "database/migrations/0010_saved_scriptures.sql - new saved_scriptures table (additive only, no existing table altered)",
+    "newTauriCommands": [
+      "list_bible_books (translationId?) -> BibleBook[] - composes existing BibleProvider::get_book over the canonical book list, no new provider method",
+      "save_scripture / list_saved_scriptures / delete_saved_scripture - CRUD over the new saved_scriptures table",
+      "list_presentation_history (serviceId) -> PresentationItem[] - thin wrapper exposing the already-service_id-aware persistence::list_presentation_items for an arbitrary (not just live) service"
+    ],
+    "behaviorFix": "presentation.rs build_scripture_slide now renders a full verse range (previously silently truncated to the range's first verse only - see docs/phase-3-6-church-libraries.md's audit finding). preview_presentation/preview_scripture/prepare_presentation/create_manual_presentation all share this one function, so the fix applies uniformly.",
+    "zeroChangesTo": "Tauri command names/signatures for every pre-existing command, event names/payloads, intelligence engines, cross-domain correlation logic, presentation activation safety (prepare_to_activate/commit_activation/stop_active_item untouched), licensing gate, BSB dataset content, database tables other than the one new additive table"
+  },
+  "offlineDependencyCheck": {
+    "command": "cargo tree --workspace --all-features",
+    "result": "no HTTP client crate in the dependency graph - unchanged from prior phases"
+  },
+  "secretsScan": {
+    "command": "git diff 60f3994 -- apps/desktop/src apps/desktop/src-tauri database docs | grep -iE \"TODO|FIXME|api[_-]?key|secret|password|BEGIN (RSA|PRIVATE)|dbg!|console\\.log\"",
+    "result": "no matches"
+  },
+  "tauriCapabilitiesCheck": {
+    "command": "git diff 60f3994 -- apps/desktop/src-tauri/capabilities/ apps/desktop/src-tauri/tauri.conf.json",
+    "result": "empty diff - no capability or CSP change"
+  }
+}

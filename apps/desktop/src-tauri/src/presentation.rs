@@ -32,7 +32,7 @@
 //! section.
 
 use cip_core_ai::SuggestionStatus;
-use cip_core_bible::{BibleProvider, BibleProviderError, ScriptureReference};
+use cip_core_bible::{get_verse_range, BibleProvider, BibleProviderError, ScriptureReference};
 use cip_core_presentation::{PresentationContent, PresentationItem, PresentationItemStatus};
 use cip_presentation_renderer::{render_content, RenderError, RenderedSlide};
 use rusqlite::Connection;
@@ -75,23 +75,34 @@ pub enum PresentationError {
     DisplayUnavailable(String),
 }
 
-/// `"ROM 8:28"` -> `("ROM", 8, 28)`. Reverses `ScriptureReference`'s own
-/// `Display` impl - the same parse `commands::parse_display_reference`
-/// performs, kept as a separate copy here (rather than a shared import)
-/// so this module has no dependency on `commands.rs`, matching
-/// `pipeline.rs`'s existing independence from it.
-fn parse_display_reference(text: &str) -> Result<(String, u32, u32), PresentationError> {
+/// `"ROM 8:28"` -> `("ROM", 8, 28, None)`; `"ROM 8:28-31"` -> `("ROM", 8,
+/// 28, Some(31))`. Reverses `ScriptureReference`'s own `Display` impl -
+/// the same parse `commands::parse_display_reference` performs, kept as a
+/// separate copy here (rather than a shared import) so this module has no
+/// dependency on `commands.rs`, matching `pipeline.rs`'s existing
+/// independence from it.
+///
+/// Phase 3.6: previously silently discarded everything after a `-` (only
+/// the range's start verse was ever prepared/displayed - see
+/// `docs/phase-3-6-church-libraries.md`'s Bible Library audit finding).
+/// Now returns the end verse too so [`build_scripture_slide`] can render
+/// the full range, matching what Bible Library "browse a range, prepare
+/// it" actually needs.
+fn parse_display_reference(
+    text: &str,
+) -> Result<(String, u32, u32, Option<u32>), PresentationError> {
     let invalid = || PresentationError::InvalidReference(text.to_string());
     let (book, rest) = text.rsplit_once(' ').ok_or_else(invalid)?;
     let (chapter_str, verse_str) = rest.split_once(':').ok_or_else(invalid)?;
     let chapter: u32 = chapter_str.parse().map_err(|_| invalid())?;
-    let verse: u32 = verse_str
-        .split('-')
-        .next()
-        .unwrap_or(verse_str)
-        .parse()
-        .map_err(|_| invalid())?;
-    Ok((book.to_string(), chapter, verse))
+    let (verse, verse_end) = match verse_str.split_once('-') {
+        Some((start, end)) => (
+            start.parse().map_err(|_| invalid())?,
+            Some(end.parse().map_err(|_| invalid())?),
+        ),
+        None => (verse_str.parse().map_err(|_| invalid())?, None),
+    };
+    Ok((book.to_string(), chapter, verse, verse_end))
 }
 
 /// Looks up a scripture reference against the real local `BibleProvider`
@@ -106,16 +117,38 @@ pub fn build_scripture_slide(
     translation_id: &str,
     reference_display: &str,
 ) -> Result<(PresentationContent, RenderedSlide), PresentationError> {
-    let (book, chapter, verse) = parse_display_reference(reference_display)?;
-    let scripture_reference = ScriptureReference::single(translation_id, &book, chapter, verse);
-    let verse_row = provider
-        .get_verse(&scripture_reference)?
-        .ok_or_else(|| PresentationError::VerseNotFound(reference_display.to_string()))?;
+    let (book, chapter, verse, verse_end) = parse_display_reference(reference_display)?;
+
+    let text = match verse_end {
+        None => {
+            let scripture_reference =
+                ScriptureReference::single(translation_id, &book, chapter, verse);
+            provider
+                .get_verse(&scripture_reference)?
+                .ok_or_else(|| PresentationError::VerseNotFound(reference_display.to_string()))?
+                .text
+        }
+        Some(verse_end) => {
+            let verses =
+                get_verse_range(provider, translation_id, &book, chapter, verse, verse_end)
+                    .map_err(|_| PresentationError::VerseNotFound(reference_display.to_string()))?;
+            if verses.is_empty() {
+                return Err(PresentationError::VerseNotFound(
+                    reference_display.to_string(),
+                ));
+            }
+            verses
+                .into_iter()
+                .map(|v| format!("{} {}", v.reference.verse_start, v.text))
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+    };
 
     let content = PresentationContent::Scripture {
         reference: reference_display.to_string(),
         translation_id: translation_id.to_string(),
-        text: verse_row.text,
+        text,
     };
     let slide = render_content(&content)?;
     Ok((content, slide))
@@ -303,6 +336,33 @@ mod tests {
         let (content_b, slide_b) = build_scripture_slide(&provider, "KJV", "ROM 8:28").unwrap();
         assert_eq!(content_a, content_b);
         assert_eq!(slide_a, slide_b);
+    }
+
+    #[test]
+    fn builds_real_bible_text_for_a_verse_range() {
+        // Phase 3.6: a range must include every verse's text, not just the
+        // first one - see docs/phase-3-6-church-libraries.md's Bible
+        // Library audit finding (the range used to be silently truncated).
+        let provider = seeded_provider();
+        let (content, slide) = build_scripture_slide(&provider, "KJV", "ROM 8:29-30").unwrap();
+
+        let PresentationContent::Scripture {
+            reference, text, ..
+        } = content
+        else {
+            panic!("expected scripture content");
+        };
+        assert_eq!(reference, "ROM 8:29-30");
+        assert!(text.contains("foreknow"), "must include verse 29's text");
+        assert!(text.contains("justified"), "must include verse 30's text");
+        assert_eq!(slide.heading, "ROM 8:29-30");
+    }
+
+    #[test]
+    fn rejects_an_inverted_verse_range() {
+        let provider = seeded_provider();
+        let err = build_scripture_slide(&provider, "KJV", "ROM 8:31-29").unwrap_err();
+        assert!(matches!(err, PresentationError::VerseNotFound(_)));
     }
 
     #[test]

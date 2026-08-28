@@ -38,6 +38,7 @@ use cip_core_bible::ReferenceKind;
 use cip_core_confidence::{ConfidenceLevel, ConfidenceResult, ConfidenceSource};
 use cip_core_service::{ScriptureDetection, ServiceSession, ServiceStatus};
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -1162,6 +1163,154 @@ pub fn get_transcript_segment_service_id(
     .transpose()
 }
 
+// --- saved scriptures (Phase 3.6: Church Knowledge Libraries) --------------
+
+/// A church-wide, cross-service Scripture bookmark - see
+/// `database/migrations/0010_saved_scriptures.sql` for why this is a
+/// standalone table rather than reusing `scripture_detections`/
+/// `ai_suggestions`/`presentation_items` (all of them are service-scoped,
+/// one-shot records; this is neither).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedScripture {
+    pub id: Uuid,
+    pub translation_id: String,
+    pub book: String,
+    pub chapter: u32,
+    pub verse_start: u32,
+    pub verse_end: Option<u32>,
+    pub reference_display: String,
+    pub note: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[allow(clippy::type_complexity)]
+fn saved_scripture_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<(
+    String,
+    String,
+    String,
+    u32,
+    u32,
+    Option<u32>,
+    String,
+    Option<String>,
+    String,
+)> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn row_to_saved_scripture(
+    id: String,
+    translation_id: String,
+    book: String,
+    chapter: u32,
+    verse_start: u32,
+    verse_end: Option<u32>,
+    reference_display: String,
+    note: Option<String>,
+    created_at: String,
+) -> Result<SavedScripture, PersistError> {
+    Ok(SavedScripture {
+        id: Uuid::parse_str(&id).map_err(|_| PersistError::NotFound(id))?,
+        translation_id,
+        book,
+        chapter,
+        verse_start,
+        verse_end,
+        reference_display,
+        note,
+        created_at: parse_rfc3339(&created_at),
+    })
+}
+
+const SAVED_SCRIPTURE_COLUMNS: &str =
+    "id, translation_id, book, chapter, verse_start, verse_end, reference_display, note, created_at";
+
+/// Saves a Scripture reference for later reuse. `note` is an optional
+/// operator-written label (e.g. "Baptism series"); free text, never
+/// interpreted.
+#[allow(clippy::too_many_arguments)]
+pub fn persist_saved_scripture(
+    conn: &Connection,
+    id: Uuid,
+    translation_id: &str,
+    book: &str,
+    chapter: u32,
+    verse_start: u32,
+    verse_end: Option<u32>,
+    reference_display: &str,
+    note: Option<&str>,
+) -> Result<SavedScripture, PersistError> {
+    let created_at = Utc::now();
+    conn.execute(
+        "INSERT INTO saved_scriptures
+            (id, translation_id, book, chapter, verse_start, verse_end, reference_display, note, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            id.to_string(),
+            translation_id,
+            book,
+            chapter,
+            verse_start,
+            verse_end,
+            reference_display,
+            note,
+            created_at.to_rfc3339(),
+        ],
+    )?;
+    Ok(SavedScripture {
+        id,
+        translation_id: translation_id.to_string(),
+        book: book.to_string(),
+        chapter,
+        verse_start,
+        verse_end,
+        reference_display: reference_display.to_string(),
+        note: note.map(str::to_string),
+        created_at,
+    })
+}
+
+/// Every saved scripture, most recently saved first.
+pub fn list_saved_scriptures(conn: &Connection) -> Result<Vec<SavedScripture>, PersistError> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SAVED_SCRIPTURE_COLUMNS} FROM saved_scriptures ORDER BY created_at DESC"
+    ))?;
+    let rows = stmt
+        .query_map([], saved_scripture_row)?
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.into_iter()
+        .map(|(id, t, b, c, vs, ve, rd, note, created_at)| {
+            row_to_saved_scripture(id, t, b, c, vs, ve, rd, note, created_at)
+        })
+        .collect()
+}
+
+/// Deletes a saved scripture. Idempotent-safe from the caller's
+/// perspective (returns whether a row actually existed) rather than
+/// erroring on a double-delete - matches `stop_active_item`'s "safe and
+/// idempotent" discipline for operator-facing cleanup actions.
+pub fn delete_saved_scripture(conn: &Connection, id: Uuid) -> Result<bool, PersistError> {
+    let affected = conn.execute(
+        "DELETE FROM saved_scriptures WHERE id = ?1",
+        params![id.to_string()],
+    )?;
+    Ok(affected > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1920,5 +2069,113 @@ mod tests {
             get_transcript_segment_service_id(&conn, Uuid::new_v4()).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn saved_scripture_create_retrieve_matches_the_committed_row() {
+        // "create -> retrieve" durability proof (Phase 3.6 spec section 19):
+        // a plain committed SQLite write is durable by construction, the
+        // same proof pattern every other persistence test in this module
+        // already uses (there is no in-process "restart" to simulate -
+        // literal process-restart durability is proven at the Xvfb
+        // relaunch level, see pilot-evidence/3.6/).
+        let conn = migrated_conn();
+        let id = Uuid::new_v4();
+        let saved = persist_saved_scripture(
+            &conn,
+            id,
+            "BSB",
+            "ROM",
+            8,
+            28,
+            None,
+            "ROM 8:28",
+            Some("Comfort verse"),
+        )
+        .unwrap();
+        assert_eq!(saved.id, id);
+        assert_eq!(saved.verse_end, None);
+
+        let all = list_saved_scriptures(&conn).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0], saved);
+    }
+
+    #[test]
+    fn saved_scripture_supports_a_verse_range() {
+        let conn = migrated_conn();
+        let saved = persist_saved_scripture(
+            &conn,
+            Uuid::new_v4(),
+            "BSB",
+            "ROM",
+            8,
+            29,
+            Some(30),
+            "ROM 8:29-30",
+            None,
+        )
+        .unwrap();
+        assert_eq!(saved.verse_start, 29);
+        assert_eq!(saved.verse_end, Some(30));
+        assert_eq!(saved.note, None);
+    }
+
+    #[test]
+    fn list_saved_scriptures_orders_most_recently_saved_first() {
+        let conn = migrated_conn();
+        let first = persist_saved_scripture(
+            &conn,
+            Uuid::new_v4(),
+            "BSB",
+            "GEN",
+            1,
+            1,
+            None,
+            "GEN 1:1",
+            None,
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let second = persist_saved_scripture(
+            &conn,
+            Uuid::new_v4(),
+            "BSB",
+            "JHN",
+            3,
+            16,
+            None,
+            "JHN 3:16",
+            None,
+        )
+        .unwrap();
+
+        let all = list_saved_scriptures(&conn).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].id, second.id);
+        assert_eq!(all[1].id, first.id);
+    }
+
+    #[test]
+    fn delete_saved_scripture_removes_it_and_is_safe_to_repeat() {
+        let conn = migrated_conn();
+        let saved = persist_saved_scripture(
+            &conn,
+            Uuid::new_v4(),
+            "BSB",
+            "PSA",
+            23,
+            1,
+            None,
+            "PSA 23:1",
+            None,
+        )
+        .unwrap();
+
+        assert!(delete_saved_scripture(&conn, saved.id).unwrap());
+        assert!(list_saved_scriptures(&conn).unwrap().is_empty());
+        // Idempotent: deleting an already-deleted (or never-existed) row
+        // reports "nothing was there", never an error.
+        assert!(!delete_saved_scripture(&conn, saved.id).unwrap());
     }
 }

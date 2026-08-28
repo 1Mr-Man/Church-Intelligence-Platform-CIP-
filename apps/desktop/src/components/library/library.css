@@ -1,0 +1,247 @@
+/* Phase 3.6: Church Knowledge Libraries & Service History - top-level
+   navigation and the Bible/Music/History library pages. Reuses every
+   design token established in Phase 3.5.1 (index.css) rather than
+   inventing a new palette - Bible leans on --status-scripture (gold, the
+   token already reserved for Scripture emphasis), Music on --status-audio
+   (teal), History stays --status-neutral (structural/archival), matching
+   the same domain-color discipline `workspace.css` already established
+   for the Attention Queue/Intelligence Feed. */
+
+.app-nav {
+  display: flex;
+  gap: 0.3rem;
+  padding: 0.6rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.app-nav button {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.app-nav button:hover {
+  background: var(--bg-elevated-2);
+}
+
+.app-nav button[aria-pressed="true"] {
+  background: var(--accent);
+  color: #fff;
+}
+
+.library-page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 4rem;
+}
+
+.library-page__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.library-page__header h1 {
+  margin: 0.1rem 0 0;
+  font-size: 1.6rem;
+}
+
+.library-page__eyebrow {
+  margin: 0;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: var(--status-scripture);
+}
+
+.library-page--music .library-page__eyebrow {
+  color: var(--status-audio);
+}
+
+.library-page--history .library-page__eyebrow {
+  color: var(--status-neutral);
+}
+
+.library-page__status-line {
+  color: var(--text);
+  opacity: 0.75;
+  font-size: 0.9rem;
+  margin: 0 0 1rem;
+}
+
+.library-page__notice {
+  background: var(--status-good-bg);
+  border: 1px solid var(--status-good-border);
+  color: var(--status-good);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  margin: 0 0 1rem;
+}
+
+.library-page__empty {
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--text);
+  opacity: 0.8;
+  background: var(--bg-elevated);
+}
+
+.library-tabs {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.library-tabs button {
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+
+.library-tabs button[aria-pressed="true"] {
+  border-color: var(--status-scripture-border);
+  background: var(--status-scripture-bg);
+  color: var(--status-scripture);
+  font-weight: 700;
+}
+
+.library-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+  background: var(--bg-elevated);
+}
+
+.library-panel h2 {
+  margin-top: 0;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-h);
+  opacity: 0.9;
+}
+
+.library-book-grid,
+.library-chapter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 0.5rem;
+  margin: 0.5rem 0 1.25rem;
+}
+
+.library-chapter-grid {
+  grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+}
+
+.library-book-tile,
+.library-chapter-tile {
+  border: 1px solid var(--border);
+  background: var(--bg-elevated-2);
+  color: var(--text-h);
+  border-radius: 8px;
+  padding: 0.55rem 0.4rem;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.library-book-tile:hover,
+.library-chapter-tile:hover {
+  border-color: var(--status-scripture-border);
+}
+
+.library-range-tool {
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  margin: 0.75rem 0;
+}
+
+.library-card-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.library-card {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--status-neutral-border);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  background: var(--bg-elevated-2);
+}
+
+.library-card--bible {
+  border-left-color: var(--status-scripture-border);
+}
+
+.library-card--music {
+  border-left-color: var(--status-audio-border);
+}
+
+.library-card--history {
+  border-left-color: var(--status-neutral-border);
+}
+
+.library-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.library-card__header strong {
+  color: var(--text-h);
+  font-size: 1.05rem;
+}
+
+.library-card__meta {
+  font-size: 0.8rem;
+  color: var(--text);
+  opacity: 0.75;
+  text-transform: capitalize;
+}
+
+.library-card__text {
+  margin: 0.35rem 0 0;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.library-card__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 720px) {
+  .library-page {
+    padding: 1rem 1rem 3rem;
+  }
+  .app-nav {
+    padding: 0.5rem 1rem;
+    overflow-x: auto;
+  }
+}

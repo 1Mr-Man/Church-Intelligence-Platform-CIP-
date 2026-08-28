@@ -417,6 +417,75 @@ mod tests {
         assert!(slide.body_lines.join(" ").contains("one and only"));
     }
 
+    /// Phase 3.6 acceptance: the Bible Library's book browser and the
+    /// verse-range presentation fix, both against the real, complete BSB
+    /// production dataset (spec section 25 - never validated against the
+    /// 6-verse dev fixture alone). Reuses the same real-dataset setup
+    /// pattern as `phase_real_bible_dataset_full_validation` above rather
+    /// than a second import, since this only needs read-only checks.
+    #[test]
+    fn phase_3_6_bible_library_acceptance_against_the_real_bsb_dataset() {
+        use cip_core_bible::{book_alias::BOOKS, BibleProvider};
+        use cip_integrations_bible::SqliteBibleProvider;
+
+        let conn = migrated_conn();
+        let reg = SqliteContentRegistry::new(migrated_conn());
+        let dataset = crate::bible_production_dataset::bsb_dataset();
+        import_and_register(&conn, &reg, &dataset).unwrap();
+        let provider = SqliteBibleProvider::new(conn);
+
+        // --- book browser: every canonical book resolves, correct testament
+        //     split, and chapter counts sum to the real 1,189 total -----------
+        let mut books = Vec::new();
+        for canonical in BOOKS {
+            if let Some(book) = provider.get_book("BSB", canonical.code).unwrap() {
+                books.push(book);
+            }
+        }
+        assert_eq!(
+            books.len(),
+            66,
+            "every canonical book must be present in BSB"
+        );
+        let old_testament = books
+            .iter()
+            .filter(|b| b.testament == cip_core_bible::Testament::Old)
+            .count();
+        let new_testament = books
+            .iter()
+            .filter(|b| b.testament == cip_core_bible::Testament::New)
+            .count();
+        assert_eq!(old_testament, 39, "the Old Testament has 39 books");
+        assert_eq!(new_testament, 27, "the New Testament has 27 books");
+        let total_chapters: u32 = books.iter().map(|b| b.chapter_count).sum();
+        assert_eq!(
+            total_chapters, 1189,
+            "chapter counts across all 66 real books must sum to the documented 1,189 total"
+        );
+
+        // --- verse-range presentation fix: a real multi-verse range across
+        //     three different books must include every verse's real text,
+        //     not just the first one (the bug this phase fixed) -------------
+        for (reference, must_contain) in [
+            ("JHN 3:16-17", vec!["one and only", "did not send His Son"]),
+            ("PSA 23:1-3", vec!["my shepherd"]),
+            ("1CO 13:4-7", vec!["patient", "kind"]),
+        ] {
+            let (content, _) =
+                crate::presentation::build_scripture_slide(&provider, "BSB", reference).unwrap();
+            let cip_core_presentation::PresentationContent::Scripture { text, .. } = &content
+            else {
+                panic!("expected Scripture content for {reference}");
+            };
+            for fragment in must_contain {
+                assert!(
+                    text.contains(fragment),
+                    "{reference} presentation text {text:?} must contain {fragment:?}"
+                );
+            }
+        }
+    }
+
     /// Phase 3.1 failure-injection gap #10: a dataset that imported
     /// successfully but was later corrupted on disk (a partial write, bit
     /// rot, a stray manual edit - never something CIP's own import path

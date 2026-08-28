@@ -21,9 +21,9 @@ use crate::state::{AppState, DEFAULT_TRANSLATION_ID};
 use crate::timeline::{self, TimelineEntry};
 use cip_core_ai::{Suggestion, SuggestionKind, SuggestionStatus, TranscriptSegment};
 use cip_core_bible::{
-    check_bible_integrity, search_bible as dispatch_bible_search, BibleSearchResult,
-    BibleTranslation, IntegrityReport, PartialScriptureReference, ReferenceKind, ScriptureContext,
-    ScriptureContextManager, ScriptureReference,
+    book_alias::BOOKS, check_bible_integrity, search_bible as dispatch_bible_search, BibleBook,
+    BibleSearchResult, BibleTranslation, IntegrityReport, PartialScriptureReference, ReferenceKind,
+    ScriptureContext, ScriptureContextManager, ScriptureReference,
 };
 use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
 use cip_core_content::{ContentMetadata, ContentRegistryError, ContentStatus, ContentType};
@@ -1670,6 +1670,27 @@ pub fn get_presentation_item(
         .map_err(log_and_return)
 }
 
+/// Presentation History (Phase 3.6): every presentation item ever prepared
+/// for a given (possibly past, possibly the live) service, regardless of
+/// status - unlike `list_prepared_presentations` above, which is
+/// deliberately hardcoded to the live service's still-`Prepared` items
+/// only. This is not a new persistence mechanism: `presentation_items`
+/// already records `service_id` for every item and already survives a
+/// restart (see docs/phase-3-6-church-libraries.md's audit); this command
+/// only exposes the existing `persistence::list_presentation_items` with
+/// an operator-supplied `service_id` instead of the hardcoded live one.
+#[tauri::command]
+pub fn list_presentation_history(
+    service_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<PresentationItem>, AppError> {
+    let id = parse_uuid(&service_id).map_err(log_and_return)?;
+    let db = state.db.lock().expect("db connection poisoned");
+    persistence::list_presentation_items(&db, id, None)
+        .map_err(AppError::from)
+        .map_err(log_and_return)
+}
+
 /// Cancels ("retracts") a still-prepared item before it's ever displayed.
 /// Only valid from `Prepared` - an already-cancelled item cannot be
 /// cancelled again.
@@ -2093,6 +2114,101 @@ pub fn search_bible(
     let translation_id = translation_id.unwrap_or_else(|| DEFAULT_TRANSLATION_ID.to_string());
     ensure_translation_selectable(&state, &translation_id).map_err(log_and_return)?;
     dispatch_bible_search(state.bible_provider.as_ref(), &translation_id, &query)
+        .map_err(AppError::from)
+        .map_err(log_and_return)
+}
+
+/// The Bible Library book browser's book list (Phase 3.6): the canonical
+/// 66-book order/testament from `book_alias::BOOKS` (the one place book
+/// identity is known - see that module's docs), each looked up against
+/// the real provider so `chapter_count` reflects what this translation
+/// actually has imported rather than assumed canon. A book the dataset
+/// doesn't have (e.g. a partial dev fixture) is simply omitted, never
+/// invented with a guessed chapter count - see
+/// docs/phase-3-6-church-libraries.md's "no fabricated Bible data" rule.
+/// No new database table or provider method: this only composes the
+/// existing `BibleProvider::get_book`, called once per canonical book.
+#[tauri::command]
+pub fn list_bible_books(
+    translation_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<BibleBook>, AppError> {
+    let translation_id = translation_id.unwrap_or_else(|| DEFAULT_TRANSLATION_ID.to_string());
+    ensure_translation_selectable(&state, &translation_id).map_err(log_and_return)?;
+    let mut books = Vec::new();
+    for canonical in BOOKS {
+        if let Some(book) = state
+            .bible_provider
+            .get_book(&translation_id, canonical.code)
+            .map_err(AppError::from)
+            .map_err(log_and_return)?
+        {
+            books.push(book);
+        }
+    }
+    Ok(books)
+}
+
+// --- saved scriptures (Phase 3.6: Church Knowledge Libraries) --------------
+
+/// Saves a Scripture reference (single verse or a verse range) for later
+/// reuse from the Bible Library - see
+/// `persistence::persist_saved_scripture`'s docs for why this is a
+/// standalone, church-wide, cross-service table. Takes structured fields
+/// rather than re-parsing a reference string a third time (a copy already
+/// exists in both `commands.rs` and `presentation.rs` for their own
+/// narrower purposes) - the frontend already has these fields from
+/// whichever `BibleSearchResult`(s) the operator is saving.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn save_scripture(
+    translation_id: String,
+    book: String,
+    chapter: u32,
+    verse_start: u32,
+    verse_end: Option<u32>,
+    reference_display: String,
+    note: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<persistence::SavedScripture, AppError> {
+    let translation_id =
+        require_non_empty(&translation_id, "translationId").map_err(log_and_return)?;
+    let book = require_non_empty(&book, "book").map_err(log_and_return)?;
+    let reference_display =
+        require_non_empty(&reference_display, "referenceDisplay").map_err(log_and_return)?;
+    let db = state.db.lock().expect("db connection poisoned");
+    persistence::persist_saved_scripture(
+        &db,
+        Uuid::new_v4(),
+        &translation_id,
+        &book,
+        chapter,
+        verse_start,
+        verse_end,
+        &reference_display,
+        note.as_deref(),
+    )
+    .map_err(AppError::from)
+    .map_err(log_and_return)
+}
+
+/// Every saved scripture, most recently saved first - the Bible Library's
+/// "Saved" list.
+#[tauri::command]
+pub fn list_saved_scriptures(
+    state: State<'_, AppState>,
+) -> Result<Vec<persistence::SavedScripture>, AppError> {
+    let db = state.db.lock().expect("db connection poisoned");
+    persistence::list_saved_scriptures(&db)
+        .map_err(AppError::from)
+        .map_err(log_and_return)
+}
+
+#[tauri::command]
+pub fn delete_saved_scripture(id: String, state: State<'_, AppState>) -> Result<bool, AppError> {
+    let uuid = parse_uuid(&id).map_err(log_and_return)?;
+    let db = state.db.lock().expect("db connection poisoned");
+    persistence::delete_saved_scripture(&db, uuid)
         .map_err(AppError::from)
         .map_err(log_and_return)
 }
