@@ -767,17 +767,15 @@ pub fn start_listening(
         }
     };
 
-    if !state
-        .speech_engine
-        .lock()
-        .expect("speech_engine mutex poisoned")
-        .is_ready()
-    {
-        return Err(log_and_return(AppError::SpeechEngine(
-            cip_core_ai::SpeechEngineError::NotInitialized,
-        )));
-    }
-
+    // Phase 3.8.5: audio capture must not be gated on speech-engine
+    // readiness - see docs/phase-3-8-5-audit.md section M/N. `AudioEngine`
+    // and `SpeechEngine` are independent capabilities (docs/live-speech.md's
+    // "four independent signals"); a device with no Whisper model installed
+    // must still be able to capture, meter, and feed the acoustic/music
+    // pipeline. Whether speech is *also* available is checked below, after
+    // capture has actually started, purely to decide whether
+    // `AppEvent::SpeechStarted` is honestly emitted - it is never assumed.
+    //
     // Phase 2.2: a second consumer inside the same single sink closure,
     // never a second `AudioEngine::start()` call - the trait allows
     // exactly one sink. `try_send`/bounded channel so a slow/backed-up
@@ -827,6 +825,17 @@ pub fn start_listening(
         .map_err(AppError::from)
         .map_err(log_and_return)?;
 
+    // Audio genuinely started, so this event is recorded/emitted
+    // unconditionally. Speech readiness is checked only now, after a
+    // successful `audio_engine.start()`, and only to decide whether
+    // `SpeechStarted` is honest to emit - it must never be fabricated when
+    // no speech engine is actually ready to transcribe.
+    let speech_ready = state
+        .speech_engine
+        .lock()
+        .expect("speech_engine mutex poisoned")
+        .is_ready();
+
     {
         let db = state.db.lock().expect("db connection poisoned");
         record_timeline(
@@ -836,20 +845,24 @@ pub fn start_listening(
             LogCategory::Audio,
             serde_json::json!({ "deviceId": resolved_device_id }),
         );
-        record_timeline(
-            &db,
-            Some(service_id),
-            AppEvent::SpeechStarted,
-            LogCategory::Speech,
-            serde_json::json!({}),
-        );
+        if speech_ready {
+            record_timeline(
+                &db,
+                Some(service_id),
+                AppEvent::SpeechStarted,
+                LogCategory::Speech,
+                serde_json::json!({}),
+            );
+        }
     }
     let _ = emit(
         &app,
         AppEvent::AudioStarted,
         serde_json::json!({ "deviceId": resolved_device_id }),
     );
-    let _ = emit(&app, AppEvent::SpeechStarted, serde_json::json!({}));
+    if speech_ready {
+        let _ = emit(&app, AppEvent::SpeechStarted, serde_json::json!({}));
+    }
     Ok(())
 }
 
@@ -863,6 +876,14 @@ pub fn stop_listening(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
         .map_err(AppError::from)
         .map_err(log_and_return)?;
 
+    // Mirrors `start_listening`'s honesty rule: only claim speech stopped
+    // if a speech engine was actually ready to have been running.
+    let speech_ready = state
+        .speech_engine
+        .lock()
+        .expect("speech_engine mutex poisoned")
+        .is_ready();
+
     if let Ok(guard) = state.active_service.lock() {
         if let Some(session) = guard.as_ref() {
             let db = state.db.lock().expect("db connection poisoned");
@@ -873,17 +894,21 @@ pub fn stop_listening(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
                 LogCategory::Audio,
                 serde_json::json!({}),
             );
-            record_timeline(
-                &db,
-                Some(session.id),
-                AppEvent::SpeechStopped,
-                LogCategory::Speech,
-                serde_json::json!({}),
-            );
+            if speech_ready {
+                record_timeline(
+                    &db,
+                    Some(session.id),
+                    AppEvent::SpeechStopped,
+                    LogCategory::Speech,
+                    serde_json::json!({}),
+                );
+            }
         }
     }
     let _ = emit(&app, AppEvent::AudioStopped, serde_json::json!({}));
-    let _ = emit(&app, AppEvent::SpeechStopped, serde_json::json!({}));
+    if speech_ready {
+        let _ = emit(&app, AppEvent::SpeechStopped, serde_json::json!({}));
+    }
     Ok(())
 }
 

@@ -713,7 +713,8 @@ export function LiveChurchBrain() {
         <h2>Audio &amp; Speech</h2>
         {status?.speechStatus === "unavailable" && (
           <p className="live-brain__notice">
-            SPEECH UNAVAILABLE &mdash; manual operation remains available (search, prepare, approve below).
+            SPEECH UNAVAILABLE &mdash; live transcription will not run, but audio capture (input level, acoustic/music
+            recognition) and manual operation (search, prepare, approve below) remain available.
             {appConfig?.whisperModelPath && (
               <>
                 {" "}
@@ -757,7 +758,7 @@ export function LiveChurchBrain() {
           ) : (
             <button
               type="button"
-              disabled={!status?.service || status.speechStatus === "unavailable" || isBusy("start-listening")}
+              disabled={!status?.service || isBusy("start-listening")}
               onClick={() =>
                 withBusy("start-listening", async () => {
                   await commands.startListening(selectedDevice || undefined);
@@ -769,6 +770,16 @@ export function LiveChurchBrain() {
             </button>
           )}
         </div>
+        {status && status.audioStatus === "listening" && (
+          <p className="live-brain__hint" aria-live="polite">
+            {status.audio.inputLevel != null
+              ? status.audio.inputLevel > 0.01
+                ? `SIGNAL CAPTURED — input level ${Math.round(status.audio.inputLevel * 100)}%`
+                : "NO SIGNAL — audio device is capturing but no sound is being detected"
+              : "Capturing — input level not yet reported"}
+            {status.speechStatus === "ready" ? " — transcription active" : " — transcription unavailable, audio capture only"}
+          </p>
+        )}
 
         <details className="live-brain__manual-entry">
           <summary>Manual / test transcript entry</summary>

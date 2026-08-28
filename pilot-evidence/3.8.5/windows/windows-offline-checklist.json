@@ -1,0 +1,35 @@
+{
+  "phase": "3.8.5",
+  "note": "No physical Windows machine and no real audio hardware were available in this container for Phase 3.8.5. This checklist is for the operator to run against the rebuilt installer below and report back real results for.",
+  "installer": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "70ea056359a1dbc738b9b84bd7f2e8bbe6d6a0088bb858aeac47cddaad04b813",
+    "fileSizeBytes": 7140776,
+    "status": "NOT VERIFIED on real Windows hardware - cross-compiled, file(1)-inspected, and Windows-target cargo-check/tauri-build-verified only (Environment A). Environment B (Xvfb) could not be established this session (see pilot-evidence/3.8.5/xvfb/environment-b-not-available.json)."
+  },
+  "hardBlockerPerOperatorSpec": "Do not mark the live-audio pipeline PASS unless real Windows audio has actually produced evidence. That physical Windows/real-audio test has NOT occurred in this session.",
+  "requiredForGateToBecomePASS": [
+    "a real Windows 10/11 x64 machine with real input devices available (Microphone, Stereo Mix, Microphone Array, Line In, etc.)",
+    "install and launch this rebuilt installer specifically (SHA-256 above), not a prior build",
+    "1) Start Service. 2) Open the Audio & Speech panel and enumerate devices - confirm the real device list (not a hardcoded/fabricated one) appears. 3) Select Stereo Mix (or another real device). 4) Click Start Listening - confirm the button is NOT disabled/blocked and the action does not immediately fail with a speech-engine error",
+    "5) Confirm AudioEngine reports a capturing state (audioStatus becomes 'listening') and the newly-rendered input level indicator is visible. 6) Play audio through the selected device (e.g. a video with speech) and confirm the input level indicator moves from NO SIGNAL to SIGNAL CAPTURED, proving audio capture independent of any Whisper model",
+    "7) Verify no CPAL stream error is reported. 8) If a real local Whisper model exists at the configured path (docs/live-speech.md), confirm speechStatus becomes 'ready' and a controlled test phrase ('Turn to Matthew chapter 6 verse 9.') played through the device produces a real transcript segment, real MAT 6:9 Bible detection, and (if applicable) Sermon Intelligence findings - do NOT use automatic presentation as the first acceptance test for this",
+    "9) Stop Listening - confirm audio and (if it was running) speech both stop cleanly. 10) Start Listening again on the same device - confirm restart works with no stale state. 11) Try an invalid/disconnected device id and confirm a real, honest AudioEngineError is reported rather than a false success",
+    "capture the app's diagnostic log (RUST_LOG not required - checkpoints log at Info level by default) and report which of the 12 final-gate items below did/did not pass, with any real error text observed"
+  ],
+  "finalGateFields": {
+    "WINDOWS_DEVICE_ENUMERATION": "NOT_VERIFIED",
+    "AUDIO_DEVICE_SELECTION": "NOT_VERIFIED",
+    "AUDIOENGINE_START": "NOT_VERIFIED",
+    "CPAL_STREAM": "NOT_VERIFIED",
+    "INPUT_LEVEL": "NOT_VERIFIED",
+    "AUDIO_CHUNK_FLOW": "NOT_VERIFIED",
+    "WHISPER_INITIALIZATION": "NOT_VERIFIED",
+    "SPEECH_FEED": "NOT_VERIFIED",
+    "TRANSCRIPT": "NOT_VERIFIED",
+    "BIBLE_DETECTION": "NOT_VERIFIED",
+    "SERMON_INTELLIGENCE": "NOT_VERIFIED",
+    "OFFLINE_OPERATION": "NOT_VERIFIED"
+  },
+  "conclusion": "All physical-hardware/real-audio validation for Phase 3.8.5 remains NOT PERFORMED - not estimated, not simulated, not inferred from code review, and not carried over from any prior phase's Environment C usage. The fix applied this phase is justified by direct code tracing (docs/phase-3-8-5-audit.md) and a full-green automated regression suite (Environment A) only."
+}

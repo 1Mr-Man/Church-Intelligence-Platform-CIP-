@@ -1,0 +1,24 @@
+{
+  "phase": "3.8.5",
+  "environmentA": {
+    "description": "Automated Rust + frontend regression suite, plus direct code tracing recorded in docs/phase-3-8-5-audit.md",
+    "status": "PASS - full green, see pilot-evidence/3.8.5/automated/regression.json"
+  },
+  "environmentB": {
+    "description": "Xvfb + xdotool + xwd GUI reproduction (virtual display, no real hardware)",
+    "status": "NOT AVAILABLE THIS SESSION - the CIP main window is created under Xvfb but its WebKitGTK webview never navigates past a generic 'Could not connect to localhost: Connection refused' error page, on both this phase's rebuilt binary AND an unmodified Phase 3.8.4 baseline binary built and tested identically as a controlled isolation check. This proves the failure is a property of this session's container, not a Phase 3.8.5 regression. See pilot-evidence/3.8.5/xvfb/environment-b-not-available.json for the full investigation (XDG_RUNTIME_DIR, a real session D-Bus daemon, and WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS were all tried without success)."
+  },
+  "environmentC": {
+    "description": "Real Windows 10/11 x64 hardware with real audio input devices (Microphone, Stereo Mix, Microphone Array, Line In, etc.)",
+    "status": "NOT VERIFIED - no physical Windows machine and no real audio hardware are accessible in this container. Every claim in this phase about real device enumeration, CPAL stream capture, input level readings from live audio, Whisper transcription, and the full live-audio pipeline is NOT VERIFIED and must not be read as PASS.",
+    "requiredForVerification": [
+      "A real Windows 10/11 x64 machine (ideally the same one that reported 'SPEECH UNAVAILABLE - manual operation remains available' and produced the four real device names)",
+      "Install this phase's rebuilt installer (SHA-256 70ea056359a1dbc738b9b84bd7f2e8bbe6d6a0088bb858aeac47cddaad04b813) specifically, not a prior build",
+      "Start Service, select a real input device (e.g. Stereo Mix - Realtek(R) Audio), click Start Listening",
+      "Confirm the button is no longer disabled/blocked purely because speech is unavailable, and that AudioEngine genuinely enters a capturing state (not just that the click was accepted)",
+      "Play audio through the selected device and confirm the newly-rendered input level indicator moves from NO SIGNAL to SIGNAL CAPTURED",
+      "If a real local Whisper model is placed at the configured path per docs/live-speech.md, confirm transcript/Bible-detection/Sermon-Intelligence flow from a controlled test phrase ('Turn to Matthew chapter 6 verse 9.') per the operator's spec - do NOT use automatic presentation as the first acceptance test",
+      "Report back exact PASS/FAIL for each of the 12 final-gate items so this phase's report can be honestly updated - see pilot-evidence/3.8.5/windows/windows-offline-checklist.json"
+    ]
+  }
+}

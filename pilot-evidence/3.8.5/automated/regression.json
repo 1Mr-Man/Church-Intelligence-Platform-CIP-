@@ -1,0 +1,21 @@
+{
+  "phase": "3.8.5",
+  "rust": {
+    "fmtCheck": "clean",
+    "clippyWorkspaceAllTargets": "clean (-D warnings)",
+    "testWorkspaceDefaultFeatures": "all suites passed, 0 failed (full breakdown in /tmp scratchpad cargo-test-full.log at time of run; representative counts: cip_desktop_lib unit tests 221 passed, cip_integration_tests 75 passed, cip_core_bible 232 passed, cip_core_intelligence 58 passed, plus all other workspace crates - 0 failed across every crate)",
+    "testCipAiSpeechWhisperFeature": "7 passed, 0 failed",
+    "cargoCheckWindowsGnuTarget": "clean (cargo check --target x86_64-pc-windows-gnu -p cip-desktop)",
+    "tauriBuildWindowsGnuTarget": "succeeded end-to-end (cargo build --release + NSIS packaging via `npx tauri build --target x86_64-pc-windows-gnu`) - a stronger check than cargo check alone since it fully links and packages the Windows binary"
+  },
+  "frontend": {
+    "typecheck": "clean (tsc -b)",
+    "lint": "0 errors; 4 pre-existing warnings unchanged from Phase 3.8.4 baseline (react(only-export-components) in main.tsx, react(set-state-in-effect) in PilotDiagnosticsPanel.tsx/ServiceReplay.tsx/LiveChurchBrain.tsx) - no new warnings introduced by this phase's edits",
+    "test": "210 passed, 0 failed (16 test files) - unchanged pass count from Phase 3.8.4 baseline; no new frontend tests were added this phase because the removed disabled-condition and the reordered backend event logic are not independently unit-testable without the Xvfb/hardware reproduction this session's container could not perform (see pilot-evidence/3.8.5/xvfb/environment-b-not-available.json)",
+    "build": "clean (tsc -b && vite build)"
+  },
+  "codeChangeSummary": {
+    "commandsRs": "start_listening: removed the pre-flight `speech_engine.is_ready()` early-return that ran before `audio_engine.start()`; audio capture now starts unconditionally (subject to the existing, unchanged device-resolution/AudioEngineError handling). Speech readiness is now checked only after a successful `audio_engine.start()`, solely to decide whether `AppEvent::SpeechStarted` is honestly recorded/emitted (never fabricated). stop_listening mirrors the same rule for `AppEvent::SpeechStopped`. Command names, parameters, and return types are unchanged.",
+    "liveChurchBrainTsx": "Start Listening button's `disabled` condition no longer includes `status.speechStatus === \"unavailable\"`. The SPEECH UNAVAILABLE notice text was clarified to state that audio capture (input level, acoustic/music recognition) and manual operation remain available even though live transcription will not run. The already-computed `status.audio.inputLevel` (existing RMS mechanism, no new meter) is now rendered next to the device selector while listening, distinguishing NO SIGNAL from SIGNAL CAPTURED, and noting whether transcription is active."
+  }
+}
