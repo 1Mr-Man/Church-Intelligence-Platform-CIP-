@@ -1,0 +1,36 @@
+{
+  "phase": "3.8.7.1",
+  "summary": "Direct extraction and inspection of the rebuilt NSIS installer, confirming the Phase 3.8.6.1 DLL-bundling fix still holds after this phase's additions (new tauri-plugin-dialog dependency, model-provisioning command, counter/build-metadata fixes), plus symbol-level proof that both the whisper feature and the new file-picker plugin are genuinely compiled into this exact binary.",
+  "extractionMethod": "7z x \"Church Intelligence Platform_0.1.0_x64-setup.exe\"",
+  "installerChecksum": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "ab35b87e2d48760dffed2cb243a84cccc420412755f5ff50a2d5e070103036f7",
+    "sizeBytes": 8572190,
+    "previousPhaseSha256": "b737f72b9f870393065777516a58d0a5c5e6e7e9411ccdd3cd8c40578249e177",
+    "previousPhaseSizeBytes": 8458075,
+    "sizeIncreaseBytes": 114115,
+    "sizeIncreaseNote": "Consistent with the new tauri-plugin-dialog/rfd dependency and the install_whisper_model command's additional code, despite NSIS LZMA compression."
+  },
+  "extractedInstallerContents": [
+    "libwinpthread-1.dll",
+    "cip-desktop.exe",
+    "WebView2Loader.dll",
+    "uninstall.exe",
+    "libstdc++-6.dll",
+    "libgcc_s_seh-1.dll"
+  ],
+  "runtimeDllsStillPresent": {
+    "libstdc++-6.dll": { "sizeBytes": 4596950, "sha256": "a62ff6722ca9869dd11877719a54090d6cdc48a33deaafdea0fbe22bea4f1d5a" },
+    "libgcc_s_seh-1.dll": { "sizeBytes": 169919, "sha256": "404a0258a09cc6a9f1e8f06e7e45ed6528e2d95fdab36b1567aa31df0425d202" },
+    "libwinpthread-1.dll": { "sizeBytes": 94077, "sha256": "9b6c00d17c550d89576f25d6c8de52255bbb750a8a42340eb55d2bd7c3bff536" },
+    "note": "Byte SIZES are identical to Phase 3.8.6.1's recorded values (same source files, same toolchain, same strip flags) - confirming these are the same DLLs, unaffected by this phase. The SHA-256 VALUES differ from Phase 3.8.6.1's recorded ones, and this was investigated directly rather than assumed innocuous: `x86_64-w64-mingw32-strip --strip-debug` rewrites the PE COFF header's Time/Date field (and its dependent header CheckSum field) to the wall-clock time of the strip operation itself, confirmed by stripping the identical source file twice one second apart and diffing the objdump -p output - only the Time/Date and CheckSum fields differed (2 bytes total), the import table, export table, and all code sections were byte-identical. This means these DLLs' SHA-256 is NOT stable across rebuilds by construction, and is not a security-relevant discrepancy - it does not reflect any change to source, toolchain, or content."
+  },
+  "cipDesktopExeVerification": {
+    "extractedSizeBytes": 34407914,
+    "fileCommand": "PE32+ executable (GUI) x86-64 (stripped to external PDB), for MS Windows, 11 sections",
+    "buildCommitEmbeddedProof": "x86_64-w64-mingw32-strings finds the literal string '61c80a40' (this session's real current-HEAD short-12 commit hash at build time) embedded in the binary - direct evidence the build.rs rerun-if-changed fix (this phase) works: a build with no other apps/desktop/src-tauri file changed since the last commit still picked up the CURRENT git state, not a stale cached value.",
+    "whisperFeatureSymbolProof": "x86_64-w64-mingw32-strings finds whisper_full_with_state, ggml_backend_init, and other real whisper.cpp/ggml symbols - the whisper feature remains genuinely compiled in, unaffected by this phase's changes.",
+    "dialogPluginSymbolProof": "x86_64-w64-mingw32-strings finds tauri_plugin_dialog::init and tauri_plugin_dialog::desktop::pick_file mangled symbols - the new native file-picker capability this phase adds is genuinely compiled into this exact binary, not just declared as a dependency."
+  },
+  "automatedVerification": "scripts/build-windows-whisper.sh's own final step (7z-extraction DLL-presence check) passed on this build, unchanged from Phase 3.8.6.1's automation - 'confirmed: libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll are all present in the installer'."
+}

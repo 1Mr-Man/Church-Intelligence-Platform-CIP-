@@ -1,0 +1,36 @@
+{
+  "phase": "3.8.7.1",
+  "summary": "Evidence for the model-provisioning feature (native file picker + validated, atomic install), the build-commit metadata fix, and the inference-counter semantics fix.",
+  "networkEgressRetest": {
+    "method": "curl through this container's own agent proxy, run fresh this session (not carried over from Phase 3.8.6's memory)",
+    "results": {
+      "huggingface.co:443": "CONNECT rejected, HTTP 403 (organization policy denial, per the proxy's own status endpoint)",
+      "cdn-lfs.huggingface.co:443": "CONNECT rejected, HTTP 403 (same policy)",
+      "ggml.ggerganov.com:443": "CONNECT rejected, HTTP 403 (same policy)",
+      "github.com": "reachable (HTTP 400 on bare root - a real connection, not a block)",
+      "raw.githubusercontent.com": "reachable, served real content (HTTP 200, verified against a known public file)"
+    },
+    "conclusion": "The standard Whisper model distribution channel is deliberately blocked by this environment's network policy. No unofficial mirror was used as a workaround (no way to verify authenticity against a canonical checksum) - see docs/phase-3-8-7-1-audit.md for the full reasoning."
+  },
+  "modelSelectionCommandDesign": {
+    "command": "install_whisper_model(source_path: String) -> Result<WhisperModelDiagnostic, String>",
+    "validation": "Calls cip_ai_speech::WhisperSpeechEngine::load(&source) on the CANDIDATE file before copying anything - the exact same real Whisper-model-loading code path this application uses at its own startup. A renamed unrelated file, a truncated download, or an HTML error page saved with a .bin extension is rejected with the real underlying whisper-rs error text, never silently accepted based on filename or extension alone.",
+    "atomicity": "Writes to a temp file (dest.with_extension('bin.installing')) in the SAME destination directory as the real model path, then renames over it - a same-filesystem rename is atomic on both Windows and Unix, so a crash or full disk mid-copy can never leave a half-written file where CIP expects a real model.",
+    "capabilityScope": "capabilities/default.json grants dialog:allow-open only (no save dialog, no message boxes, no fs/shell/http plugin) - capabilities/display.json (the presentation window) deliberately does NOT include this, preserving its existing zero-plugin isolation.",
+    "takesEffectOn": "CIP's next launch - AppState.speech_engine is constructed once at startup and held for the process lifetime; this command does not attempt to hot-swap the running engine, and its own doc comments and the frontend's success message both say so explicitly."
+  },
+  "buildCommitMetadataFix": {
+    "rootCause": "build.rs embedded `git rev-parse HEAD` via cargo:rustc-env but emitted no cargo:rerun-if-changed directive at all. Cargo's default rerun heuristic only tracks files inside this crate's own package directory, never .git/ at the workspace root - so a build run between two commits with no other apps/desktop/src-tauri file changed (exactly Phase 3.8.6.1's shape) never reran the build script, silently keeping the previous build's commit hash. This is the real, confirmed explanation for the operator's real Windows diagnostics showing build_commit 487994b (Phase 3.8.5's commit) despite the binary genuinely being a much later, whisper-enabled build.",
+    "fix": "build.rs now resolves the real git directory via `git rev-parse --git-dir`, explicitly watches `<git-dir>/HEAD` and (when HEAD is a symbolic ref) the ref file it resolves to, via cargo:rerun-if-changed. Also adds a build_dirty field (from `git status --porcelain`) so a diagnostics reader can tell 'exactly this commit' apart from 'this commit plus uncommitted changes' - honest given this project's own build-then-commit workflow.",
+    "directVerification": {
+      "method": "x86_64-w64-mingw32-strings against the freshly built target/x86_64-pc-windows-gnu/release/cip-desktop.exe",
+      "result": "Found the string '61c80a40' (the current HEAD's short-12 commit hash at build time) embedded in the binary - NOT the stale '487994b6' the operator's real diagnostics previously showed. Confirms the fix works: this build genuinely picked up the current commit.",
+      "buildTimeGitState": "13 files modified/untracked at the moment this build ran (all Phase 3.8.7.1 work, not yet committed) - so CIP_GIT_DIRTY should read 'true' for this exact build, consistent with build.rs's own `git status --porcelain` check and this project's own build-then-commit workflow (this build necessarily runs before the commit that captures it)."
+    }
+  },
+  "inferenceCounterSemanticsFix": {
+    "rootCauseConfirmedByReadingCode": "handle_audio_chunk incremented inferences_attempted for every chunk handed to speech.feed_audio(), regardless of whether the engine reported itself ready - so a real Windows session with NullSpeechEngine (no model loaded) showed '60,684 inferences attempted / 0 succeeded', which is misleading: zero of those were genuine whisper.cpp calls. It also wrote a fresh 'speech engine not initialized' row to the SQLite timeline table on every single one of those 60,684 chunks - a real, separate, previously-undiscovered inefficiency (unbounded timeline growth from one static, unchanging condition).",
+    "fix": "handle_audio_chunk now checks speech.is_ready() FIRST (a reliable, always-available per-engine signal - NullSpeechEngine always false, WhisperSpeechEngine always true once constructed, confirmed by reading both implementations directly) and short-circuits before ever calling feed_audio or resampling when not ready: increments a new chunks_skipped_engine_not_ready counter instead, sets the diagnostic error text directly, and returns - no feed_audio call, no timeline write, per not-ready chunk.",
+    "regressionProof": "cargo test -p cip-desktop --lib: 227 passed, 0 failed (both default and --features whisper). No existing test asserted the old, misleading counting behavior - the fix is purely additive to what the counters mean, not a breaking change to any tested contract."
+  }
+}

@@ -1,11 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "enables the default permissions",
+  "description": "enables the default permissions, plus (Phase 3.8.7.1) a native open-file dialog scoped to picking a Whisper model file to install - no other dialog capability (save, message boxes), and no fs/shell/http plugin. The display window's own capability (display.json) deliberately does not include this - it stays at zero plugin access.",
   "windows": [
     "main"
   ],
   "permissions": [
-    "core:default"
+    "core:default",
+    "dialog:allow-open"
   ]
 }

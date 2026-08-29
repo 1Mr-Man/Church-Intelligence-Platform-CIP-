@@ -13,7 +13,7 @@
  * raw `TypeError` from a missing `window.__TAURI_INTERNALS__`.
  */
 import { invoke } from "@tauri-apps/api/core";
-import type { AppConfig, AppEnvironment, BackupReport, PilotDiagnostics } from "../config/appConfig";
+import type { AppConfig, AppEnvironment, BackupReport, PilotDiagnostics, WhisperModelDiagnostic } from "../config/appConfig";
 import type { ContentCandidate } from "../domain/contentIntelligence";
 import type {
   AudioDevice,
@@ -86,6 +86,22 @@ export function appHealthCheck(): Promise<HealthReport> {
 /** Phase 3.2: hardware/model diagnostics for pilot setup - see `PilotDiagnostics`. */
 export function getPilotDiagnostics(): Promise<PilotDiagnostics> {
   return invokeCommand("get_pilot_diagnostics");
+}
+
+/**
+ * Phase 3.8.7.1: install an operator-selected Whisper model file (already
+ * downloaded by them, e.g. from https://huggingface.co/ggerganov/whisper.cpp
+ * on their own machine's internet connection). Validates the file by
+ * actually attempting to load it as a real Whisper model before copying
+ * it anywhere - see the Rust command's own docs (`commands.rs`) for why
+ * that matters. Rejects (rather than resolving) with a human-readable
+ * message on any failure - a missing/unreadable file, or a file that
+ * doesn't load as a valid model. Takes effect on CIP's next launch, not
+ * immediately - see the returned diagnostic's own freshness caveat in
+ * the panel that calls this.
+ */
+export function installWhisperModel(sourcePath: string): Promise<WhisperModelDiagnostic> {
+  return invokeCommand("install_whisper_model", { sourcePath });
 }
 
 /**

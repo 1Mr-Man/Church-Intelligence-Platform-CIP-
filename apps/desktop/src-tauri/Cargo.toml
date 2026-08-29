@@ -26,6 +26,7 @@ chrono.workspace = true
 uuid.workspace = true
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
+tauri-plugin-dialog = "2"
 
 cip-database.workspace = true
 cip-core-bible.workspace = true

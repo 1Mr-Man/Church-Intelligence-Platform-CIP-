@@ -19,7 +19,9 @@ use crate::presentation_display;
 use crate::sermon_foundation;
 use crate::state::{AppState, DEFAULT_TRANSLATION_ID};
 use crate::timeline::{self, TimelineEntry};
-use cip_core_ai::{Suggestion, SuggestionKind, SuggestionStatus, TranscriptSegment};
+use cip_core_ai::{
+    SpeechEngineError, Suggestion, SuggestionKind, SuggestionStatus, TranscriptSegment,
+};
 use cip_core_bible::{
     book_alias::BOOKS, check_bible_integrity, search_bible as dispatch_bible_search, BibleBook,
     BibleSearchResult, BibleTranslation, IntegrityReport, PartialScriptureReference, ReferenceKind,
@@ -265,6 +267,86 @@ fn diagnose_whisper_model(path: &std::path::Path) -> WhisperModelDiagnostic {
     }
 }
 
+/// Phase 3.8.7.1: lets an operator install a Whisper model file they've
+/// already downloaded themselves (this build environment's own egress to
+/// the standard model host is confirmed blocked - see
+/// `docs/phase-3-8-7-1-audit.md` - but a real Windows machine typically
+/// has ordinary internet access, so the operator downloading the file
+/// directly and pointing CIP at it is the fastest real path to a working
+/// model) without hand-editing a path or using a file manager to place it.
+///
+/// Never trusts the candidate file's name or extension: it validates by
+/// actually attempting to load it as a real Whisper model - the exact
+/// same [`cip_ai_speech::WhisperSpeechEngine::load`] call this
+/// application itself uses at startup - so a renamed unrelated file, a
+/// truncated download, or an HTML error page saved with a `.bin`
+/// extension is rejected with the real underlying error, never silently
+/// accepted. Only once that validation succeeds is the file copied into
+/// place, atomically (written to a temp file in the destination
+/// directory first, then renamed over the real path, so a crash or a
+/// full disk mid-copy can never leave a half-written file where CIP
+/// expects a real model).
+///
+/// Installing a model this way takes effect on CIP's **next launch** -
+/// `AppState.speech_engine` is constructed once at startup
+/// (`create_speech_engine`) and held for the life of the process, so this
+/// command deliberately does not attempt to hot-swap the running engine;
+/// the returned diagnostic reflects the file on disk, not the live
+/// engine's state.
+#[cfg(feature = "whisper")]
+#[tauri::command]
+pub fn install_whisper_model(
+    state: State<'_, AppState>,
+    source_path: String,
+) -> Result<WhisperModelDiagnostic, String> {
+    let source = std::path::PathBuf::from(&source_path);
+    let metadata =
+        std::fs::metadata(&source).map_err(|e| format!("cannot read \"{source_path}\": {e}"))?;
+    if !metadata.is_file() {
+        return Err(format!("\"{source_path}\" is not a regular file"));
+    }
+
+    cip_ai_speech::WhisperSpeechEngine::load(&source).map_err(|e| {
+        format!(
+            "\"{source_path}\" did not load as a valid Whisper model ({e}) - \
+             this is the same check CIP itself performs at startup, so this \
+             file would not have worked even if installed"
+        )
+    })?;
+
+    let dest = &state.config.whisper_model_path;
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
+    }
+    let tmp_dest = dest.with_extension("bin.installing");
+    std::fs::copy(&source, &tmp_dest).map_err(|e| format!("could not copy model file: {e}"))?;
+    std::fs::rename(&tmp_dest, dest)
+        .map_err(|e| format!("could not finalize model install: {e}"))?;
+
+    log::info!(
+        target: LogCategory::Speech.target(),
+        "installed Whisper model from {source_path} to {} - restart CIP for it to take effect",
+        dest.display()
+    );
+
+    Ok(diagnose_whisper_model(dest))
+}
+
+/// Non-`whisper`-feature builds have no [`cip_ai_speech::WhisperSpeechEngine`]
+/// to validate a candidate file against at all - honestly refuses rather
+/// than installing an unverified file, mirroring `create_speech_engine`'s
+/// own feature-gated behavior in `lib.rs`.
+#[cfg(not(feature = "whisper"))]
+#[tauri::command]
+pub fn install_whisper_model(_source_path: String) -> Result<WhisperModelDiagnostic, String> {
+    Err(
+        "this build was not compiled with the `whisper` feature, so there is no speech engine \
+         available to validate a model file against"
+            .to_string(),
+    )
+}
+
 /// One physical (or virtual, e.g. Xvfb) display this process can detect -
 /// via Tauri's own `AppHandle::available_monitors`, not a new dependency.
 /// Software display-window logic and physical display *readability* are
@@ -300,6 +382,13 @@ pub struct MachineDiagnostic {
     pub arch: String,
     pub cip_version: String,
     pub build_commit: String,
+    /// Phase 3.8.7: whether `git status --porcelain` reported uncommitted
+    /// changes at build time - this project's own workflow always builds
+    /// and verifies an artifact before committing the changes that
+    /// produced it, so `build_commit` alone is routinely one phase behind
+    /// a freshly built binary. `true` here means "built from `build_commit`
+    /// plus uncommitted work", not "built from `build_commit` exactly".
+    pub build_dirty: bool,
 }
 
 /// Phase 3.3: is the database file actually writable/readable right now -
@@ -334,6 +423,10 @@ pub struct SpeechRuntimeDiagnostics {
     pub last_chunk_sample_rate_hz: Option<u32>,
     pub last_chunk_sample_count: Option<usize>,
     pub last_resampled_sample_count: Option<usize>,
+    /// Phase 3.8.7: chunks that arrived while the engine wasn't ready - see
+    /// `state::SpeechDiagnostics::chunks_skipped_engine_not_ready`. Never
+    /// double-counted in `inferences_attempted` below.
+    pub chunks_skipped_engine_not_ready: u64,
     pub inferences_attempted: u64,
     pub inferences_succeeded: u64,
     pub last_error: Option<String>,
@@ -364,6 +457,7 @@ pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> Pilo
         arch: std::env::consts::ARCH.to_string(),
         cip_version: env!("CARGO_PKG_VERSION").to_string(),
         build_commit: env!("CIP_GIT_COMMIT").to_string(),
+        build_dirty: env!("CIP_GIT_DIRTY") == "true",
     };
 
     let whisper_model = diagnose_whisper_model(&state.config.whisper_model_path);
@@ -389,6 +483,7 @@ pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> Pilo
             last_chunk_sample_rate_hz: diag.last_chunk_sample_rate_hz,
             last_chunk_sample_count: diag.last_chunk_sample_count,
             last_resampled_sample_count: diag.last_resampled_sample_count,
+            chunks_skipped_engine_not_ready: diag.chunks_skipped_engine_not_ready,
             inferences_attempted: diag.inferences_attempted,
             inferences_succeeded: diag.inferences_succeeded,
             last_error: diag.last_error,
@@ -1142,6 +1237,37 @@ fn handle_audio_chunk(app: &AppHandle, service_id: Uuid, chunk: AudioChunk) {
             .speech_engine
             .lock()
             .expect("speech_engine mutex poisoned");
+
+        // Phase 3.8.7: a real Windows session with no model installed
+        // showed "60,684 inferences attempted / 0 succeeded" - misleading,
+        // since every one of those chunks was rejected by `NullSpeechEngine`
+        // before whisper.cpp ever ran. `is_ready()` is a reliable,
+        // always-available per-engine signal (`NullSpeechEngine` always
+        // `false`; `WhisperSpeechEngine` always `true` once constructed -
+        // see both engines' own `is_ready` impls), so check it here and
+        // skip `feed_audio` entirely when not ready: there is nothing to
+        // resample or feed, and calling it anyway would only reproduce the
+        // same `SpeechEngineError::NotInitialized` on every single chunk,
+        // which previously also wrote a redundant timeline row per chunk
+        // for a static condition that doesn't change chunk-to-chunk.
+        if !speech.is_ready() {
+            let error_text = SpeechEngineError::NotInitialized.to_string();
+            let mut diag = state
+                .speech_diagnostics
+                .lock()
+                .expect("speech_diagnostics mutex poisoned");
+            diag.chunks_received += 1;
+            diag.last_chunk_sample_rate_hz = Some(chunk.sample_rate_hz);
+            diag.last_chunk_sample_count = Some(chunk.samples.len());
+            diag.chunks_skipped_engine_not_ready += 1;
+            diag.last_error = Some(error_text.clone());
+            drop(diag);
+            *state
+                .speech_error
+                .lock()
+                .expect("speech_error mutex poisoned") = Some(error_text);
+            return;
+        }
 
         // Phase 3.8.6: `AudioEngine` delivers chunks at the device's own
         // native rate and never resamples (see `integrations/audio`'s
@@ -5419,6 +5545,7 @@ mod tests {
                 arch: "x86_64".to_string(),
                 cip_version: "0.1.0".to_string(),
                 build_commit: "abc123def456".to_string(),
+                build_dirty: false,
             },
             whisper_model: WhisperModelDiagnostic::Missing {
                 expected_path: "/tmp/ggml-tiny.en.bin".to_string(),
@@ -5433,6 +5560,7 @@ mod tests {
                 last_chunk_sample_rate_hz: None,
                 last_chunk_sample_count: None,
                 last_resampled_sample_count: None,
+                chunks_skipped_engine_not_ready: 0,
                 inferences_attempted: 0,
                 inferences_succeeded: 0,
                 last_error: None,

@@ -65,6 +65,19 @@ pub struct SpeechDiagnostics {
     /// `None` when the engine's `required_sample_rate_hz()` was `None`
     /// (no resampling needed) or matched the chunk's own rate already.
     pub last_resampled_sample_count: Option<usize>,
+    /// Phase 3.8.7: audio chunks that arrived while `speech_engine.is_ready()`
+    /// was `false` (no model loaded, or the `whisper` feature wasn't
+    /// compiled in) - these are never forwarded to `feed_audio` at all, so
+    /// they must never be counted in `inferences_attempted` below. Without
+    /// this split, a real Windows session with no model installed showed
+    /// "60,684 inferences attempted" despite zero whisper.cpp code ever
+    /// running - `is_ready()` is a reliable, always-available per-engine
+    /// signal (`NullSpeechEngine` always `false`, `WhisperSpeechEngine`
+    /// always `true` once constructed) that makes this distinction exact,
+    /// not a guess.
+    pub chunks_skipped_engine_not_ready: u64,
+    /// Only ever incremented while the engine reported itself ready - see
+    /// `chunks_skipped_engine_not_ready` above for why that split matters.
     pub inferences_attempted: u64,
     pub inferences_succeeded: u64,
     /// The real error text from the most recent `feed_audio` failure -

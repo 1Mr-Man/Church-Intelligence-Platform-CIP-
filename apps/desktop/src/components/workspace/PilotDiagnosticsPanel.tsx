@@ -10,7 +10,8 @@
  * can actually observe, nothing more).
  */
 import { useCallback, useEffect, useState } from "react";
-import { getPilotDiagnostics } from "../../lib/commands";
+import { open } from "@tauri-apps/plugin-dialog";
+import { getPilotDiagnostics, installWhisperModel } from "../../lib/commands";
 import type { PilotDiagnostics } from "../../config/appConfig";
 
 function whisperModelSummary(diagnostics: PilotDiagnostics): string {
@@ -31,6 +32,8 @@ export function PilotDiagnosticsPanel() {
   const [diagnostics, setDiagnostics] = useState<PilotDiagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [installMessage, setInstallMessage] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -43,6 +46,31 @@ export function PilotDiagnosticsPanel() {
 
   useEffect(() => {
     refresh();
+  }, [refresh]);
+
+  const selectModelFile = useCallback(() => {
+    setInstallMessage(null);
+    open({
+      title: "Select a Whisper model file",
+      filters: [{ name: "Whisper model", extensions: ["bin", "gguf"] }],
+      multiple: false,
+      directory: false,
+    })
+      .then((selected) => {
+        if (!selected || Array.isArray(selected)) {
+          return;
+        }
+        setInstalling(true);
+        return installWhisperModel(selected)
+          .then((result) => {
+            const detail = result.status === "present" ? `${result.sizeBytes.toLocaleString()} bytes` : result.status;
+            setInstallMessage(`Installed (${detail}). Restart CIP for it to take effect.`);
+            refresh();
+          })
+          .catch((e) => setInstallMessage(`Install failed: ${String(e)}`))
+          .finally(() => setInstalling(false));
+      })
+      .catch((e) => setInstallMessage(`Could not open file picker: ${String(e)}`));
   }, [refresh]);
 
   return (
@@ -61,7 +89,8 @@ export function PilotDiagnosticsPanel() {
             <dt>Machine</dt>
             <dd>
               {diagnostics.machine.os} / {diagnostics.machine.arch} &mdash; CIP {diagnostics.machine.cipVersion} (
-              {diagnostics.machine.buildCommit})
+              {diagnostics.machine.buildCommit}
+              {diagnostics.machine.buildDirty ? " + uncommitted changes" : ""})
             </dd>
           </div>
           <div>
@@ -86,7 +115,17 @@ export function PilotDiagnosticsPanel() {
           </div>
           <div>
             <dt>Whisper model</dt>
-            <dd>{whisperModelSummary(diagnostics)}</dd>
+            <dd>
+              {whisperModelSummary(diagnostics)}
+              {diagnostics.speech.featureCompiled && (
+                <div>
+                  <button type="button" onClick={selectModelFile} disabled={installing}>
+                    {installing ? "Installing…" : "Select Existing Model File…"}
+                  </button>
+                  {installMessage && <span> {installMessage}</span>}
+                </div>
+              )}
+            </dd>
           </div>
           <div>
             <dt>Whisper diagnostics</dt>
@@ -118,6 +157,9 @@ export function PilotDiagnosticsPanel() {
               <div>
                 Inferences: {diagnostics.speech.inferencesSucceeded} succeeded /{" "}
                 {diagnostics.speech.inferencesAttempted} attempted
+                {diagnostics.speech.chunksSkippedEngineNotReady > 0 && (
+                  <> ({diagnostics.speech.chunksSkippedEngineNotReady} more chunks skipped - engine not ready)</>
+                )}
               </div>
               {diagnostics.speech.lastError && <div>Last error: {diagnostics.speech.lastError}</div>}
             </dd>

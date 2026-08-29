@@ -130,6 +130,14 @@ pub fn run() {
                 ])
                 .build(),
         )
+        // Phase 3.8.7.1: the ONLY plugin capability added for model
+        // provisioning - a native "open file" dialog so an operator can
+        // pick a Whisper model file they've already downloaded themselves,
+        // scoped via capabilities/default.json to `dialog:allow-open` only
+        // (no save dialog, no message boxes). The display window's own
+        // capability deliberately does not grant this - see
+        // capabilities/display.json.
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let handle = app.handle();
             let config = AppConfig::resolve(handle)?;
@@ -140,6 +148,25 @@ pub fn run() {
                 config.environment,
                 config.data_dir.display()
             );
+
+            // Phase 3.8.7.1: `cip_database::open` creates `config.data_dir`
+            // itself as a side effect of opening the sqlite file under it,
+            // but `config.model_dir` is a sibling subdirectory that
+            // nothing else touches - an operator following the documented
+            // "place ggml-tiny.en.bin under .../models/" instructions on a
+            // fresh install would otherwise have to create that folder by
+            // hand first. Created unconditionally and ignored if it
+            // already exists; never fails startup if this can't be
+            // created (e.g. a read-only data dir) - the existing
+            // `WhisperModelDiagnostic::Missing`/`Unreadable` reporting
+            // already covers that case honestly.
+            if let Err(e) = std::fs::create_dir_all(&config.model_dir) {
+                log::warn!(
+                    target: LogCategory::Speech.target(),
+                    "could not create model directory {}: {e}",
+                    config.model_dir.display()
+                );
+            }
 
             let mut db = cip_database::open(&config.database_path)?;
             let applied = cip_database::run_migrations(&mut db)?;
@@ -354,6 +381,7 @@ pub fn run() {
             commands::get_app_config,
             commands::app_health_check,
             commands::get_pilot_diagnostics,
+            commands::install_whisper_model,
             commands::backup_database,
             commands::list_bible_translations,
             commands::start_service,

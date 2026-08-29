@@ -50,6 +50,8 @@ export interface MachineDiagnostic {
   arch: string;
   cipVersion: string;
   buildCommit: string;
+  /** `true` means built from `buildCommit` plus uncommitted changes - not `buildCommit` exactly. */
+  buildDirty: boolean;
 }
 
 /** Is the database file actually readable/writable right now (Phase 3.3). */
@@ -76,6 +78,8 @@ export interface SpeechRuntimeDiagnostics {
   lastChunkSampleRateHz: number | null;
   lastChunkSampleCount: number | null;
   lastResampledSampleCount: number | null;
+  /** Chunks skipped because `engineReady` was `false` - never counted in `inferencesAttempted`. */
+  chunksSkippedEngineNotReady: number;
   inferencesAttempted: number;
   inferencesSucceeded: number;
   lastError: string | null;
