@@ -31,6 +31,24 @@
 #    installed alongside it (Ubuntu ships both) - this script switches to
 #    it via `update-alternatives` before building.
 #
+# Phase 3.8.6.1: the resulting `cip-desktop.exe` genuinely, dynamically
+# depends on `libstdc++-6.dll` (confirmed via
+# `x86_64-w64-mingw32-objdump -p` against the built binary - whisper.cpp's
+# C++ code pulls it in), which itself dynamically depends on
+# `libgcc_s_seh-1.dll` and `libwinpthread-1.dll` (confirmed the same way,
+# against each DLL in turn). None of the three ship with a stock Windows
+# installation, and Tauri's NSIS bundler does not know to include them
+# automatically - installing on a real Windows machine without them fails
+# immediately with "libstdc++-6.dll was not found" (a real Environment C
+# failure, not a hypothetical one). This script stages exactly those three
+# files, resolved from the *active* mingw-w64-x86-64 toolchain via
+# `-print-file-name` (never a hardcoded GCC-version path, so this keeps
+# working across a toolchain upgrade), strips their debug info to keep the
+# installer size sane, and `tauri.windows.conf.json`'s `bundle.resources`
+# (a Windows-only config override Tauri merges automatically) places them
+# in `$INSTDIR` next to `cip-desktop.exe` - the directory Windows' default
+# DLL search order checks first.
+#
 # Usage: scripts/build-windows-whisper.sh
 # Must be run with permission to call `update-alternatives` (root, in this
 # container) and from the repository root.
@@ -39,9 +57,50 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+if ! command -v 7z >/dev/null 2>&1; then
+  echo "ERROR: 7z is required to verify the packaged installer's contents (e.g. 'apt-get install -y p7zip-full')" >&2
+  exit 1
+fi
+
 echo "==> Switching x86_64-w64-mingw32-gcc/g++ to the posix-threads variant"
 update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
 update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+
+echo "==> Staging Windows runtime DLLs (libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll) from the active mingw toolchain"
+# Must happen BEFORE the first `cargo build`, not just before packaging:
+# tauri-build's own build.rs (run as part of compiling cip-desktop, even a
+# plain `cargo build`) validates that every `tauri.windows.conf.json`
+# `bundle.resources` path actually exists on disk, and fails the whole
+# compile with "resource path ... doesn't exist" otherwise - confirmed by
+# directly running this script and observing the exact failure.
+runtime_dir="apps/desktop/src-tauri/windows-runtime"
+mkdir -p "$runtime_dir"
+for dll in libstdc++-6.dll libgcc_s_seh-1.dll; do
+  src="$(x86_64-w64-mingw32-g++ -print-file-name="$dll")"
+  if [ ! -f "$src" ]; then
+    echo "ERROR: could not locate $dll via 'x86_64-w64-mingw32-g++ -print-file-name' - got '$src'" >&2
+    exit 1
+  fi
+  cp "$src" "$runtime_dir/$dll"
+  echo "    staged: $dll (from $src)"
+done
+winpthread_src="$(x86_64-w64-mingw32-gcc -print-file-name=libwinpthread-1.dll)"
+if [ ! -f "$winpthread_src" ]; then
+  echo "ERROR: could not locate libwinpthread-1.dll via 'x86_64-w64-mingw32-gcc -print-file-name' - got '$winpthread_src'" >&2
+  exit 1
+fi
+cp "$winpthread_src" "$runtime_dir/libwinpthread-1.dll"
+echo "    staged: libwinpthread-1.dll (from $winpthread_src)"
+x86_64-w64-mingw32-strip --strip-debug "$runtime_dir"/*.dll
+echo "    stripped debug info from staged DLLs"
+for dll in "$runtime_dir"/*.dll; do
+  arch="$(file "$dll")"
+  case "$arch" in
+    *"x86-64"*) ;;
+    *) echo "ERROR: $dll is not x86-64 - refusing to package a mismatched-architecture DLL: $arch" >&2; exit 1 ;;
+  esac
+done
+echo "    architecture verified: all staged DLLs are x86-64"
 
 echo "==> First build attempt (expected to fail on the ggml lib-name defect if whisper-rs-sys has not been built with this toolchain variant before)"
 if cargo build --target x86_64-pc-windows-gnu -p cip-desktop --features whisper --release; then
@@ -66,5 +125,18 @@ fi
 
 echo "==> Rust build succeeded. Packaging the NSIS installer."
 (cd apps/desktop && npx tauri build --target x86_64-pc-windows-gnu --features whisper)
+
+echo "==> Verifying the packaged installer actually contains the runtime DLLs"
+installer="target/x86_64-pc-windows-gnu/release/bundle/nsis/Church Intelligence Platform_0.1.0_x64-setup.exe"
+extract_dir="$(mktemp -d)"
+(cd "$extract_dir" && 7z x "$OLDPWD/$installer" -y >/dev/null)
+for dll in libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll; do
+  if [ ! -f "$extract_dir/$dll" ]; then
+    echo "ERROR: $dll is missing from the packaged installer - the resources config did not apply" >&2
+    exit 1
+  fi
+done
+rm -rf "$extract_dir"
+echo "    confirmed: libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll are all present in the installer"
 
 echo "==> Done. Installer at target/x86_64-pc-windows-gnu/release/bundle/nsis/"

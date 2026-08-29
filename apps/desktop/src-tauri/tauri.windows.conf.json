@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "resources": {
+      "windows-runtime/libstdc++-6.dll": "",
+      "windows-runtime/libgcc_s_seh-1.dll": "",
+      "windows-runtime/libwinpthread-1.dll": ""
+    }
+  }
+}

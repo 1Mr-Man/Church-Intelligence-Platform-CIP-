@@ -1,0 +1,67 @@
+{
+  "phase": "3.8.6.1",
+  "trigger": "Real Environment C failure: the operator installed the Phase 3.8.6 whisper-enabled installer on a real Windows machine and launched it. Windows reported: \"cip-desktop.exe - System Error: The code execution cannot proceed because libstdc++-6.dll was not found. Reinstalling the program may fix this problem.\" (screenshot evidence). This is a definitive, real installer-packaging defect, not speculation.",
+  "peImportInspection": {
+    "tool": "x86_64-w64-mingw32-objdump -p target/x86_64-pc-windows-gnu/release/cip-desktop.exe",
+    "fullUniqueDllImportList": [
+      "KERNEL32.dll", "WebView2Loader.dll", "advapi32.dll",
+      "api-ms-win-core-synch-l1-2-0.dll", "api-ms-win-core-winrt-error-l1-1-0.dll",
+      "api-ms-win-core-winrt-l1-1-0.dll", "bcryptprimitives.dll", "comctl32.dll",
+      "dwmapi.dll", "gdi32.dll", "imm32.dll", "kernel32.dll", "libstdc++-6.dll",
+      "msvcrt.dll", "ntdll.dll", "ole32.dll", "oleaut32.dll", "propsys.dll",
+      "shell32.dll", "shlwapi.dll", "user32.dll", "userenv.dll", "ws2_32.dll"
+    ],
+    "classification": {
+      "windowsSystemDlls": [
+        "KERNEL32.dll/kernel32.dll", "advapi32.dll", "api-ms-win-core-synch-l1-2-0.dll",
+        "api-ms-win-core-winrt-error-l1-1-0.dll", "api-ms-win-core-winrt-l1-1-0.dll",
+        "bcryptprimitives.dll", "comctl32.dll", "dwmapi.dll", "gdi32.dll", "imm32.dll",
+        "msvcrt.dll", "ntdll.dll", "ole32.dll", "oleaut32.dll", "propsys.dll",
+        "shell32.dll", "shlwapi.dll", "user32.dll", "userenv.dll", "ws2_32.dll"
+      ],
+      "windowsSystemDllsNote": "Present on every stock Windows 10/11 x64 installation - never bundled",
+      "nonSystemRuntimeDlls": ["libstdc++-6.dll"],
+      "nonSystemRuntimeDllsNote": "The one real gap - whisper.cpp's C++ code is dynamically linked against it (confirmed via the actual linker invocation captured during Phase 3.8.6, which used -Wl,-Bdynamic ... -lstdc++)",
+      "alreadyHandledByTauri": ["WebView2Loader.dll"],
+      "alreadyHandledByTauriNote": "Tauri's own NSIS generation already copies this automatically (confirmed present in installer.nsi's main install section before this phase's changes) - untouched by this phase"
+    }
+  },
+  "transitiveDependencyInspection": {
+    "method": "x86_64-w64-mingw32-objdump -p run against each candidate DLL in turn, not assumed",
+    "libstdcxxDependsOn": ["KERNEL32.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll", "msvcrt.dll"],
+    "libgccSehDependsOn": ["KERNEL32.dll", "libwinpthread-1.dll", "msvcrt.dll"],
+    "libwinpthreadDependsOn": ["KERNEL32.dll", "msvcrt.dll"],
+    "conclusion": "The full, closed transitive set of non-system runtime DLLs required is exactly three: libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll. No fourth DLL is needed (libwinpthread-1.dll has no further non-system dependencies)."
+  },
+  "dllSourceAndVerification": [
+    {
+      "dll": "libstdc++-6.dll",
+      "sourcePath": "/usr/lib/gcc/x86_64-w64-mingw32/13-posix/libstdc++-6.dll (resolved via `x86_64-w64-mingw32-g++ -print-file-name=libstdc++-6.dll`, never a hardcoded path)",
+      "toolchainVariant": "posix-threads - matches the toolchain variant actually used to build cip-desktop.exe this phase (see docs/phase-3-8-6-windows-whisper-build.md's mingw threading-model fix); using the win32-threads variant's copy instead would risk an ABI mismatch",
+      "architectureBeforeStrip": "PE32+ executable (DLL) (console) x86-64, for MS Windows, 20 sections",
+      "sizeBeforeStripBytes": 26347027,
+      "sizeAfterStripBytes": 4596950,
+      "sha256AfterStrip": "3c1d639084dd1004c4e12a1a6f1e3ed4a6e0242882e23ae92ed417ffa819e942"
+    },
+    {
+      "dll": "libgcc_s_seh-1.dll",
+      "sourcePath": "/usr/lib/gcc/x86_64-w64-mingw32/13-posix/libgcc_s_seh-1.dll (resolved via `x86_64-w64-mingw32-g++ -print-file-name=libgcc_s_seh-1.dll`)",
+      "toolchainVariant": "posix-threads",
+      "sizeAfterStripBytes": 169919,
+      "sha256AfterStrip": "b71a749a203fae1b884efc25f2a49f7938a271b4048292efe698ce4e5ca484a7"
+    },
+    {
+      "dll": "libwinpthread-1.dll",
+      "sourcePath": "/usr/x86_64-w64-mingw32/lib/libwinpthread-1.dll (resolved via `x86_64-w64-mingw32-gcc -print-file-name=libwinpthread-1.dll`)",
+      "toolchainVariant": "shared between posix/win32 variants (winpthreads itself has no thread-model split)",
+      "sizeAfterStripBytes": 94077,
+      "sha256AfterStrip": "5fcfe1a32fb0d1e5f735911a98db64fac689cf41d6b5413bc2fbffd0c393357b"
+    }
+  ],
+  "architectureVerification": "All three staged DLLs and cip-desktop.exe itself confirmed PE32+ x86-64 via file(1) before packaging - the build script (scripts/build-windows-whisper.sh) refuses to proceed if any staged DLL is not x86-64.",
+  "debugSymbolStripping": {
+    "tool": "x86_64-w64-mingw32-strip --strip-debug",
+    "reasoning": "The stock Ubuntu-packaged libstdc++-6.dll ships with full debug info (26MB) - stripping only removes debug sections, never code or the export table (verified: the import table of the stripped libstdc++-6.dll is byte-identical in content to the unstripped original, confirmed via objdump -p before/after)",
+    "sizeReduction": "libstdc++-6.dll: 26,347,027 -> 4,596,950 bytes"
+  }
+}

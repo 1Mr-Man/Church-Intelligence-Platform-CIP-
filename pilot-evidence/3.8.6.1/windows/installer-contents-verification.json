@@ -1,0 +1,49 @@
+{
+  "phase": "3.8.6.1",
+  "summary": "Direct extraction and inspection of the actual packaged NSIS installer, proving the runtime DLLs identified by this phase's audit genuinely ship inside it - not just staged in a build directory that never made it into the final artifact.",
+  "extractionMethod": "7z x \"Church Intelligence Platform_0.1.0_x64-setup.exe\" (p7zip-full installed this phase specifically to perform this verification)",
+  "installerNsiPlacementProof": {
+    "generatedFile": "target/x86_64-pc-windows-gnu/release/nsis/x64/installer.nsi",
+    "relevantLines": [
+      "SetOutPath $INSTDIR",
+      "File /a \"/oname=libgcc_s_seh-1.dll\" \".../apps/desktop/src-tauri/windows-runtime/libgcc_s_seh-1.dll\"",
+      "File /a \"/oname=libstdc++-6.dll\" \".../apps/desktop/src-tauri/windows-runtime/libstdc++-6.dll\"",
+      "File /a \"/oname=libwinpthread-1.dll\" \".../apps/desktop/src-tauri/windows-runtime/libwinpthread-1.dll\""
+    ],
+    "conclusion": "All three DLLs are placed directly into $INSTDIR (the same directory as cip-desktop.exe), the directory Windows' default DLL search order checks first - not a nested 'resources' subfolder that the loader would not find automatically. A matching Delete entry for each DLL is also present in the uninstaller section, so uninstall correctly removes them."
+  },
+  "extractedInstallerContents": [
+    "libwinpthread-1.dll",
+    "cip-desktop.exe",
+    "$PLUGINSDIR/System.dll (NSIS-internal, not part of the installed app)",
+    "$PLUGINSDIR/NSISdl.dll (NSIS-internal)",
+    "$PLUGINSDIR/nsis_tauri_utils.dll (NSIS-internal)",
+    "$PLUGINSDIR/StartMenu.dll (NSIS-internal)",
+    "$PLUGINSDIR/nsDialogs.dll (NSIS-internal)",
+    "WebView2Loader.dll",
+    "uninstall.exe",
+    "libstdc++-6.dll",
+    "libgcc_s_seh-1.dll"
+  ],
+  "extractedFileVerification": {
+    "cip-desktop.exe": "PE32+ executable (GUI) x86-64 (stripped to external PDB), for MS Windows, 11 sections",
+    "libstdc++-6.dll": "PE32+ executable (DLL) (console) x86-64 (stripped to external PDB), for MS Windows, 11 sections",
+    "libgcc_s_seh-1.dll": "PE32+ executable (DLL) (console) x86-64 (stripped to external PDB), for MS Windows, 11 sections",
+    "libwinpthread-1.dll": "PE32+ executable (DLL) (console) x86-64 (stripped to external PDB), for MS Windows, 12 sections",
+    "WebView2Loader.dll": "PE32+ executable (DLL) (console) x86-64, for MS Windows, 9 sections"
+  },
+  "extractedFileSha256": {
+    "libstdc++-6.dll": "3c1d639084dd1004c4e12a1a6f1e3ed4a6e0242882e23ae92ed417ffa819e942",
+    "libgcc_s_seh-1.dll": "b71a749a203fae1b884efc25f2a49f7938a271b4048292efe698ce4e5ca484a7",
+    "libwinpthread-1.dll": "5fcfe1a32fb0d1e5f735911a98db64fac689cf41d6b5413bc2fbffd0c393357b"
+  },
+  "installerSizeChange": {
+    "beforeThisPhaseBytes": 7613226,
+    "beforeThisPhaseSha256": "26739280b7cc4ef750d73a7d04248cf00533b7ff5623720f8ad1621f5e3f9441",
+    "afterThisPhaseBytes": 8458075,
+    "afterThisPhaseSha256": "b737f72b9f870393065777516a58d0a5c5e6e7e9411ccdd3cd8c40578249e177",
+    "increaseBytes": 844849,
+    "note": "A real, substantial increase despite NSIS's LZMA compression, consistent with three additional real DLLs (4.86MB combined, post-strip) being bundled"
+  },
+  "automatedVerification": "This entire extraction-and-check sequence is now the last step of scripts/build-windows-whisper.sh itself - the script fails loudly if any of the three DLLs is missing from the packaged installer, so this is not a one-off manual check but a build-time gate on every future run."
+}

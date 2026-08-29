@@ -2,3 +2,10 @@
 # will have compiled files and executables
 /target/
 /gen/schemas
+
+# Phase 3.8.6.1: MinGW runtime DLLs (libstdc++-6.dll, libgcc_s_seh-1.dll,
+# libwinpthread-1.dll) staged here by scripts/build-windows-whisper.sh from
+# the active toolchain before `tauri build` - regenerated on every build,
+# never committed as source (see tauri.windows.conf.json's bundle.resources,
+# which references this directory).
+/windows-runtime/
