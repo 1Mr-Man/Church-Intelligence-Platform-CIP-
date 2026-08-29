@@ -935,10 +935,31 @@ pub fn start_listening(
         mpsc::sync_channel::<AudioChunk>(acoustic::ACOUSTIC_CHANNEL_CAPACITY);
     spawn_acoustic_worker(app.clone(), service_id, acoustic_rx);
 
-    let sink_app = app.clone();
+    // Phase 3.8.7.2: `handle_audio_chunk` used to run inline, synchronously,
+    // on cpal's own real-time audio callback thread - the same thread that
+    // must return in low-single-digit milliseconds to keep the OS's audio
+    // ring buffer fed. Once every ~3s of buffered audio it instead ran a
+    // real, blocking whisper.cpp inference call there, which real-hardware
+    // evidence traced to app slowness, degraded transcription (a stalled
+    // callback can starve/glitch the audio backend feeding Whisper), and
+    // the UI's own status poll intermittently blocking on the same
+    // `speech_engine` mutex the inference held - see
+    // docs/phase-3-8-7-2-audit.md. Fixed the same way the acoustic path
+    // already was: hand each chunk off through a channel to a dedicated
+    // worker thread, so the audio callback only ever does cheap,
+    // non-blocking work. Unlike acoustic's bounded/best-effort channel,
+    // this one is unbounded - dropping a chunk mid-buffer here would
+    // introduce a gap into whatever Whisper is accumulating, reintroducing
+    // a different flavor of the same audio-corruption problem; steady-state
+    // throughput is not at risk since the worker's own per-chunk cost
+    // (resample + buffer-append) is far cheaper than real-time arrival
+    // except during the brief, bounded inference window.
+    let (speech_tx, speech_rx) = mpsc::channel::<AudioChunk>();
+    spawn_speech_worker(app.clone(), service_id, speech_rx);
+
     let sink: AudioChunkSink = Arc::new(move |chunk: AudioChunk| {
         let _ = acoustic_tx.try_send(chunk.clone());
-        handle_audio_chunk(&sink_app, service_id, chunk);
+        let _ = speech_tx.send(chunk);
     });
 
     let start_result = state
@@ -1223,12 +1244,34 @@ fn resample_pcm16(samples: &[i16], from_hz: u32, to_hz: u32) -> Vec<i16> {
     out
 }
 
-/// Runs on the `AudioEngine`'s own capture thread (see
-/// `integrations/audio`'s worker-thread design) - never on a Tauri command
-/// thread. Re-fetches `AppState` from the cloned `AppHandle` rather than
-/// capturing a `State<'_, AppState>` directly, since the latter's lifetime
-/// is tied to a single command invocation and can't be captured into a
-/// closure that outlives it.
+/// Phase 3.8.7.2: the dedicated worker thread `handle_audio_chunk` actually
+/// runs on - see that function's own docs and `docs/phase-3-8-7-2-audit.md`
+/// for why this exists (previously it ran inline on cpal's real-time audio
+/// callback thread, where a blocking whisper.cpp inference call every ~3s
+/// violated the real-time-audio contract). Mirrors `spawn_acoustic_worker`
+/// exactly: reads from `rx` (fed by `start_listening`'s sink closure) until
+/// the channel closes, which happens automatically when `stop_listening`/a
+/// failed `start_listening` drops the sink that held the matching sender.
+/// No explicit `flush()` on channel closure - buffered-but-not-yet-inferred
+/// audio (less than one `CHUNK_SAMPLES` window) is simply dropped, exactly
+/// the same behavior this had before this phase (unchanged, not a new gap).
+fn spawn_speech_worker(app: AppHandle, service_id: Uuid, rx: mpsc::Receiver<AudioChunk>) {
+    std::thread::spawn(move || {
+        while let Ok(chunk) = rx.recv() {
+            handle_audio_chunk(&app, service_id, chunk);
+        }
+    });
+}
+
+/// Runs on the dedicated speech worker thread (`spawn_speech_worker`) -
+/// never on cpal's own real-time audio callback thread (Phase 3.8.7.2:
+/// moved off it - see `docs/phase-3-8-7-2-audit.md` for the real-hardware
+/// evidence that running whisper.cpp inference there caused app slowness,
+/// degraded transcription quality, and intermittent UI status stalls), and
+/// never on a Tauri command thread either. Re-fetches `AppState` from the
+/// cloned `AppHandle` rather than capturing a `State<'_, AppState>`
+/// directly, since the latter's lifetime is tied to a single command
+/// invocation and can't be captured into a closure/thread that outlives it.
 fn handle_audio_chunk(app: &AppHandle, service_id: Uuid, chunk: AudioChunk) {
     let state = app.state::<AppState>();
 

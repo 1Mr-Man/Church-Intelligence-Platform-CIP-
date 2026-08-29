@@ -1,0 +1,32 @@
+{
+  "phase": "3.8.7.2",
+  "summary": "Real-code-cited root-cause evidence and direct compiled-binary proof for the speech-worker-thread decoupling fix.",
+  "trigger": "Operator's real Windows report after a model was successfully installed: transcription active and audio arriving, but CIP slow/unresponsive, transcript text poor/repetitive, Intelligence Feed empty, and intermittent NO SIGNAL.",
+  "rootCauseCitations": {
+    "audioCallbackInvokesSinkSynchronously": "integrations/audio/src/lib.rs:316-336 - device.build_input_stream's closure calls sink(AudioChunk{...}) directly, on cpal's own real-time audio thread, no channel in between.",
+    "sinkPreviouslyCalledHandleAudioChunkInline": "apps/desktop/src-tauri/src/commands.rs (pre-fix): the sink closure in start_listening called handle_audio_chunk(&sink_app, service_id, chunk) directly - the ONE remaining audio consumer not already using the acoustic path's proven worker-thread pattern.",
+    "whisperInferenceIsBlockingAndSynchronous": "ai/speech/src/whisper.rs:38 (CHUNK_SAMPLES = 3.0s of audio) and :102-104 (state.full(params, &audio_f32) - whisper.cpp's real, synchronous CPU-bound call) - runs once per feed_audio call that crosses the buffer threshold.",
+    "lockHeldAcrossInference": "handle_audio_chunk acquired state.speech_engine.lock() and held it across the entire feed_audio call, including the blocking inference.",
+    "sameLockNeededByPolledStatusCommand": "get_live_status (commands.rs, ~line 5025) also locks state.speech_engine just to read is_ready() - and LiveChurchBrain.tsx:245 polls getLiveStatus() every STATUS_POLL_MS = 3000 (LiveChurchBrain.tsx:49) - the same cadence as CHUNK_SAMPLES's 3.0s inference window, so a poll landing during inference blocks on the mutex.",
+    "acousticPathAlreadyUsesTheCorrectPattern": "commands.rs's own pre-existing doc comment (now preserved) states the acoustic worker exists specifically so 'a slow/backed-up acoustic worker can never block the audio capture thread or the speech-engine feed right after it' - the speech path had never been given the same treatment until this phase."
+  },
+  "sermonContentCrossDomainFinding": {
+    "conclusion": "Confirmed NOT wired to the live audio path at all - pipeline.rs's handle_final_transcript calls only cip_core_service::process_transcript_segment (Bible Intelligence). LiveChurchBrain.tsx's onTranscriptUpdated handler only appends to the displayed transcript list; analyzeSermonTranscript is only called from the manual Sermon text-entry path.",
+    "scopeDecision": "Confirmed pre-existing, documented (Phase 3.8's own ServiceReplay screen exists for exactly this reason) - explicitly out of scope for this phase, not a regression, not fixed here."
+  },
+  "fixDesign": {
+    "pattern": "Mirrors spawn_acoustic_worker exactly - a dedicated std::thread::spawn loop reading AudioChunks from an mpsc channel until it closes.",
+    "channelChoice": "Unbounded (mpsc::channel), unlike acoustic's bounded/try_send channel - dropping a chunk mid-Whisper-buffer would reintroduce an audio-corruption problem of a different shape; steady-state throughput is not at risk since per-chunk worker cost (resample + buffer-append) is far cheaper than real-time arrival except during the brief, bounded inference window.",
+    "audioCallbackNowDoes": "downmix_to_i16, rms_level, two non-blocking channel sends (acoustic try_send + speech send) - no locks, no inference, no database access, no event emission.",
+    "unchanged": "WhisperSpeechEngine's buffering window, resampling logic, Bible detection logic, database schema, event contracts - purely relocates where existing per-chunk work executes."
+  },
+  "directCompiledBinaryProof": {
+    "method": "x86_64-w64-mingw32-strings against the actual packaged installer's extracted cip-desktop.exe",
+    "buildCommitEmbedded": "'91a918e3c9cc' found verbatim - the real baseline commit (Phase 3.8.7.1) this build was made against",
+    "speechWorkerSymbolFound": "cip_desktop_lib::commands::spawn_speech_worker (mangled, e.g. _ZN15cip_desktop_lib8commands18spawn_speech_worker...) - direct proof the fix is genuinely compiled into this exact binary, not just present in source",
+    "handleAudioChunkSymbolFound": "_ZN15cip_desktop_lib8commands18handle_audio_chunk17h56edb8ebd29eecb8E",
+    "whisperSymbolsStillPresent": "whisper_full_with_state, ggml_backend_init - whisper feature unaffected by this phase",
+    "dialogPluginStillPresent": "tauri_plugin_dialog::init, tauri_plugin_dialog::desktop::pick_file - Phase 3.8.7.1's model-picker feature unaffected"
+  },
+  "regressionProof": "cargo fmt --check, cargo clippy --all-targets -D warnings (default and --features whisper), cargo test --workspace: cip-desktop 227/227 passed (both feature configs, unchanged counts), cip-ai-speech --features whisper 7/7 passed, every other workspace crate green. cargo check --target x86_64-pc-windows-gnu clean. Frontend (unchanged this phase): typecheck/lint/test/build all clean, 210/210 tests passed."
+}
