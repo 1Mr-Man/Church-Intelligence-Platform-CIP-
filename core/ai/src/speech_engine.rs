@@ -81,6 +81,36 @@ pub trait SpeechEngine: Send + Sync {
     fn required_sample_rate_hz(&self) -> Option<u32> {
         None
     }
+
+    /// Whether the most recent `feed_audio` call actually ran the
+    /// engine's real inference pass, as opposed to merely buffering audio
+    /// toward a future one. `false` by default - only an engine that
+    /// internally batches audio before inferring (only
+    /// `WhisperSpeechEngine` does, today) needs to override this.
+    ///
+    /// Phase 3.8.7.3: added after a real Windows session showed
+    /// misleadingly high "inferences attempted" counts - every
+    /// `feed_audio` call was counted as an attempt even though most of
+    /// them (per `WhisperSpeechEngine`'s own ~3s buffering window) never
+    /// touch whisper.cpp at all. A caller that wants an honest count
+    /// checks this after each `feed_audio` call rather than assuming
+    /// every call is an inference.
+    fn last_feed_triggered_inference(&self) -> bool {
+        false
+    }
+
+    /// Discard any buffered-but-not-yet-inferred audio without running
+    /// inference on it. A no-op by default (`NullSpeechEngine`/
+    /// `ScriptedSpeechEngine` hold no such buffer).
+    ///
+    /// Phase 3.8.7.3: used by a real-time caller that has determined its
+    /// own backlog of unprocessed audio has grown too stale to be worth
+    /// finishing (see `docs/phase-3-8-7-3-audit.md`'s backpressure
+    /// design) - clearing the engine's own internal buffer here prevents
+    /// splicing fresh, post-recovery audio onto old, now-discontinuous
+    /// buffered samples in whatever the engine's next real inference
+    /// window turns out to be.
+    fn discard_buffered_audio(&mut self) {}
 }
 
 #[cfg(test)]

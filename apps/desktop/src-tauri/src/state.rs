@@ -85,6 +85,55 @@ pub struct SpeechDiagnostics {
     /// later success clears that field, so a diagnostics read always has
     /// something to show once at least one failure has occurred.
     pub last_error: Option<String>,
+    /// Phase 3.8.7.3: current estimated wall-clock duration (ms) of audio
+    /// queued for the speech worker but not yet handed to `feed_audio` -
+    /// the same counter `spawn_speech_worker`'s backpressure logic reads to
+    /// decide whether the backlog has become stale. See
+    /// `docs/phase-3-8-7-3-audit.md`'s backpressure design for why this is
+    /// tracked in milliseconds-of-audio rather than raw chunk count (chunk
+    /// size/rate varies by capture device).
+    pub queue_pending_ms: u64,
+    /// The highest `queue_pending_ms` has reached since the current
+    /// listening session started - reset to 0 on each `start_listening`,
+    /// so the operator can see how close the pipeline came to overload
+    /// even after it recovers back to `queue_pending_ms == 0`.
+    pub queue_high_water_ms: u64,
+    /// Number of times the backlog crossed the overload threshold and the
+    /// worker discarded buffered/queued audio to catch back up to
+    /// real-time - see `spawn_speech_worker`'s overload-drain logic.
+    pub overload_events: u64,
+    /// Total estimated milliseconds of audio discarded across all overload
+    /// events - distinct from `overload_events` (a count of episodes),
+    /// this is the actual amount of audio the operator never heard
+    /// transcribed, which diagnostics must never hide.
+    pub audio_ms_dropped_overload: u64,
+    /// Wall-clock duration of the most recent real Whisper inference call
+    /// (`state.full()`), measured with `std::time::Instant` around the
+    /// call - `None` until the first real inference completes. Distinct
+    /// from `inferences_attempted`/`inferences_succeeded`, which count
+    /// events but never recorded how long any one of them took.
+    pub last_inference_duration_ms: Option<u64>,
+    /// The largest `last_inference_duration_ms` observed so far this
+    /// process - lets the operator see worst-case inference cost, not just
+    /// the most recent sample.
+    pub max_inference_duration_ms: Option<u64>,
+    /// Running sum of every real inference's duration, paired with
+    /// `inference_duration_samples` below to let a diagnostics reader
+    /// compute an average without this struct needing to store one itself
+    /// (an average alone would hide whether it's based on 1 sample or
+    /// 10,000).
+    pub inference_duration_ms_sum: u64,
+    /// Count of real inferences included in `inference_duration_ms_sum` -
+    /// only incremented when `SpeechEngine::last_feed_triggered_inference`
+    /// reports `true` for that `feed_audio` call, matching
+    /// `inferences_attempted`'s own honest-counting rule (Finding 1,
+    /// `docs/phase-3-8-7-3-audit.md`).
+    pub inference_duration_samples: u64,
+    /// Wall-clock duration of the most recent `handle_final_transcript`
+    /// database pipeline call (persistence + Bible detection + suggestion
+    /// generation combined) - see `docs/phase-3-8-7-3-audit.md` Finding 6.
+    /// `None` until the first final transcript is processed.
+    pub last_transcript_pipeline_duration_ms: Option<u64>,
 }
 
 pub struct AppState {
@@ -116,11 +165,34 @@ pub struct AppState {
     pub context_manager: Mutex<DefaultScriptureContextManager>,
     pub audio_engine: Mutex<Box<dyn AudioEngine>>,
     pub speech_engine: Mutex<Box<dyn SpeechEngine>>,
+    /// Phase 3.8.7.3: `speech_engine.lock().is_ready()`, cached once at
+    /// construction. `SpeechEngine::is_ready()` is provably constant for
+    /// the whole lifetime of both existing implementations
+    /// (`NullSpeechEngine`/`ScriptedSpeechEngine` always `false`,
+    /// `WhisperSpeechEngine` always `true` once constructed - it never
+    /// unloads its model) - `docs/phase-3-8-7-3-audit.md` Finding 3.
+    /// Status-polling call sites (`get_pilot_diagnostics`,
+    /// `start_listening`, `stop_listening`, `get_live_status`) read this
+    /// plain field instead of locking `speech_engine` just to ask a
+    /// question whose answer never changes, so a status poll can never
+    /// block behind a long-running Whisper inference holding that mutex.
+    pub speech_ready: bool,
     pub active_service: Mutex<Option<ServiceSession>>,
     /// Monotonic counter for `TranscriptSegment.sequence`, shared across
     /// the real audio/speech pipeline and `process_test_transcript` so
     /// both paths order consistently within one service.
     pub transcript_sequence: AtomicU64,
+    /// Phase 3.8.7.3: incremented once per successful `start_listening`.
+    /// `spawn_speech_worker` captures the value current at its own spawn
+    /// time and compares against this field before emitting/persisting a
+    /// segment - a mismatch means a `stop_listening`/`start_listening`
+    /// cycle happened while that worker's `recv()` loop was still
+    /// draining a stale channel, so its output is discarded instead of
+    /// being attributed to the new listening session (Finding 4,
+    /// `docs/phase-3-8-7-3-audit.md`). Deliberately keyed to *listening*,
+    /// not `active_service` (whose id does not change across a
+    /// listening restart within the same service).
+    pub listening_generation: AtomicU64,
     /// The last audio-engine failure, if any, since the last successful
     /// `start_listening`/chunk. `get_live_status` reports `AudioStatusKind::Error`
     /// while this is set, distinct from `Unavailable` (Phase 1.3's audio
@@ -236,6 +308,7 @@ impl AppState {
         acoustic_music_engine: MusicIntelligenceEngine,
         acoustic_recognizer: Box<dyn AcousticMusicRecognizer>,
     ) -> Self {
+        let speech_ready = speech_engine.is_ready();
         Self {
             config,
             db: Mutex::new(db),
@@ -249,8 +322,10 @@ impl AppState {
             )),
             audio_engine: Mutex::new(audio_engine),
             speech_engine: Mutex::new(speech_engine),
+            speech_ready,
             active_service: Mutex::new(None),
             transcript_sequence: AtomicU64::new(0),
+            listening_generation: AtomicU64::new(0),
             audio_error: Mutex::new(None),
             speech_error: Mutex::new(None),
             speech_diagnostics: Mutex::new(speech_diagnostics),

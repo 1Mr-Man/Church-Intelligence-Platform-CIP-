@@ -28,6 +28,21 @@ function whisperModelSummary(diagnostics: PilotDiagnostics): string {
   }
 }
 
+function formatMs(ms: number | null): string {
+  return ms == null ? "n/a" : `${ms}ms`;
+}
+
+const OVERLOAD_STATE_LABELS: Record<PilotDiagnostics["speech"]["overloadState"], string> = {
+  normal: "Normal",
+  busy: "Busy",
+  falling_behind: "Falling behind",
+  overloaded: "Overloaded - discarding stale audio",
+};
+
+function overloadStateLabel(state: PilotDiagnostics["speech"]["overloadState"]): string {
+  return OVERLOAD_STATE_LABELS[state];
+}
+
 export function PilotDiagnosticsPanel() {
   const [diagnostics, setDiagnostics] = useState<PilotDiagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -162,6 +177,28 @@ export function PilotDiagnosticsPanel() {
                 )}
               </div>
               {diagnostics.speech.lastError && <div>Last error: {diagnostics.speech.lastError}</div>}
+            </dd>
+          </div>
+          <div>
+            <dt>Speech pipeline health</dt>
+            <dd>
+              <div>
+                Status: <strong>{overloadStateLabel(diagnostics.speech.overloadState)}</strong>
+              </div>
+              <div>
+                Queued audio: {diagnostics.speech.queuePendingMs}ms (high water: {diagnostics.speech.queueHighWaterMs}ms this session)
+              </div>
+              {diagnostics.speech.overloadEvents > 0 && (
+                <div>
+                  Overload events: {diagnostics.speech.overloadEvents} (total {diagnostics.speech.audioMsDroppedOverload}ms of
+                  audio discarded to catch back up to real time)
+                </div>
+              )}
+              <div>
+                Inference duration: last {formatMs(diagnostics.speech.lastInferenceDurationMs)}, avg{" "}
+                {formatMs(diagnostics.speech.avgInferenceDurationMs)}, max {formatMs(diagnostics.speech.maxInferenceDurationMs)}
+              </div>
+              <div>Transcript pipeline (DB + Bible detection): last {formatMs(diagnostics.speech.lastTranscriptPipelineDurationMs)}</div>
             </dd>
           </div>
           <div>

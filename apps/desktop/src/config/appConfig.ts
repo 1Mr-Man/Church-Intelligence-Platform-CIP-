@@ -80,9 +80,27 @@ export interface SpeechRuntimeDiagnostics {
   lastResampledSampleCount: number | null;
   /** Chunks skipped because `engineReady` was `false` - never counted in `inferencesAttempted`. */
   chunksSkippedEngineNotReady: number;
+  /**
+   * Phase 3.8.7.3: only counts calls where Whisper actually ran inference,
+   * not every chunk fed to a ready engine (most chunks just buffer).
+   */
   inferencesAttempted: number;
   inferencesSucceeded: number;
   lastError: string | null;
+  /** Current estimated wall-clock duration (ms) of audio queued for the speech worker. */
+  queuePendingMs: number;
+  /** Highest `queuePendingMs` observed since the current listening session started. */
+  queueHighWaterMs: number;
+  /** How many times the backlog crossed the overload threshold and queued/buffered audio was discarded. */
+  overloadEvents: number;
+  /** Total estimated milliseconds of audio discarded across all overload events. */
+  audioMsDroppedOverload: number;
+  lastInferenceDurationMs: number | null;
+  maxInferenceDurationMs: number | null;
+  avgInferenceDurationMs: number | null;
+  lastTranscriptPipelineDurationMs: number | null;
+  /** Derived from `queuePendingMs` against fixed thresholds - see `commands.rs::classify_overload`. */
+  overloadState: "normal" | "busy" | "falling_behind" | "overloaded";
 }
 
 export interface PilotDiagnostics {

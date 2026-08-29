@@ -43,6 +43,10 @@ pub struct WhisperSpeechEngine {
     sequence: u64,
     elapsed_ms: u64,
     language: Option<String>,
+    /// Phase 3.8.7.3: whether the most recent `feed_audio` call actually
+    /// ran `run_inference` - see `SpeechEngine::last_feed_triggered_inference`'s
+    /// own docs for why a caller needs this.
+    last_feed_triggered_inference: bool,
 }
 
 impl WhisperSpeechEngine {
@@ -70,6 +74,7 @@ impl WhisperSpeechEngine {
             sequence: 0,
             elapsed_ms: 0,
             language: None,
+            last_feed_triggered_inference: false,
         })
     }
 
@@ -149,8 +154,10 @@ impl SpeechEngine for WhisperSpeechEngine {
     fn feed_audio(&mut self, samples: &[i16]) -> Result<Vec<TranscriptSegment>, SpeechEngineError> {
         self.buffer.extend_from_slice(samples);
         if self.buffer.len() >= CHUNK_SAMPLES {
+            self.last_feed_triggered_inference = true;
             self.run_inference()
         } else {
+            self.last_feed_triggered_inference = false;
             Ok(vec![])
         }
     }
@@ -161,6 +168,14 @@ impl SpeechEngine for WhisperSpeechEngine {
 
     fn required_sample_rate_hz(&self) -> Option<u32> {
         Some(SAMPLE_RATE_HZ)
+    }
+
+    fn last_feed_triggered_inference(&self) -> bool {
+        self.last_feed_triggered_inference
+    }
+
+    fn discard_buffered_audio(&mut self) {
+        self.buffer.clear();
     }
 }
 

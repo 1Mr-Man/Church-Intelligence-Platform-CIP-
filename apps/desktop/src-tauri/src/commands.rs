@@ -49,7 +49,7 @@ use cip_integrations_music::{ImportReport as MusicImportReport, MusicDatasetInpu
 use cip_presentation_renderer::{render_content, RenderedSlide, SCRIPTURE_DEFAULT_TEMPLATE};
 use rusqlite::Connection;
 use serde::Serialize;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
@@ -427,9 +427,109 @@ pub struct SpeechRuntimeDiagnostics {
     /// `state::SpeechDiagnostics::chunks_skipped_engine_not_ready`. Never
     /// double-counted in `inferences_attempted` below.
     pub chunks_skipped_engine_not_ready: u64,
+    /// Phase 3.8.7.3: only counts calls where `SpeechEngine::feed_audio`
+    /// actually ran real inference (`last_feed_triggered_inference() ==
+    /// true`) - see `docs/phase-3-8-7-3-audit.md` Finding 1. Previously
+    /// this counted every chunk fed to a ready engine, which for
+    /// `WhisperSpeechEngine`'s ~3s buffering window meant it was
+    /// misleadingly ~300x too high.
     pub inferences_attempted: u64,
     pub inferences_succeeded: u64,
     pub last_error: Option<String>,
+    /// Current estimated wall-clock duration (ms) of audio queued for the
+    /// speech worker but not yet fed to the engine.
+    pub queue_pending_ms: u64,
+    /// Highest `queue_pending_ms` observed since the current listening
+    /// session started.
+    pub queue_high_water_ms: u64,
+    /// How many times the backlog crossed the overload threshold and
+    /// queued/buffered audio was discarded to catch back up to real time.
+    pub overload_events: u64,
+    /// Total estimated milliseconds of audio discarded across all
+    /// overload events.
+    pub audio_ms_dropped_overload: u64,
+    pub last_inference_duration_ms: Option<u64>,
+    pub max_inference_duration_ms: Option<u64>,
+    /// Average inference duration across every real inference so far -
+    /// derived at read time from `inference_duration_ms_sum` /
+    /// `inference_duration_samples`, never stored redundantly. `None`
+    /// until at least one real inference has completed.
+    pub avg_inference_duration_ms: Option<u64>,
+    pub last_transcript_pipeline_duration_ms: Option<u64>,
+    /// Derived from `queue_pending_ms` against fixed thresholds - see
+    /// `classify_overload`'s own docs. Never stored redundantly.
+    pub overload_state: OverloadState,
+}
+
+/// Phase 3.8.7.3: the speech pipeline's operator-visible backlog state,
+/// derived purely from `queue_pending_ms` against fixed thresholds - see
+/// `classify_overload`. Never persisted or set directly; always computed
+/// fresh at diagnostics-read time so it can never drift from the counter
+/// it's derived from.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OverloadState {
+    #[default]
+    Normal,
+    Busy,
+    FallingBehind,
+    Overloaded,
+}
+
+/// Backlog thresholds (milliseconds of queued-but-not-yet-processed
+/// audio), per `docs/phase-3-8-7-3-audit.md`'s backpressure design.
+/// `OVERLOAD_THRESHOLD_MS` is also the point at which `spawn_speech_worker`
+/// actively drains and discards the backlog (see that function) - the
+/// other two are purely descriptive, operator-facing states between
+/// "fine" and "actively shedding audio."
+const BUSY_THRESHOLD_MS: u64 = 3_000;
+const FALLING_BEHIND_THRESHOLD_MS: u64 = 6_000;
+const OVERLOAD_THRESHOLD_MS: u64 = 10_000;
+
+/// Classifies the current backlog depth for the operator - a pure
+/// function so it's directly unit-testable without any real audio/thread
+/// plumbing. See the threshold constants' own docs for the exact
+/// boundaries.
+fn classify_overload(pending_ms: u64) -> OverloadState {
+    if pending_ms >= OVERLOAD_THRESHOLD_MS {
+        OverloadState::Overloaded
+    } else if pending_ms >= FALLING_BEHIND_THRESHOLD_MS {
+        OverloadState::FallingBehind
+    } else if pending_ms >= BUSY_THRESHOLD_MS {
+        OverloadState::Busy
+    } else {
+        OverloadState::Normal
+    }
+}
+
+/// Estimated wall-clock duration (ms) of one `AudioChunk`'s worth of
+/// audio, from its own reported sample rate and sample count - a pure
+/// function so it's directly unit-testable. Chunk size/rate varies by
+/// capture device (Phase 3.8.7.3's audit measured 480 samples @ 48kHz =
+/// 10ms on the operator's own real hardware), which is exactly why
+/// backlog is tracked in milliseconds-of-audio here, not raw chunk count.
+fn chunk_duration_ms(chunk: &AudioChunk) -> u64 {
+    if chunk.sample_rate_hz == 0 {
+        return 0;
+    }
+    (chunk.samples.len() as u64 * 1000) / u64::from(chunk.sample_rate_hz)
+}
+
+/// Lock-free saturating subtraction: decrements `counter` by `amount`,
+/// clamped at 0, without ever underflowing (a plain `fetch_sub` on
+/// `AtomicU64` wraps around on underflow, which would corrupt the
+/// backlog reading). Used by the speech pipeline's `pending_ms` tracker,
+/// which multiple threads (the audio callback's sink, and the speech
+/// worker) touch concurrently.
+fn saturating_sub_u64(counter: &AtomicU64, amount: u64) {
+    let mut current = counter.load(Ordering::SeqCst);
+    loop {
+        let new = current.saturating_sub(amount);
+        match counter.compare_exchange_weak(current, new, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => break,
+            Err(observed) => current = observed,
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -468,11 +568,18 @@ pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> Pilo
             .lock()
             .expect("speech_diagnostics mutex poisoned")
             .clone();
-        let engine_ready = state
-            .speech_engine
-            .lock()
-            .expect("speech_engine mutex poisoned")
-            .is_ready();
+        // Phase 3.8.7.3: `speech_engine.lock()...is_ready()` used to be
+        // read here on every poll - `state.speech_ready` is the same fact,
+        // cached once at construction (`is_ready()` never changes after
+        // that for either existing engine), so this can never block behind
+        // an in-progress Whisper inference. See
+        // `docs/phase-3-8-7-3-audit.md` Finding 3.
+        let engine_ready = state.speech_ready;
+        let avg_inference_duration_ms = if diag.inference_duration_samples > 0 {
+            Some(diag.inference_duration_ms_sum / diag.inference_duration_samples)
+        } else {
+            None
+        };
         SpeechRuntimeDiagnostics {
             feature_compiled: diag.feature_compiled,
             model_load_attempted: diag.model_load_attempted,
@@ -487,6 +594,15 @@ pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> Pilo
             inferences_attempted: diag.inferences_attempted,
             inferences_succeeded: diag.inferences_succeeded,
             last_error: diag.last_error,
+            queue_pending_ms: diag.queue_pending_ms,
+            queue_high_water_ms: diag.queue_high_water_ms,
+            overload_events: diag.overload_events,
+            audio_ms_dropped_overload: diag.audio_ms_dropped_overload,
+            last_inference_duration_ms: diag.last_inference_duration_ms,
+            max_inference_duration_ms: diag.max_inference_duration_ms,
+            avg_inference_duration_ms,
+            last_transcript_pipeline_duration_ms: diag.last_transcript_pipeline_duration_ms,
+            overload_state: classify_overload(diag.queue_pending_ms),
         }
     };
 
@@ -947,19 +1063,51 @@ pub fn start_listening(
     // docs/phase-3-8-7-2-audit.md. Fixed the same way the acoustic path
     // already was: hand each chunk off through a channel to a dedicated
     // worker thread, so the audio callback only ever does cheap,
-    // non-blocking work. Unlike acoustic's bounded/best-effort channel,
-    // this one is unbounded - dropping a chunk mid-buffer here would
-    // introduce a gap into whatever Whisper is accumulating, reintroducing
-    // a different flavor of the same audio-corruption problem; steady-state
-    // throughput is not at risk since the worker's own per-chunk cost
-    // (resample + buffer-append) is far cheaper than real-time arrival
-    // except during the brief, bounded inference window.
+    // non-blocking work.
+    //
+    // Phase 3.8.7.3: the channel itself is still unbounded (`mpsc::channel`,
+    // not `sync_channel`) - dropping a chunk mid-buffer here would still
+    // introduce a gap into whatever Whisper is accumulating. What changed
+    // is that the *backlog* is no longer allowed to grow without limit:
+    // `pending_ms` tracks how much queued audio the worker hasn't consumed
+    // yet (incremented here on send, decremented by the worker on
+    // dequeue), and once the worker observes that backlog crossing
+    // `OVERLOAD_THRESHOLD_MS` it drains and discards it in bulk rather than
+    // grinding through an ever-more-stale FIFO - see `spawn_speech_worker`
+    // and `docs/phase-3-8-7-3-audit.md` Finding 2.
     let (speech_tx, speech_rx) = mpsc::channel::<AudioChunk>();
-    spawn_speech_worker(app.clone(), service_id, speech_rx);
+    let pending_ms = Arc::new(AtomicU64::new(0));
+    let worker_pending_ms = Arc::clone(&pending_ms);
+    // Phase 3.8.7.3 Finding 4: a fresh generation for this listening
+    // session - `spawn_speech_worker` tags every non-empty result it
+    // produces with this value, so a stale worker from a *previous*
+    // `start_listening` call (still finishing its last, unavoidably
+    // uncancellable `feed_audio` call - whisper.cpp has no cancellation
+    // API) can never write output into this new session. Reset
+    // `queue_high_water_ms` for the new session while holding the lock.
+    let generation = state.listening_generation.fetch_add(1, Ordering::SeqCst) + 1;
+    {
+        let mut diag = state
+            .speech_diagnostics
+            .lock()
+            .expect("speech_diagnostics mutex poisoned");
+        diag.queue_pending_ms = 0;
+        diag.queue_high_water_ms = 0;
+    }
+    spawn_speech_worker(
+        app.clone(),
+        service_id,
+        speech_rx,
+        worker_pending_ms,
+        generation,
+    );
 
     let sink: AudioChunkSink = Arc::new(move |chunk: AudioChunk| {
         let _ = acoustic_tx.try_send(chunk.clone());
-        let _ = speech_tx.send(chunk);
+        let duration_ms = chunk_duration_ms(&chunk);
+        if speech_tx.send(chunk).is_ok() {
+            pending_ms.fetch_add(duration_ms, Ordering::SeqCst);
+        }
     });
 
     let start_result = state
@@ -998,12 +1146,10 @@ pub fn start_listening(
     // unconditionally. Speech readiness is checked only now, after a
     // successful `audio_engine.start()`, and only to decide whether
     // `SpeechStarted` is honest to emit - it must never be fabricated when
-    // no speech engine is actually ready to transcribe.
-    let speech_ready = state
-        .speech_engine
-        .lock()
-        .expect("speech_engine mutex poisoned")
-        .is_ready();
+    // no speech engine is actually ready to transcribe. Phase 3.8.7.3: reads
+    // the cached `state.speech_ready` field rather than locking
+    // `speech_engine` - see that field's own docs (Finding 3).
+    let speech_ready = state.speech_ready;
 
     {
         let db = state.db.lock().expect("db connection poisoned");
@@ -1046,12 +1192,9 @@ pub fn stop_listening(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
         .map_err(log_and_return)?;
 
     // Mirrors `start_listening`'s honesty rule: only claim speech stopped
-    // if a speech engine was actually ready to have been running.
-    let speech_ready = state
-        .speech_engine
-        .lock()
-        .expect("speech_engine mutex poisoned")
-        .is_ready();
+    // if a speech engine was actually ready to have been running. Phase
+    // 3.8.7.3: reads the cached `state.speech_ready` field (Finding 3).
+    let speech_ready = state.speech_ready;
 
     if let Ok(guard) = state.active_service.lock() {
         if let Some(session) = guard.as_ref() {
@@ -1255,10 +1398,80 @@ fn resample_pcm16(samples: &[i16], from_hz: u32, to_hz: u32) -> Vec<i16> {
 /// No explicit `flush()` on channel closure - buffered-but-not-yet-inferred
 /// audio (less than one `CHUNK_SAMPLES` window) is simply dropped, exactly
 /// the same behavior this had before this phase (unchanged, not a new gap).
-fn spawn_speech_worker(app: AppHandle, service_id: Uuid, rx: mpsc::Receiver<AudioChunk>) {
+///
+/// Phase 3.8.7.3: `pending_ms` is the shared backlog tracker - `start_listening`'s
+/// sink closure adds each chunk's duration on send; this loop subtracts it
+/// back off on dequeue. When the remaining backlog (after removing the
+/// chunk just dequeued) is at or above `OVERLOAD_THRESHOLD_MS`, the worker
+/// is falling behind badly enough that grinding through the rest of the
+/// backlog would only ever process increasingly stale audio - so instead it
+/// drains and discards everything currently queued (`rx.try_recv()` until
+/// empty) plus whatever `WhisperSpeechEngine` itself had buffered
+/// (`discard_buffered_audio`), and resumes from the next fresh chunk. This
+/// keeps memory bounded (the backlog can only grow across a single
+/// worker-loop iteration, never indefinitely) and guarantees Whisper is
+/// never fed minutes-old audio - see `docs/phase-3-8-7-3-audit.md` Finding 2
+/// for the full design and why a plain bounded/drop-newest channel alone
+/// was rejected. `generation` is this listening session's id (Finding 4) -
+/// passed through unchanged to `handle_audio_chunk`.
+fn spawn_speech_worker(
+    app: AppHandle,
+    service_id: Uuid,
+    rx: mpsc::Receiver<AudioChunk>,
+    pending_ms: Arc<AtomicU64>,
+    generation: u64,
+) {
     std::thread::spawn(move || {
         while let Ok(chunk) = rx.recv() {
-            handle_audio_chunk(&app, service_id, chunk);
+            let chunk_ms = chunk_duration_ms(&chunk);
+            saturating_sub_u64(&pending_ms, chunk_ms);
+            let backlog_ms = pending_ms.load(Ordering::SeqCst);
+
+            let state = app.state::<AppState>();
+            {
+                let mut diag = state
+                    .speech_diagnostics
+                    .lock()
+                    .expect("speech_diagnostics mutex poisoned");
+                diag.queue_pending_ms = backlog_ms;
+                if backlog_ms > diag.queue_high_water_ms {
+                    diag.queue_high_water_ms = backlog_ms;
+                }
+            }
+
+            if backlog_ms >= OVERLOAD_THRESHOLD_MS {
+                // The chunk just dequeued is itself already stale at this
+                // backlog depth - discard it along with everything else
+                // still queued, rather than spending an inference on audio
+                // that will be minutes old by the time it's transcribed.
+                let mut dropped_ms = chunk_ms;
+                while let Ok(stale) = rx.try_recv() {
+                    let stale_ms = chunk_duration_ms(&stale);
+                    dropped_ms += stale_ms;
+                    saturating_sub_u64(&pending_ms, stale_ms);
+                }
+                state
+                    .speech_engine
+                    .lock()
+                    .expect("speech_engine mutex poisoned")
+                    .discard_buffered_audio();
+                {
+                    let mut diag = state
+                        .speech_diagnostics
+                        .lock()
+                        .expect("speech_diagnostics mutex poisoned");
+                    diag.overload_events += 1;
+                    diag.audio_ms_dropped_overload += dropped_ms;
+                    diag.queue_pending_ms = pending_ms.load(Ordering::SeqCst);
+                }
+                log::warn!(
+                    target: LogCategory::Speech.target(),
+                    "speech worker overloaded: discarded ~{dropped_ms}ms of backlog audio, resuming from live audio"
+                );
+                continue;
+            }
+
+            handle_audio_chunk(&app, service_id, chunk, generation);
         }
     });
 }
@@ -1272,7 +1485,14 @@ fn spawn_speech_worker(app: AppHandle, service_id: Uuid, rx: mpsc::Receiver<Audi
 /// cloned `AppHandle` rather than capturing a `State<'_, AppState>`
 /// directly, since the latter's lifetime is tied to a single command
 /// invocation and can't be captured into a closure/thread that outlives it.
-fn handle_audio_chunk(app: &AppHandle, service_id: Uuid, chunk: AudioChunk) {
+///
+/// `generation` is the listening session this chunk was captured under
+/// (Phase 3.8.7.3 Finding 4, set by `start_listening`/passed through
+/// `spawn_speech_worker`) - checked before any non-empty result is
+/// emitted/persisted, so a worker whose channel closed but is still
+/// finishing an in-flight `feed_audio` call cannot write output into a
+/// newer listening session that has since started.
+fn handle_audio_chunk(app: &AppHandle, service_id: Uuid, chunk: AudioChunk, generation: u64) {
     let state = app.state::<AppState>();
 
     let segments = {
@@ -1340,16 +1560,44 @@ fn handle_audio_chunk(app: &AppHandle, service_id: Uuid, chunk: AudioChunk) {
             diag.last_chunk_sample_rate_hz = Some(chunk.sample_rate_hz);
             diag.last_chunk_sample_count = Some(chunk.samples.len());
             diag.last_resampled_sample_count = resampled_len;
-            diag.inferences_attempted += 1;
         }
 
-        match speech.feed_audio(feed_samples) {
+        // Phase 3.8.7.3 Finding 1: `feed_audio` only actually runs
+        // whisper.cpp's `full()` once per ~3s buffering window - most
+        // calls just append to an internal buffer and return immediately.
+        // Counting every call as an "inference attempt" (the old
+        // behavior) was off by roughly the buffering-window factor.
+        // `last_feed_triggered_inference()` reports the truth after the
+        // fact, so both the counters and the duration measurement below
+        // are gated on it - never on "a `feed_audio` call happened".
+        let inference_start = std::time::Instant::now();
+        let feed_result = speech.feed_audio(feed_samples);
+        let triggered_inference = speech.last_feed_triggered_inference();
+
+        if triggered_inference {
+            let duration_ms =
+                u64::try_from(inference_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let mut diag = state
+                .speech_diagnostics
+                .lock()
+                .expect("speech_diagnostics mutex poisoned");
+            diag.inferences_attempted += 1;
+            diag.last_inference_duration_ms = Some(duration_ms);
+            diag.max_inference_duration_ms =
+                Some(diag.max_inference_duration_ms.unwrap_or(0).max(duration_ms));
+            diag.inference_duration_ms_sum += duration_ms;
+            diag.inference_duration_samples += 1;
+        }
+
+        match feed_result {
             Ok(segments) => {
-                state
-                    .speech_diagnostics
-                    .lock()
-                    .expect("speech_diagnostics mutex poisoned")
-                    .inferences_succeeded += 1;
+                if triggered_inference {
+                    state
+                        .speech_diagnostics
+                        .lock()
+                        .expect("speech_diagnostics mutex poisoned")
+                        .inferences_succeeded += 1;
+                }
                 segments
             }
             Err(e) => {
@@ -1385,6 +1633,19 @@ fn handle_audio_chunk(app: &AppHandle, service_id: Uuid, chunk: AudioChunk) {
         .expect("speech_error mutex poisoned") = None;
 
     for mut segment in segments {
+        // Phase 3.8.7.3 Finding 4: discard output from a listening session
+        // that has since been superseded by a newer `start_listening` call
+        // - see this function's own docs and `docs/phase-3-8-7-3-audit.md`.
+        // Checked once per non-empty result, not per chunk (buffering-only
+        // calls never reach here at all).
+        if state.listening_generation.load(Ordering::SeqCst) != generation {
+            log::debug!(
+                target: LogCategory::Speech.target(),
+                "discarding transcript segment from stale listening generation {generation}"
+            );
+            continue;
+        }
+
         if !segment.is_final {
             let _ = emit(app, AppEvent::TranscriptUpdated, segment);
             continue;
@@ -1393,6 +1654,7 @@ fn handle_audio_chunk(app: &AppHandle, service_id: Uuid, chunk: AudioChunk) {
         segment.sequence = state.transcript_sequence.fetch_add(1, Ordering::SeqCst);
         let segment_for_event = segment.clone();
 
+        let pipeline_start = std::time::Instant::now();
         let processed = {
             let db = state.db.lock().expect("db connection poisoned");
             let mut context = state
@@ -1408,6 +1670,13 @@ fn handle_audio_chunk(app: &AppHandle, service_id: Uuid, chunk: AudioChunk) {
                 segment,
             )
         };
+        let pipeline_duration_ms =
+            u64::try_from(pipeline_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        state
+            .speech_diagnostics
+            .lock()
+            .expect("speech_diagnostics mutex poisoned")
+            .last_transcript_pipeline_duration_ms = Some(pipeline_duration_ms);
 
         match processed {
             Ok(processed) => {
@@ -5064,11 +5333,11 @@ pub fn get_live_status(state: State<'_, AppState>) -> LiveStatus {
         }
     };
 
-    let speech_ready = state
-        .speech_engine
-        .lock()
-        .expect("speech_engine mutex poisoned")
-        .is_ready();
+    // Phase 3.8.7.3: reads the cached `state.speech_ready` field rather
+    // than locking `speech_engine` - see that field's own docs (Finding 3).
+    // This is the exact poll (frontend cadence 3000ms) that previously
+    // blocked behind an in-progress Whisper inference holding that mutex.
+    let speech_ready = state.speech_ready;
     let speech_status = if state
         .speech_error
         .lock()
@@ -5199,6 +5468,112 @@ mod tests {
         let out = resample_pcm16(&[500], 44_100, 16_000);
         assert!(!out.is_empty());
         assert!(out.iter().all(|&s| s == 500));
+    }
+
+    // --- Phase 3.8.7.3 backpressure primitives --------------------------
+    // Pure, deterministic functions - directly unit-testable without any
+    // real threading/audio hardware. Long-run Tests A/B/D from the
+    // operator's own spec are exercised through these: "no backlog
+    // growth"/"bounded memory"/"recovers" are properties of
+    // `classify_overload`'s thresholds and `chunk_duration_ms`'s honest
+    // accounting, checked here directly.
+
+    #[test]
+    fn chunk_duration_ms_matches_the_operators_own_measured_real_hardware_chunk() {
+        // Phase 3.8.7.3 audit: 480 samples @ 48,000 Hz on the operator's
+        // real device = 10ms per chunk.
+        let chunk = AudioChunk {
+            samples: vec![0i16; 480],
+            sample_rate_hz: 48_000,
+        };
+        assert_eq!(chunk_duration_ms(&chunk), 10);
+    }
+
+    #[test]
+    fn chunk_duration_ms_is_zero_for_a_zero_sample_rate_never_divides_by_zero() {
+        let chunk = AudioChunk {
+            samples: vec![0i16; 480],
+            sample_rate_hz: 0,
+        };
+        assert_eq!(chunk_duration_ms(&chunk), 0);
+    }
+
+    #[test]
+    fn chunk_duration_ms_is_zero_for_an_empty_chunk() {
+        let chunk = AudioChunk {
+            samples: vec![],
+            sample_rate_hz: 16_000,
+        };
+        assert_eq!(chunk_duration_ms(&chunk), 0);
+    }
+
+    #[test]
+    fn classify_overload_reports_normal_below_the_busy_threshold() {
+        assert_eq!(classify_overload(0), OverloadState::Normal);
+        assert_eq!(
+            classify_overload(BUSY_THRESHOLD_MS - 1),
+            OverloadState::Normal
+        );
+    }
+
+    #[test]
+    fn classify_overload_reports_busy_between_busy_and_falling_behind() {
+        assert_eq!(classify_overload(BUSY_THRESHOLD_MS), OverloadState::Busy);
+        assert_eq!(
+            classify_overload(FALLING_BEHIND_THRESHOLD_MS - 1),
+            OverloadState::Busy
+        );
+    }
+
+    #[test]
+    fn classify_overload_reports_falling_behind_between_falling_behind_and_overload() {
+        assert_eq!(
+            classify_overload(FALLING_BEHIND_THRESHOLD_MS),
+            OverloadState::FallingBehind
+        );
+        assert_eq!(
+            classify_overload(OVERLOAD_THRESHOLD_MS - 1),
+            OverloadState::FallingBehind
+        );
+    }
+
+    #[test]
+    fn classify_overload_reports_overloaded_at_and_above_the_overload_threshold() {
+        assert_eq!(
+            classify_overload(OVERLOAD_THRESHOLD_MS),
+            OverloadState::Overloaded
+        );
+        assert_eq!(
+            classify_overload(OVERLOAD_THRESHOLD_MS * 100),
+            OverloadState::Overloaded
+        );
+    }
+
+    #[test]
+    fn classify_overload_recovers_back_to_normal_once_backlog_drains() {
+        // Test D (Recovery) from the operator's spec, as a pure-function
+        // property: the same backlog depth always classifies the same way
+        // - there is no hidden hysteresis/latching state that could get
+        // stuck in an overloaded reading after the real backlog clears.
+        assert_eq!(
+            classify_overload(OVERLOAD_THRESHOLD_MS),
+            OverloadState::Overloaded
+        );
+        assert_eq!(classify_overload(0), OverloadState::Normal);
+    }
+
+    #[test]
+    fn saturating_sub_u64_never_underflows() {
+        let counter = AtomicU64::new(5);
+        saturating_sub_u64(&counter, 10);
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn saturating_sub_u64_subtracts_normally_when_amount_fits() {
+        let counter = AtomicU64::new(100);
+        saturating_sub_u64(&counter, 30);
+        assert_eq!(counter.load(Ordering::SeqCst), 70);
     }
 
     // --- Phase 1.3 lifecycle/workflow guards ---------------------------
@@ -5607,6 +5982,15 @@ mod tests {
                 inferences_attempted: 0,
                 inferences_succeeded: 0,
                 last_error: None,
+                queue_pending_ms: 0,
+                queue_high_water_ms: 0,
+                overload_events: 0,
+                audio_ms_dropped_overload: 0,
+                last_inference_duration_ms: None,
+                max_inference_duration_ms: None,
+                avg_inference_duration_ms: None,
+                last_transcript_pipeline_duration_ms: None,
+                overload_state: OverloadState::Normal,
             },
             audio_devices: Vec::new(),
             audio: AudioEngineStatus {

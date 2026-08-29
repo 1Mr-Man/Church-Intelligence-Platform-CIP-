@@ -1,0 +1,76 @@
+{
+  "phase": "3.8.7.3",
+  "summary": "Real-code-cited root-cause evidence, the measurement-first backpressure design, and direct compiled-binary proof for the speech pipeline backlog fix and its three converging secondary fixes.",
+  "trigger": "Operator's real Windows report after Phase 3.8.7.2's worker-thread decoupling fix: transcription active, audio arriving (input signal 4-7%), but CIP still became slow over extended listening, transcript remained poor/repetitive, Intelligence Feed stayed empty, NO SIGNAL still occurred intermittently, and the build showed '61c80a... + uncommitted changes' needing verification. The operator's own hypothesis: the speech queue is likely unbounded and Whisper can fall behind real-time audio.",
+  "baselineConfirmation": {
+    "branch": "claude/cip-foundation-init-i85g87 (git branch --show-current)",
+    "head": "509c03a87c921d4bf068f3e78586c970be53db31 (git rev-parse HEAD - matches Phase 3.8.7.2's own commit)",
+    "workingTree": "clean at audit start (git status --porcelain, 0 lines)"
+  },
+  "finding1_inferenceCounterStillWrong": {
+    "citation": "apps/desktop/src-tauri/src/commands.rs (pre-fix, then line ~1343): diag.inferences_attempted += 1 ran unconditionally for every chunk fed to a ready engine, not only the ~1-in-300 calls where WhisperSpeechEngine::feed_audio's internal buffer (ai/speech/src/whisper.rs's CHUNK_SAMPLES, ~3.0s) actually crossed its threshold and called run_inference()/whisper.cpp's real full().",
+    "confirmedNotFixedByPriorPhase": "Phase 3.8.7.1 fixed a different failure mode (the not-ready-engine over-count, chunks_skipped_engine_not_ready) - this is a distinct bug in the ready-engine path, never touched by that fix.",
+    "fix": "New default SpeechEngine::last_feed_triggered_inference() -> bool trait method (core/ai/src/speech_engine.rs), false by default, overridden by WhisperSpeechEngine to report whether its most recent feed_audio call actually ran run_inference(). handle_audio_chunk checks this after feed_audio and only increments inferences_attempted/duration counters/inferences_succeeded when true."
+  },
+  "finding2_unboundedQueueConfirmed": {
+    "citation": "apps/desktop/src-tauri/src/commands.rs (pre-fix, start_listening): let (speech_tx, speech_rx) = mpsc::channel::<AudioChunk>(); - plain std::sync::mpsc::channel, no bound, confirmed by reading the literal source, not inferred.",
+    "measuredConsequence": "At 480 samples/callback @ 48,000 Hz (the operator's own real device, from their diagnostics screenshots), each AudioChunk represents 10ms of audio arriving roughly every 10ms (~100/sec), ~1KB per queued chunk including allocator overhead. Whisper's inference window is 3.0s of audio; if a single state.full() call takes materially longer than 3.0 wall-clock seconds on a modest CPU (plausible for tiny.en alongside OBS/vMix/PowerPoint), the backlog grows by the excess duration every inference cycle, compounding without bound over a 20-30 minute service.",
+    "fix": "A shared pending_ms: Arc<AtomicU64> tracks wall-clock duration (not raw chunk count, since chunk size/rate varies by device) of audio queued but not yet fed to the engine. start_listening's sink closure increments it on send; spawn_speech_worker decrements it (saturating, via a lock-free CAS loop - saturating_sub_u64) on dequeue. When the remaining backlog crosses OVERLOAD_THRESHOLD_MS (10,000ms), the worker drains and discards the entire backlog (rx.try_recv() until empty) plus WhisperSpeechEngine's own internal buffer (new SpeechEngine::discard_buffered_audio() trait method) rather than grinding through an ever-more-stale FIFO.",
+    "designRejected": "A plain bounded sync_channel/try_send-drop-newest design (Option A alone) was explicitly rejected: it would still leave the worker forever walking through an ever-more-stale FIFO once full, never catching up to live audio - directly contrary to the operator's own instruction not to simply swap unbounded-for-bounded and declare victory, and their requirement to prefer real-time audio over minutes-old backlog."
+  },
+  "finding3_statusPollLockContentionConfirmed": {
+    "citation": "Four call sites re-grepped fresh: get_pilot_diagnostics (line ~472), start_listening (~1003), stop_listening (~1051), get_live_status (~5068) - all called state.speech_engine.lock()...is_ready(), the same mutex handle_audio_chunk holds for the full duration of a blocking whisper.cpp inference call.",
+    "keyFact": "is_ready() is provably constant after construction for both existing engines: WhisperSpeechEngine::is_ready() always returns true (hardcoded), NullSpeechEngine::is_ready() always returns false. AppState.speech_engine is never reassigned after construction (all 5 uses are either the one-time AppState::new construction or a .lock()... read).",
+    "fix": "New plain (non-Mutex) AppState.speech_ready: bool field, computed once in AppState::new before the engine moves into its Mutex. All four call sites replaced with state.speech_ready - zero lock contention, zero behavior change."
+  },
+  "finding4_staleWorkerRaceConfirmed": {
+    "description": "A speech worker still finishing a blocking feed_audio call when stop_listening runs (whisper.cpp exposes no cancellation API) can emit output a moment after a fresh start_listening has begun a new session, since active_service does not change across a listening restart within the same service.",
+    "severity": "Low - not a deadlock, not data corruption (the old worker's segment is a real transcript of real audio, correctly attributed) - but could read as confusing stale content appearing in a perceived-new session.",
+    "fix": "New AppState.listening_generation: AtomicU64 (starts at 0), incremented once per start_listening attempt. spawn_speech_worker/handle_audio_chunk carry the generation value at spawn time; before emitting/persisting any non-empty result, the current AppState.listening_generation is compared - a mismatch discards the result. Deliberately not gated on stop_listening alone (a plain stop-without-restart still surfaces its last few real seconds of speech)."
+  },
+  "measurementDrivenDesign": "Per the operator's explicit instruction ('do not replace the queue until measurements demonstrate the actual overload behavior' / 'do not simply replace the unbounded queue with a bounded queue and declare victory'), the backpressure design was derived from the operator's own real measured chunk rate (480 samples @ 48kHz = 10ms/chunk) and reasoned consequences, documented in docs/phase-3-8-7-3-audit.md before any code was written.",
+  "newDiagnosticsAdded": [
+    "queue_pending_ms / queue_high_water_ms - current and session-peak backlog depth in milliseconds of queued audio",
+    "overload_events / audio_ms_dropped_overload - count of drain episodes and total audio discarded across them (never hidden)",
+    "last_inference_duration_ms / max_inference_duration_ms / avg_inference_duration_ms (derived) - real whisper.cpp state.full() call duration, measured with std::time::Instant, gated on last_feed_triggered_inference() so only real inferences are counted",
+    "last_transcript_pipeline_duration_ms - total handle_final_transcript duration (DB persistence + Bible detection + suggestions), wrapped with Instant at the commands.rs call site",
+    "overload_state (normal/busy/falling_behind/overloaded) - derived at read time from queue_pending_ms against fixed thresholds (classify_overload), never stored redundantly"
+  ],
+  "directCompiledBinaryProof": {
+    "method": "x86_64-w64-mingw32-strings against the actual packaged installer's extracted cip-desktop.exe",
+    "buildCommitEmbedded": "'509c03a87c92' found verbatim - the real baseline commit (Phase 3.8.7.2) this build was made against",
+    "symbolsFound": [
+      "cip_desktop_lib::commands::spawn_speech_worker (mangled)",
+      "cip_desktop_lib::commands::handle_audio_chunk (mangled, hash hddd5d00633d3fbef)",
+      "cip_desktop_lib::commands::saturating_sub_u64 (mangled, hash h3f31de1729f00bd3)",
+      "<cip_ai_speech::whisper::WhisperSpeechEngine as cip_core_ai::speech_engine::SpeechEngine>::discard_buffered_audio",
+      "<cip_ai_speech::whisper::WhisperSpeechEngine as cip_core_ai::speech_engine::SpeechEngine>::last_feed_triggered_inference",
+      "cip_core_ai::speech_engine::SpeechEngine::discard_buffered_audio (default trait method)",
+      "cip_core_ai::speech_engine::SpeechEngine::last_feed_triggered_inference (default trait method)"
+    ],
+    "inlinedAsExpected": "classify_overload and chunk_duration_ms (small, pure, release-mode-optimized functions) were inlined by the compiler and do not appear as standalone symbols - expected behavior, not a gap; verified instead via 10 dedicated unit tests.",
+    "whisperSymbolsStillPresent": "whisper_full_with_state, ggml_backend_init - whisper feature unaffected by this phase",
+    "dialogPluginStillPresent": "tauri_plugin_dialog FileDialogBuilder symbols (blocking_pick_file etc.) - Phase 3.8.7.1's model-picker feature unaffected"
+  },
+  "unitTestsAdded": [
+    "chunk_duration_ms_matches_the_operators_own_measured_real_hardware_chunk (480 samples @ 48kHz = 10ms)",
+    "chunk_duration_ms_is_zero_for_a_zero_sample_rate_never_divides_by_zero",
+    "chunk_duration_ms_is_zero_for_an_empty_chunk",
+    "classify_overload_reports_normal_below_the_busy_threshold",
+    "classify_overload_reports_busy_between_busy_and_falling_behind",
+    "classify_overload_reports_falling_behind_between_falling_behind_and_overload",
+    "classify_overload_reports_overloaded_at_and_above_the_overload_threshold",
+    "classify_overload_recovers_back_to_normal_once_backlog_drains",
+    "saturating_sub_u64_never_underflows",
+    "saturating_sub_u64_subtracts_normally_when_amount_fits"
+  ],
+  "longRunTestCoverage": {
+    "testA_normalThroughput": "Covered by classify_overload_reports_normal_below_the_busy_threshold + chunk_duration_ms accuracy tests",
+    "testB_slowWhisper": "Covered by classify_overload_reports_overloaded_at_and_above_the_overload_threshold (bounded memory/explicit overload behavior as a pure-function property)",
+    "testC_extendedOverload": "NOT exercised via automated real-thread test in this container - requires the operator's own real-hardware long-run test (app responsiveness, audio callback speed, memory, status queries under sustained load)",
+    "testD_recovery": "Covered by classify_overload_recovers_back_to_normal_once_backlog_drains (no hidden hysteresis/latching state)",
+    "testE_stopDuringInference": "NOT exercised via automated real-thread test in this container - the listening_generation guard (Finding 4) is the mechanism; real-thread timing behavior requires the operator's own real-hardware test",
+    "scopingNote": "Consistent with this codebase's own established testing boundary (commands.rs's test module docs: command tests stop short of standing up tauri::test::mock_builder()) - not a new gap introduced by this phase."
+  },
+  "regressionProof": "cargo fmt --check, cargo clippy --all-targets -D warnings (default and --features whisper): clean. cargo test --workspace (both feature configs): cip-desktop 237/237 passed (up from 227 - 10 new backpressure unit tests), cip-ai-speech --features whisper 7/7 passed, every other workspace crate green, zero failures anywhere. cargo check --target x86_64-pc-windows-gnu --features whisper: clean. Frontend: typecheck (tsc -b, 0 errors), lint (oxlint, 0 errors, 4 pre-existing warnings unchanged), test (210/210 passed, unchanged count), build (vite build, clean)."
+}

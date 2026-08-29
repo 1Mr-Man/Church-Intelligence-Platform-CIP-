@@ -1,0 +1,36 @@
+{
+  "phase": "3.8.7.3",
+  "summary": "Direct extraction and inspection of the rebuilt NSIS installer, confirming Phase 3.8.6.1's DLL fix, Phase 3.8.7.1's model-provisioning feature, and Phase 3.8.7.2's worker-thread decoupling all still hold after this phase's backpressure/instrumentation fix.",
+  "extractionMethod": "7z x \"Church Intelligence Platform_0.1.0_x64-setup.exe\"",
+  "installerChecksum": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "78ecdf793b6b64993db703714ea8e46316c0a7d429af13b581f20cdfa06ad3c2",
+    "sizeBytes": 8580489,
+    "previousPhaseSha256": "e9fd4d2d28719ca28a6b7269498d0b0f4a542bb12dc2dcde43c28f106032ed7c",
+    "previousPhaseSizeBytes": 8566926,
+    "sizeChangeNote": "Slightly larger (+13563 bytes) - expected for a phase that adds real new fields/logic (backlog tracker, overload classification, 9 new diagnostics fields, listening-generation guard, two new SpeechEngine trait methods) rather than a pure relocation."
+  },
+  "extractedInstallerContents": [
+    "libwinpthread-1.dll",
+    "cip-desktop.exe",
+    "WebView2Loader.dll",
+    "uninstall.exe",
+    "libstdc++-6.dll",
+    "libgcc_s_seh-1.dll"
+  ],
+  "runtimeDllsStillPresent": {
+    "libstdc++-6.dll": { "sizeBytes": 4596950 },
+    "libgcc_s_seh-1.dll": { "sizeBytes": 169919 },
+    "libwinpthread-1.dll": { "sizeBytes": 94077 },
+    "note": "Byte sizes identical to prior phases' - same source DLLs, same toolchain, unaffected by this phase. Per-rebuild SHA-256 non-reproducibility (strip rewrites a PE timestamp field, documented in Phase 3.8.7.1's own evidence) means byte-size/content comparison, not raw checksum equality, is the meaningful check here."
+  },
+  "cipDesktopExeVerification": {
+    "extractedSizeBytes": 34422976,
+    "fileCommand": "PE32+ executable (GUI) x86-64 (stripped to external PDB), for MS Windows, 11 sections",
+    "buildCommitEmbeddedProof": "x86_64-w64-mingw32-strings finds the literal substring '509c03a87c92' embedded in the binary - the real Phase 3.8.7.2 baseline commit this build was made against, confirming the build-commit metadata fix (from Phase 3.8.7.1) continues to work correctly.",
+    "backpressureFixSymbolProof": "x86_64-w64-mingw32-strings finds cip_desktop_lib::commands::spawn_speech_worker, cip_desktop_lib::commands::handle_audio_chunk, and cip_desktop_lib::commands::saturating_sub_u64 mangled symbols, plus both new SpeechEngine trait method overrides on WhisperSpeechEngine (discard_buffered_audio, last_feed_triggered_inference) and their default-trait-method counterparts on cip_core_ai::speech_engine::SpeechEngine - direct proof this phase's fix is genuinely compiled into this exact binary. classify_overload/chunk_duration_ms were inlined by the release-mode optimizer (expected for small pure functions) and are verified via unit tests instead.",
+    "whisperFeatureSymbolProof": "whisper_full_with_state, ggml_backend_init, ggml_backend_init_by_name, ggml_backend_init_by_type still present - unaffected by this phase.",
+    "dialogPluginSymbolProof": "tauri_plugin_dialog::FileDialogBuilder::blocking_pick_file and related mangled symbols still present - Phase 3.8.7.1's model-picker feature unaffected."
+  },
+  "automatedVerification": "scripts/build-windows-whisper.sh's own final step (7z-extraction DLL-presence check) passed on this build, unchanged automation from Phase 3.8.6.1 - 'confirmed: libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll are all present in the installer'."
+}
