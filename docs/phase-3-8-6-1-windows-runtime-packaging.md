@@ -191,19 +191,21 @@ changed, matching the narrow scope the operator's own spec described.
 - **Environment B (Xvfb)**: **NOT AVAILABLE THIS SESSION**, unchanged
   from Phase 3.8.5/3.8.6's finding (a pre-existing container limitation,
   unrelated to this phase - nothing about the GUI/webview layer changed).
-- **Environment C (real Windows hardware)**: **NOT YET VERIFIED.** This
-  is the whole point of this phase - the prior artifact's Environment C
-  failure is what triggered it, and this phase's fix has not yet been
-  re-tested on real Windows hardware. That re-test (the operator's own
-  Test A/B/C) is the decisive, pending gate.
+- **Environment C (real Windows hardware)**: **CONFIRMED.** The operator
+  installed and launched this exact rebuilt artifact on their real
+  Windows machine: no `libstdc++-6.dll` error (the defect this phase
+  exists to fix), the main UI and Live Service view both opened,
+  `Stereo Mix (Realtek(R) Audio)` was selectable, and audio capture
+  genuinely worked (`SIGNAL CAPTURED`, input level 3%-6%). See
+  `pilot-evidence/3.8.6.1/windows/real-windows-relaunch-confirmation.json`.
+  Transcription itself then failed (`SPEECH ERROR`) - that is Phase
+  3.8.7's scope, not this phase's: everything this phase was responsible
+  for (packaging, launch, DLL resolution, UI/audio reachability) is
+  confirmed working.
 
 ## Known limitations
 
-- The real-Windows relaunch test (install, launch, confirm no
-  missing-DLL error, confirm the main window opens) has not yet been
-  performed for this rebuilt artifact - that is this phase's pending
-  gate, to be run by the operator.
-- If that re-test reports a *different* missing DLL, that is not a
+- If a future rebuild ever reports a *different* missing DLL, that is not a
   failure of this phase's audit - it is the next concrete dependency to
   investigate with the same `objdump -p` method, per the operator's own
   framing.
@@ -218,12 +220,10 @@ changed, matching the narrow scope the operator's own spec described.
 
 ## Deferred work
 
-The operator's own real-Windows re-test: Test A (fresh install +
-launch succeeds), Test B (no missing-DLL error, or - if a different DLL
-is reported missing - that specific new dependency), Test C (main UI
-opens, Live Service view opens, audio devices enumerate). Only after
-this passes does Phase 3.8.7 (Real Whisper Model and Inference
-Verification) begin, per the operator's explicit sequencing.
+None remaining for this phase - the operator's real-Windows re-test
+(Test A/B/C) has been performed and passed. Whisper model/inference
+investigation now proceeds as Phase 3.8.7, per the operator's explicit
+sequencing.
 
 ## Final gate
 
@@ -234,10 +234,11 @@ Verification) begin, per the operator's explicit sequencing.
 | DLL architecture verified | DONE - all three confirmed PE32+ x86-64; script refuses to package a mismatched-architecture DLL |
 | Packaging automated | DONE - `scripts/build-windows-whisper.sh` stages DLLs from the active toolchain before the first build; `tauri.windows.conf.json` wires them into the NSIS bundle automatically |
 | Installer contains dependencies | DONE - verified by direct `7z` extraction of the actual final `installer.exe`, not just the staging directory |
-| Real Windows launch | **NOT YET PERFORMED** - pending the operator's own re-test |
-| No missing DLL error | **NOT YET VERIFIED** on real hardware - pending the operator's own re-test |
+| Real Windows launch | **CONFIRMED** - operator installed and launched this exact artifact with no error |
+| No missing DLL error | **CONFIRMED** - the `libstdc++-6.dll` error this phase exists to fix did not recur |
 
-**Phase 3.8.6.1: Environment A/build-time verification PASS. Real
-Windows relaunch (Environment C) NOT YET VERIFIED - this is the
-decisive, pending gate before Phase 3.8.7 may begin.** Phase 3.8.7 is
-not started automatically.
+**Phase 3.8.6.1: PASS.** Every gate item is now confirmed, including
+real Windows hardware (Environment C) - see
+`pilot-evidence/3.8.6.1/windows/real-windows-relaunch-confirmation.json`.
+Phase 3.8.7 (Real Whisper Runtime Failure Investigation) is now
+unblocked and begins next.
