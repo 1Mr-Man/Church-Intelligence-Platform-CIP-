@@ -503,6 +503,33 @@ fn classify_overload(pending_ms: u64) -> OverloadState {
     }
 }
 
+/// Phase 3.8.7.7: on hardware where a single Whisper inference's own
+/// wall-clock duration already exceeds `OVERLOAD_THRESHOLD_MS` (confirmed
+/// on real Windows hardware: avg inference 14,991ms vs. a 10s threshold -
+/// see `docs/phase-3-8-7-7-audit.md`), `spawn_speech_worker`'s overload
+/// branch fires once after *every* successful inference, not only when
+/// the pipeline is genuinely, persistently falling behind. Discarding the
+/// stale audio backlog on every such crossing is still correct (Phase
+/// 3.8.7.3's own design - never process minutes-old audio), but wiping
+/// `TranscriptSegmenter`'s already-accumulated, validly-transcribed text
+/// (Phase 3.8.7.5's `segmenter.reset()`) on the very first isolated
+/// crossing destroys real output for no benefit: that text came from
+/// audio that was captured essentially continuously with the backlog
+/// being dropped, not across a genuine gap.
+///
+/// `consecutive_overloads` counts overload crossings since the worker was
+/// last caught up (reset to 0 on every normal dequeue - see
+/// `spawn_speech_worker`). A value of `1` means this is the first crossing
+/// since the backlog last cleared - fully explained by the inference that
+/// just finished, expected to resolve on its own once the drain empties
+/// the channel. Only `>= 2` (backlog still elevated on the very next
+/// dequeue, immediately after already draining once) indicates the
+/// pipeline cannot keep up independent of any single inference - genuine
+/// sustained overload, where resetting the segmenter remains correct.
+fn should_reset_segmenter_on_overload(consecutive_overloads: u32) -> bool {
+    consecutive_overloads >= 2
+}
+
 /// Estimated wall-clock duration (ms) of one `AudioChunk`'s worth of
 /// audio, from its own reported sample rate and sample count - a pure
 /// function so it's directly unit-testable. Chunk size/rate varies by
@@ -1428,6 +1455,10 @@ fn spawn_speech_worker(
         // behind a `Mutex` (mirrors `acoustic::AcousticWorkerState`). See
         // `segmentation.rs`'s own module docs.
         let mut segmenter = TranscriptSegmenter::new();
+        // Phase 3.8.7.7: counts overload crossings since the worker was
+        // last caught up - see `should_reset_segmenter_on_overload`'s own
+        // docs. Owned exclusively by this thread, same as `segmenter`.
+        let mut consecutive_overloads: u32 = 0;
 
         while let Ok(chunk) = rx.recv() {
             let chunk_ms = chunk_duration_ms(&chunk);
@@ -1462,13 +1493,21 @@ fn spawn_speech_worker(
                     .lock()
                     .expect("speech_engine mutex poisoned")
                     .discard_buffered_audio();
-                // Phase 3.8.7.5: discard any partially-accumulated logical
-                // segment too - otherwise pre-overload text would be
-                // spliced onto unrelated post-recovery text, the same
-                // discontinuous-buffer problem `discard_buffered_audio`
-                // exists to prevent one layer down. See
-                // `docs/phase-3-8-7-5-audit.md`.
-                segmenter.reset();
+                // Phase 3.8.7.7: only discard the segmenter's already-
+                // accumulated text when overload has persisted across
+                // consecutive dequeues - a single isolated crossing (the
+                // common case on hardware whose own inference duration
+                // alone exceeds `OVERLOAD_THRESHOLD_MS`) means that text
+                // is real, contiguous output that would otherwise flush
+                // normally once the backlog clears. See
+                // `should_reset_segmenter_on_overload`'s own docs and
+                // `docs/phase-3-8-7-7-audit.md`. Genuine sustained overload
+                // (Phase 3.8.7.5's original concern - pre-overload text
+                // spliced onto unrelated post-recovery text) still resets.
+                consecutive_overloads = consecutive_overloads.saturating_add(1);
+                if should_reset_segmenter_on_overload(consecutive_overloads) {
+                    segmenter.reset();
+                }
                 {
                     let mut diag = state
                         .speech_diagnostics
@@ -1484,6 +1523,7 @@ fn spawn_speech_worker(
                 );
                 continue;
             }
+            consecutive_overloads = 0;
 
             handle_audio_chunk(&app, service_id, chunk, generation, &mut segmenter);
         }
@@ -5848,6 +5888,30 @@ mod tests {
         let counter = AtomicU64::new(5);
         saturating_sub_u64(&counter, 10);
         assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn should_not_reset_segmenter_on_the_first_isolated_overload_crossing() {
+        // Phase 3.8.7.7: on hardware whose own inference duration alone
+        // exceeds `OVERLOAD_THRESHOLD_MS`, every successful inference
+        // triggers exactly one overload crossing (confirmed on real
+        // Windows hardware - see docs/phase-3-8-7-7-audit.md). That single
+        // crossing must not wipe the segmenter's just-produced, valid
+        // text - it is expected to resolve once the drain clears the
+        // channel.
+        assert!(!should_reset_segmenter_on_overload(0));
+        assert!(!should_reset_segmenter_on_overload(1));
+    }
+
+    #[test]
+    fn should_reset_segmenter_once_overload_persists_across_consecutive_dequeues() {
+        // Backlog still >= threshold on the very next dequeue, immediately
+        // after already draining once, means the pipeline cannot keep up
+        // independent of any single inference - genuine sustained
+        // overload, where Phase 3.8.7.5's original concern (pre-overload
+        // text spliced onto unrelated post-recovery text) still applies.
+        assert!(should_reset_segmenter_on_overload(2));
+        assert!(should_reset_segmenter_on_overload(5));
     }
 
     #[test]

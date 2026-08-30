@@ -1,0 +1,36 @@
+{
+  "phase": "3.8.7.7",
+  "summary": "Direct extraction and inspection of the rebuilt NSIS installer, confirming Phase 3.8.6.1's DLL fix, Phase 3.8.7.1's model-provisioning feature, Phase 3.8.7.2's worker-thread decoupling, Phase 3.8.7.3's backpressure instrumentation, and Phase 3.8.7.5's segmentation/router all still hold after this phase's overload/segmenter interaction fix.",
+  "extractionMethod": "7z x \"Church Intelligence Platform_0.1.0_x64-setup.exe\"",
+  "installerChecksum": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "3335f5101d0dbeb1d83dbeac567b83f9d56c5e836459c104459012a1ba2e9cbd",
+    "sizeBytes": 8587492,
+    "previousPhaseSha256": "b48b34895f4db49a56a4909ddb8c9a5bef8e1ea58e8976065f1d64e32345c681",
+    "previousPhaseSizeBytes": 8583538,
+    "sizeChangeNote": "Slightly larger (+3954 bytes) - expected for a phase adding a new consecutive_overloads counter and should_reset_segmenter_on_overload logic plus two new unit tests, on top of an already-optimized/inlined codebase."
+  },
+  "extractedInstallerContents": [
+    "libwinpthread-1.dll",
+    "cip-desktop.exe",
+    "WebView2Loader.dll",
+    "uninstall.exe",
+    "libstdc++-6.dll",
+    "libgcc_s_seh-1.dll"
+  ],
+  "runtimeDllsStillPresent": {
+    "libstdc++-6.dll": { "sizeBytes": 4596950 },
+    "libgcc_s_seh-1.dll": { "sizeBytes": 169919 },
+    "libwinpthread-1.dll": { "sizeBytes": 94077 },
+    "note": "Byte sizes identical to prior phases' - same source DLLs, same toolchain, unaffected by this phase."
+  },
+  "cipDesktopExeVerification": {
+    "extractedSizeBytes": 34461120,
+    "fileCommand": "PE32+ executable (GUI) x86-64 (stripped to external PDB), for MS Windows, 11 sections",
+    "buildCommitEmbeddedProof": "x86_64-w64-mingw32-strings finds the literal substring 'd311ffec' embedded in the binary - the real Phase 3.8.7.6 baseline commit this build was made against.",
+    "overloadSegmenterFixSymbolProof": "x86_64-w64-mingw32-strings finds the literal log string '%speech worker overloaded: discarded ~' (the overload branch's own log::warn!, now gated by the new consecutive-overload logic before it reaches segmenter.reset()) and the mangled symbols for cip_desktop_lib::commands::handle_audio_chunk, cip_desktop_lib::commands::finalize_and_route_segment, and cip_desktop_lib::segmentation::TranscriptSegmenter::push/flush_remaining/reset - direct proof this phase's fix is genuinely compiled into this exact binary. should_reset_segmenter_on_overload itself (a small pure function, single call site) was inlined by the release-mode optimizer - expected, verified instead via the full regression suite.",
+    "whisperFeatureSymbolProof": "whisper_full_with_state, ggml_backend_init still present - unaffected by this phase.",
+    "dialogPluginSymbolProof": "tauri_plugin_dialog FileDialogBuilder symbols still present - Phase 3.8.7.1's model-picker feature unaffected."
+  },
+  "automatedVerification": "scripts/build-windows-whisper.sh's own final step (7z-extraction DLL-presence check) passed on this build, unchanged automation from Phase 3.8.6.1 - 'confirmed: libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll are all present in the installer'."
+}

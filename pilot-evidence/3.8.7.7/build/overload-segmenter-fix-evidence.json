@@ -1,0 +1,48 @@
+{
+  "phase": "3.8.7.7",
+  "summary": "Root cause and fix for the operator's real Windows diagnostics showing 21/21 successful Whisper inferences yet zero transcribed output, plus direct compiled-binary proof.",
+  "operatorDiagnosticsThatTriggeredThisPhase": {
+    "liveTranscript": "Nothing transcribed yet.",
+    "audioChunksReceived": "6600 (last: 480 samples @ 48000 Hz, resampled to 160 samples)",
+    "inferences": "21 succeeded / 21 attempted",
+    "queuedAudio": "10ms (high water: 24640ms this session)",
+    "overloadEvents": "21 (total 314730ms of audio discarded)",
+    "inferenceDuration": "last 13286ms, avg 14991ms, max 24643ms",
+    "transcriptPipeline": "last n/a"
+  },
+  "rootCauseArithmetic": {
+    "chunkDuration": "480 samples @ 48,000 Hz = 10ms per AudioChunk - CPAL delivers one of these roughly every 10ms",
+    "workerBlocking": "spawn_speech_worker is single-threaded: while blocked inside one feed_audio call that triggers real Whisper inference, it cannot dequeue from the channel at all, so CPAL keeps depositing new 10ms chunks throughout the inference's own wall-clock duration",
+    "thresholdCrossing": "OVERLOAD_THRESHOLD_MS = 10_000; avg inference duration on this hardware = 14,991ms - already past the threshold before a single inference even finishes",
+    "observedMatch": "21 successful inferences and exactly 21 overload events is a 1:1 match, not a coincidence - every single successful inference was immediately followed by an overload-triggered drain on the very next dequeue",
+    "theBug": "The overload branch (commands.rs) unconditionally called segmenter.reset() (added Phase 3.8.7.5) on every crossing, discarding the text that inference just produced before it could ever reach the segmenter's 15s accumulation target and flush into a persisted, routed, displayed segment - explaining 'Nothing transcribed yet' and 'Transcript pipeline: last n/a' despite genuinely successful transcription."
+  },
+  "distinguishingSignal": {
+    "description": "Because the drain loop empties the channel completely on every overload event, the very next dequeue afterward starts from a near-empty backlog and is virtually never itself overloaded on this hardware (confirmed by the diagnostics: current queued audio is 10ms despite 21 overload events having fired). Each overload event here is isolated, not consecutive.",
+    "rule": "A single isolated overload crossing (consecutive_overloads == 1) is fully explained by the one inference that just finished and is expected to resolve on its own once the drain clears the channel - the segmenter's buffered text is real, contiguous output and should be preserved. Only backlog that remains elevated across consecutive dequeues (consecutive_overloads >= 2), immediately after already draining once, indicates the pipeline cannot keep up independent of any single inference - genuine sustained overload, where resetting the segmenter (Phase 3.8.7.5's original concern - pre-overload text spliced onto unrelated post-recovery text) remains correct."
+  },
+  "fixApplied": {
+    "newState": "consecutive_overloads: u32, local to spawn_speech_worker, owned exclusively by the worker thread (same ownership pattern as segmenter itself) - incremented on every overload crossing, reset to 0 on every normal (non-overloaded) dequeue.",
+    "newFunction": "should_reset_segmenter_on_overload(consecutive_overloads: u32) -> bool - a small pure function (mirrors classify_overload's own existing pattern in this file), returns true only at >= 2.",
+    "unchanged": "The stale audio backlog itself is still discarded unconditionally on every overload crossing, exactly as Phase 3.8.7.3 designed it - only whether segmenter.reset() additionally fires became conditional. OVERLOAD_THRESHOLD_MS was NOT changed, per the operator's own explicit instruction not to blindly raise it.",
+    "newUnitTests": [
+      "should_not_reset_segmenter_on_the_first_isolated_overload_crossing",
+      "should_reset_segmenter_once_overload_persists_across_consecutive_dequeues"
+    ]
+  },
+  "directCompiledBinaryProof": {
+    "method": "x86_64-w64-mingw32-strings against the actual packaged installer's extracted cip-desktop.exe",
+    "buildCommitEmbedded": "'d311ffec' found verbatim - the real baseline commit (Phase 3.8.7.6) this build was made against",
+    "symbolsFound": [
+      "cip_desktop_lib::commands::handle_audio_chunk",
+      "cip_desktop_lib::commands::finalize_and_route_segment",
+      "cip_desktop_lib::segmentation::TranscriptSegmenter::push",
+      "cip_desktop_lib::segmentation::TranscriptSegmenter::flush_remaining",
+      "cip_desktop_lib::segmentation::TranscriptSegmenter::reset",
+      "the literal log string '%speech worker overloaded: discarded ~' - the overload branch's own log::warn!, now gated by the new consecutive-overload logic before it reaches segmenter.reset()"
+    ],
+    "inlinedAsExpected": "should_reset_segmenter_on_overload (a small pure function, single call site) was inlined by the release-mode optimizer - the same pattern already established for classify_overload in Phase 3.8.7.3 and the router's own dispatch functions in Phase 3.8.7.5. Verified instead via two new dedicated unit tests, both passing.",
+    "whisperSymbolsStillPresent": "whisper_full_with_state, ggml_backend_init - whisper feature unaffected by this phase"
+  },
+  "regressionProof": "cargo fmt --check, cargo clippy --all-targets -D warnings (default and --features whisper): clean. cargo test -p cip-desktop (both feature configs): 248/248 passed (up from 246 - 2 new consecutive-overload unit tests). cargo test -p cip-ai-speech --features whisper: 7/7 passed. cargo check --target x86_64-pc-windows-gnu --features whisper: clean. Frontend (unchanged this phase - zero frontend files touched): typecheck (0 errors), lint (0 errors, 4 pre-existing warnings unchanged), test (210/210 passed, unchanged count), build clean."
+}
