@@ -32,19 +32,109 @@
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
-/// The display window's Tauri label - distinct from `"main"` (the
-/// operator's own window, declared in `tauri.conf.json`). Never
-/// statically declared in `tauri.conf.json`: the window is created only
-/// when an operator explicitly opens or displays something (spec section
-/// 18 - never opened automatically, including at startup).
-pub const DISPLAY_WINDOW_LABEL: &str = "display";
+/// Phase 3.10: the three display roles CIP can drive simultaneously.
+///
+/// - `Stage`: the primary congregation-facing output - this is the *only*
+///   display CIP supported before this phase. Its window label (`"display"`)
+///   is deliberately unchanged, so every pre-3.10 behavior for this screen
+///   (including `display_presentation`'s auto-open) is identical.
+/// - `Confidence`: an operator/platform-facing monitor. Mirrors the same
+///   active item; the frontend renders it with additional operator-only
+///   metadata already present in the existing broadcast payload (template,
+///   auto-detected vs. manual) - never new or fabricated data.
+/// - `Lobby`: an overflow-room screen. Mirrors Stage exactly.
+///
+/// All three ever show, at most, the one `Active` `PresentationItem` a
+/// service can have (spec section 10, unchanged by this phase) - "multi-
+/// screen" means the same output reaching more places, not more outputs.
+/// See `docs/phase-3-10-multi-screen-audit.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplayScreen {
+    Stage,
+    Confidence,
+    Lobby,
+}
 
-/// Whether the display window currently exists (open or merely not yet
-/// closed) - `false` after `close_display_window` or a manual close, and
-/// always `false` immediately after app startup (nothing creates it
-/// eagerly).
-pub fn is_display_window_open(app: &AppHandle) -> bool {
-    app.get_webview_window(DISPLAY_WINDOW_LABEL).is_some()
+impl DisplayScreen {
+    pub const ALL: [DisplayScreen; 3] = [
+        DisplayScreen::Stage,
+        DisplayScreen::Confidence,
+        DisplayScreen::Lobby,
+    ];
+
+    /// The Tauri window label - distinct from `"main"` (the operator's own
+    /// window, declared in `tauri.conf.json`). Never statically declared in
+    /// `tauri.conf.json`: a screen's window is created only when an
+    /// operator explicitly opens or displays something (spec section 18 -
+    /// never opened automatically, including at startup).
+    pub fn window_label(&self) -> &'static str {
+        match self {
+            DisplayScreen::Stage => "display",
+            DisplayScreen::Confidence => "display-confidence",
+            DisplayScreen::Lobby => "display-lobby",
+        }
+    }
+
+    /// The native OS window title bar text.
+    pub fn window_title(&self) -> &'static str {
+        match self {
+            DisplayScreen::Stage => "CIP Presentation Display",
+            DisplayScreen::Confidence => "CIP Confidence Monitor",
+            DisplayScreen::Lobby => "CIP Overflow Display",
+        }
+    }
+
+    /// The operator-facing label shown in the Presentation card's screen
+    /// controls - distinct from `window_title()` (the OS title bar).
+    pub fn operator_label(&self) -> &'static str {
+        match self {
+            DisplayScreen::Stage => "Stage",
+            DisplayScreen::Confidence => "Confidence Monitor",
+            DisplayScreen::Lobby => "Lobby / Overflow",
+        }
+    }
+
+    /// The stable snake_case identifier used on the wire (Tauri command
+    /// argument, `get_presentation_display_state` response) - mirrored by
+    /// the frontend's `PresentationScreen` type.
+    pub fn id(&self) -> &'static str {
+        match self {
+            DisplayScreen::Stage => "stage",
+            DisplayScreen::Confidence => "confidence",
+            DisplayScreen::Lobby => "lobby",
+        }
+    }
+
+    /// Parses the wire identifier back into a `DisplayScreen` - `None` for
+    /// anything else, so an unrecognized screen id is rejected explicitly
+    /// by the caller rather than silently defaulting to one.
+    pub fn parse(id: &str) -> Option<DisplayScreen> {
+        match id {
+            "stage" => Some(DisplayScreen::Stage),
+            "confidence" => Some(DisplayScreen::Confidence),
+            "lobby" => Some(DisplayScreen::Lobby),
+            _ => None,
+        }
+    }
+}
+
+/// Whether `screen`'s display window currently exists (open or merely not
+/// yet closed) - `false` after that screen's `close_display_window` or a
+/// manual close, and always `false` immediately after app startup (nothing
+/// creates any screen eagerly).
+pub fn is_display_window_open(app: &AppHandle, screen: DisplayScreen) -> bool {
+    app.get_webview_window(screen.window_label()).is_some()
+}
+
+/// Whether *any* of the three screens currently has an open window -
+/// Phase 3.10's generalization of the pre-3.10 single-window "is the
+/// display open" check, used to decide whether closing/destroying one
+/// screen's window should reconcile the active item to `Stopped` (only
+/// when it was the *last* screen still showing it).
+pub fn any_display_window_open(app: &AppHandle) -> bool {
+    DisplayScreen::ALL
+        .into_iter()
+        .any(|screen| is_display_window_open(app, screen))
 }
 
 /// Opens the display window if it doesn't already exist, or brings an
@@ -75,8 +165,8 @@ pub fn is_display_window_open(app: &AppHandle) -> bool {
 /// which are `async fn` for exactly this reason - see
 /// `docs/phase-3-8-4-audit.md` section D for the real Windows evidence and
 /// the exact vendored-source citation this is based on.
-pub fn open_display_window(app: &AppHandle) -> tauri::Result<()> {
-    if let Some(existing) = app.get_webview_window(DISPLAY_WINDOW_LABEL) {
+pub fn open_display_window(app: &AppHandle, screen: DisplayScreen) -> tauri::Result<()> {
+    if let Some(existing) = app.get_webview_window(screen.window_label()) {
         existing.show()?;
         existing.set_focus()?;
         return Ok(());
@@ -84,10 +174,10 @@ pub fn open_display_window(app: &AppHandle) -> tauri::Result<()> {
 
     let window = WebviewWindowBuilder::new(
         app,
-        DISPLAY_WINDOW_LABEL,
+        screen.window_label(),
         WebviewUrl::App("index.html".into()),
     )
-    .title("CIP Presentation Display")
+    .title(screen.window_title())
     .inner_size(1280.0, 720.0)
     .resizable(true)
     .visible(true)
@@ -139,17 +229,21 @@ pub fn open_display_window(app: &AppHandle) -> tauri::Result<()> {
     let app_handle = app.clone();
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::Destroyed) {
-            // Best-effort: the display window disappearing (manual close,
+            // Best-effort: a display screen disappearing (manual close,
             // Alt+F4, OS window-manager action) must never leave an
             // `Active` row persisted with nothing actually showing it -
-            // reconcile exactly as an explicit Stop would. Errors are
-            // logged, never propagated (there is no command call site
-            // here to return them to).
-            if let Err(e) = crate::commands::clear_active_presentation(&app_handle) {
-                log::warn!(
-                    target: crate::logging::LogCategory::Presentation.target(),
-                    "failed to reconcile presentation state after the display window closed: {e}"
-                );
+            // reconcile exactly as an explicit Stop would. Phase 3.10: only
+            // when *no* screen remains open - closing one of several open
+            // screens must not blank the others that are still genuinely
+            // showing the active item. Errors are logged, never propagated
+            // (there is no command call site here to return them to).
+            if !any_display_window_open(&app_handle) {
+                if let Err(e) = crate::commands::clear_active_presentation(&app_handle) {
+                    log::warn!(
+                        target: crate::logging::LogCategory::Presentation.target(),
+                        "failed to reconcile presentation state after the last display screen closed: {e}"
+                    );
+                }
             }
         }
     });
@@ -157,13 +251,51 @@ pub fn open_display_window(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Closes the display window if it exists - a safe no-op if it's already
-/// closed (spec section 9/17). Triggers the same `Destroyed` reconciliation
-/// [`open_display_window`] registers, so an explicit Close always leaves
-/// the same persisted state a manual close would.
-pub fn close_display_window(app: &AppHandle) -> tauri::Result<()> {
-    if let Some(window) = app.get_webview_window(DISPLAY_WINDOW_LABEL) {
+/// Closes `screen`'s display window if it exists - a safe no-op if it's
+/// already closed (spec section 9/17). Triggers the same `Destroyed`
+/// reconciliation [`open_display_window`] registers, so an explicit Close
+/// always leaves the same persisted state a manual close would.
+pub fn close_display_window(app: &AppHandle, screen: DisplayScreen) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window(screen.window_label()) {
         window.close()?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_screen_id_round_trips_through_parse() {
+        for screen in DisplayScreen::ALL {
+            assert_eq!(DisplayScreen::parse(screen.id()), Some(screen));
+        }
+    }
+
+    #[test]
+    fn every_screen_has_a_distinct_window_label() {
+        let labels: Vec<_> = DisplayScreen::ALL
+            .iter()
+            .map(|s| s.window_label())
+            .collect();
+        let mut unique = labels.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(labels.len(), unique.len(), "window labels must be distinct");
+    }
+
+    #[test]
+    fn stage_keeps_the_pre_3_10_window_label_unchanged() {
+        // Backward compatibility: the Stage screen is the only display CIP
+        // supported before Phase 3.10 - its window label must stay exactly
+        // "display" so nothing about its pre-3.10 behavior changes.
+        assert_eq!(DisplayScreen::Stage.window_label(), "display");
+    }
+
+    #[test]
+    fn parse_rejects_an_unknown_screen_id() {
+        assert_eq!(DisplayScreen::parse("projector"), None);
+        assert_eq!(DisplayScreen::parse(""), None);
+    }
 }

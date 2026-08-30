@@ -21,22 +21,22 @@ const slide: RenderedSlide = {
 
 describe("resolveHydratedPayload", () => {
   it("returns the item+slide pair when a real presentation is genuinely active", () => {
-    const state: PresentationDisplayState = { windowOpen: true, activeItem: item, activeSlide: slide };
+    const state: PresentationDisplayState = { screens: [], activeItem: item, activeSlide: slide };
     expect(resolveHydratedPayload(state)).toEqual({ item, slide });
   });
 
   it("returns null when nothing is active", () => {
-    const state: PresentationDisplayState = { windowOpen: true, activeItem: null, activeSlide: null };
+    const state: PresentationDisplayState = { screens: [], activeItem: null, activeSlide: null };
     expect(resolveHydratedPayload(state)).toBeNull();
   });
 
   it("returns null (never fabricates a slide) if activeItem is present but activeSlide somehow is not", () => {
-    const state: PresentationDisplayState = { windowOpen: true, activeItem: item, activeSlide: null };
+    const state: PresentationDisplayState = { screens: [], activeItem: item, activeSlide: null };
     expect(resolveHydratedPayload(state)).toBeNull();
   });
 
   it("returns null if activeSlide is present but activeItem somehow is not", () => {
-    const state: PresentationDisplayState = { windowOpen: true, activeItem: null, activeSlide: slide };
+    const state: PresentationDisplayState = { screens: [], activeItem: null, activeSlide: slide };
     expect(resolveHydratedPayload(state)).toBeNull();
   });
 });

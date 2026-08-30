@@ -1,0 +1,39 @@
+{
+  "phase": "3.10",
+  "summary": "Direct extraction and inspection of the rebuilt NSIS installer, confirming this phase's new multi-screen display code is genuinely compiled in and every prior phase's fix still holds.",
+  "extractionMethod": "7z x \"Church Intelligence Platform_0.1.0_x64-setup.exe\"",
+  "installerChecksum": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "50c47988ac3d06342c8d5c6c0e63e1dd7bead34669239cacbf283714375bda9b",
+    "sizeBytes": 8607375,
+    "previousPhaseSha256": "d72008247cf05bfb92681912b32bd5fe730ae1e8297436bac654121e089e2199",
+    "previousPhaseSizeBytes": 8606001,
+    "sizeChangeNote": "Larger by 1,374 bytes - expected for a new enum, a new error variant, one new command parameter across two commands, a new response field, and a new frontend three-screen control row, on top of an already-optimized codebase."
+  },
+  "extractedInstallerContents": [
+    "libwinpthread-1.dll",
+    "cip-desktop.exe",
+    "WebView2Loader.dll",
+    "uninstall.exe",
+    "libstdc++-6.dll",
+    "libgcc_s_seh-1.dll"
+  ],
+  "runtimeDllsStillPresent": {
+    "libstdc++-6.dll": { "sizeBytes": 4596950 },
+    "libgcc_s_seh-1.dll": { "sizeBytes": 169919 },
+    "libwinpthread-1.dll": { "sizeBytes": 94077 },
+    "note": "Byte sizes identical to every prior phase's - same source DLLs, same toolchain, unaffected by this phase."
+  },
+  "cipDesktopExeVerification": {
+    "fileCommand": "PE32+ executable (GUI) x86-64 (stripped to external PDB), for MS Windows, 11 sections",
+    "fileSizeBytes": 34576027,
+    "buildCommitEmbeddedProof": "x86_64-w64-mingw32-strings finds the literal substrings '799de414' and '799de414f6ef' embedded in the binary - the real Phase 3.9 baseline commit this build was made against.",
+    "multiScreenSymbolProof": "x86_64-w64-mingw32-strings confirms: (1) the new window label strings 'display-confidence' and 'display-lobby' are present; (2) the new operator/window-title label strings 'Confidence Monitor', 'Lobby / Overflow', 'CIP Confidence Monitor', 'CIP Overflow Display' are present; (3) the existing command names 'open_presentation_display' and 'close_presentation_display' are still present in the invoke handler's command-name table (now screen-parametrized, name unchanged). Direct proof this phase's new backend code is genuinely compiled into this exact binary, not just present in source.",
+    "whisperFeatureSymbolProof": "whisper_full_with_state found 96 times (same count as the Phase 3.9 build) - unaffected by this phase.",
+    "sermonHarvestSymbolProof": "harvest_sermon found 2 times and the SERMON_HARVESTED event string is present - Phase 3.9's Sermon Harvest unaffected.",
+    "dialogPluginSymbolProof": "tauri_plugin_dialog symbols still present - Phase 3.8.7.1's model-picker feature unaffected.",
+    "displayShortcutSymbolProof": "approve_suggestion, prepare_presentation, display_presentation command names still present in the invoke handler's command-name table - Phase 3.8.7.8's Bible Display shortcut unaffected.",
+    "frontendBundleNote": "The frontend's per-role CSS class names and JSX template literals (e.g. 'presentation-display--confidence') were not found via plain strings extraction - consistent with every prior phase's own finding that the minified/compressed Vite JS bundle Tauri embeds as a webview asset is not reliably greppable this way. Verified functionally via the frontend test suite instead (tsc/oxlint/vitest/build all clean), per this project's established methodology - see pilot-evidence/3.8.7.8's frontend evidence for the same precedent."
+  },
+  "automatedVerification": "scripts/build-windows-whisper.sh's own final step (7z-extraction DLL-presence check) passed on this build, unchanged automation from Phase 3.8.6.1 - 'confirmed: libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll are all present in the installer'."
+}

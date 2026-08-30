@@ -53,14 +53,29 @@ export interface PresentationDisplayPayload {
   slide: RenderedSlide;
 }
 
+/** Phase 3.10: the three display roles CIP can drive simultaneously -
+ * mirrors `presentation_display::DisplayScreen` (Rust). "Multi-screen"
+ * means the one active presentation item reaching more physical screens,
+ * not more concurrent active items - see
+ * `docs/phase-3-10-multi-screen-audit.md`. */
+export type PresentationScreen = "stage" | "confidence" | "lobby";
+
+/** One screen's open/closed state, as reported by
+ * `get_presentation_display_state`. */
+export interface PresentationScreenState {
+  screen: PresentationScreen;
+  label: string;
+  windowOpen: boolean;
+}
+
 /** The `get_presentation_display_state` response - the operator UI's sync
  * point on mount, never assumed from local state alone. `activeSlide`
- * (Phase 3.8.2) lets the display window itself hydrate on mount instead
+ * (Phase 3.8.2) lets a display window itself hydrate on mount instead
  * of depending solely on catching `PRESENTATION_STARTED` live - closing a
  * real race where the event can fire before the display window's own
  * JavaScript has loaded and subscribed. */
 export interface PresentationDisplayState {
-  windowOpen: boolean;
+  screens: PresentationScreenState[];
   activeItem: PresentationItem | null;
   activeSlide: RenderedSlide | null;
 }

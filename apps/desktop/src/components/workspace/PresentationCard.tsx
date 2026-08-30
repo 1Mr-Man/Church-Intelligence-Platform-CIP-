@@ -18,8 +18,20 @@
  * language exists specifically to make unmistakable to the operator
  * (spec section 11's hard rule: "Prepared" must never be confused with
  * "Displayed").
+ *
+ * Phase 3.10: the single Open/Close Display button is replaced with a row
+ * of three independent screen controls (Stage/Confidence Monitor/Lobby-
+ * Overflow), each open/closed on its own - multiple can be open at once,
+ * all mirroring the same active item. See
+ * `docs/phase-3-10-multi-screen-audit.md`.
  */
-import type { PresentationItem, PresentationPreview, Suggestion } from "../../domain";
+import type {
+  PresentationItem,
+  PresentationPreview,
+  PresentationScreen,
+  PresentationScreenState,
+  Suggestion,
+} from "../../domain";
 
 function itemHeading(item: PresentationItem): string {
   return item.content.type === "scripture" ? item.content.reference : item.content.title ?? "(untitled)";
@@ -34,12 +46,12 @@ export interface PresentationCardProps {
   previews: Record<string, PresentationPreview>;
   preparedItems: PresentationItem[];
   activeDisplayItem: PresentationItem | null;
-  displayWindowOpen: boolean;
+  screens: PresentationScreenState[];
   busy: string | null;
   onPreviewApproved: (suggestionId: string) => void;
   onPrepare: (suggestionId: string) => void;
-  onOpenDisplay: () => void;
-  onCloseDisplay: () => void;
+  onOpenScreen: (screen: PresentationScreen) => void;
+  onCloseScreen: (screen: PresentationScreen) => void;
   onDisplay: (itemId: string) => void;
   onCancel: (itemId: string) => void;
   onStopDisplay: () => void;
@@ -50,25 +62,26 @@ export function PresentationCard({
   previews,
   preparedItems,
   activeDisplayItem,
-  displayWindowOpen,
+  screens,
   busy,
   onPreviewApproved,
   onPrepare,
-  onOpenDisplay,
-  onCloseDisplay,
+  onOpenScreen,
+  onCloseScreen,
   onDisplay,
   onCancel,
   onStopDisplay,
 }: PresentationCardProps) {
   const isBusy = (key: string) => busy === key;
+  const anyScreenOpen = screens.some((s) => s.windowOpen);
   const nothingToShow = approvedSuggestions.length === 0 && preparedItems.length === 0 && !activeDisplayItem;
 
   return (
     <section className={`op-presentation${activeDisplayItem ? " op-presentation--active" : ""}`}>
       <div className="op-presentation__header">
         <h2>Presentation</h2>
-        <span className={`op-badge ${displayWindowOpen ? "op-badge--good" : "op-badge--neutral"}`}>
-          Display {displayWindowOpen ? "Open" : "Closed"}
+        <span className={`op-badge ${anyScreenOpen ? "op-badge--good" : "op-badge--neutral"}`}>
+          Display {anyScreenOpen ? "Open" : "Closed"}
         </span>
       </div>
 
@@ -152,16 +165,31 @@ export function PresentationCard({
         </p>
       )}
 
-      <div className="op-presentation__actions" style={{ marginTop: "1rem" }}>
-        {!displayWindowOpen ? (
-          <button type="button" disabled={isBusy("open-display")} onClick={onOpenDisplay}>
-            Open Display
-          </button>
-        ) : (
-          <button type="button" disabled={isBusy("close-display")} onClick={onCloseDisplay}>
-            Close Display
-          </button>
-        )}
+      <div className="op-presentation__screens" style={{ marginTop: "1rem" }}>
+        {screens.map((s) => (
+          <div key={s.screen} className="op-presentation__screen-row">
+            <span className={`op-badge ${s.windowOpen ? "op-badge--good" : "op-badge--neutral"}`}>
+              {s.label}: {s.windowOpen ? "Open" : "Closed"}
+            </span>
+            {!s.windowOpen ? (
+              <button
+                type="button"
+                disabled={isBusy(`open-screen-${s.screen}`)}
+                onClick={() => onOpenScreen(s.screen)}
+              >
+                Open
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={isBusy(`close-screen-${s.screen}`)}
+                onClick={() => onCloseScreen(s.screen)}
+              >
+                Close
+              </button>
+            )}
+          </div>
+        ))}
       </div>
     </section>
   );

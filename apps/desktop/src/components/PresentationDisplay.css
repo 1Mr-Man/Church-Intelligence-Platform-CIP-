@@ -57,3 +57,19 @@ body {
   font-size: clamp(1rem, 2vw, 1.5rem);
   color: #999;
 }
+
+/* Phase 3.10: Confidence Monitor-only operator metadata - a small,
+ * muted panel below the mirrored slide content, never the primary focus.
+ * Stage/Lobby never render this block. */
+.presentation-display__monitor-meta {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #333;
+  font-size: clamp(0.8rem, 1.4vw, 1.1rem);
+  color: #8a8a8a;
+  text-align: left;
+}
+
+.presentation-display__monitor-meta p {
+  margin: 0.15em 0;
+}

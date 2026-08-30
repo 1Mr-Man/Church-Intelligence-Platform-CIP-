@@ -2653,10 +2653,26 @@ pub fn cancel_presentation(
 // every other presentation command already established above - nothing
 // here invents a second lifecycle, error hierarchy, or event bus.
 
-/// Opens (or, if already open, focuses) the presentation display window -
-/// useful on its own for positioning it on a projector/second monitor
-/// before anything is ready to show, and called automatically by
-/// `display_presentation` when needed.
+/// Parses a `screen` command argument (`"stage"`/`"confidence"`/`"lobby"`)
+/// into a [`presentation_display::DisplayScreen`], or a clean
+/// `AppError::Presentation(UnknownDisplayScreen)` for anything else -
+/// shared by every Phase 3.10 screen-parametrized command below so the
+/// rejection message and error type stay identical across all of them.
+fn parse_display_screen(screen: &str) -> Result<presentation_display::DisplayScreen, AppError> {
+    presentation_display::DisplayScreen::parse(screen).ok_or_else(|| {
+        AppError::from(presentation::PresentationError::UnknownDisplayScreen(
+            screen.to_string(),
+        ))
+    })
+}
+
+/// Opens (or, if already open, focuses) `screen`'s presentation display
+/// window - useful on its own for positioning it on a projector/second
+/// monitor before anything is ready to show. `display_presentation` calls
+/// this internally for the Stage screen specifically when needed; the
+/// Confidence Monitor and Lobby/Overflow screens are only ever opened via
+/// this command, on explicit operator request (Phase 3.10 - see
+/// `docs/phase-3-10-multi-screen-audit.md`).
 ///
 /// Phase 3.8.4: `async fn`, not a plain synchronous command - real
 /// Windows testing showed the display window appearing but staying
@@ -2670,10 +2686,12 @@ pub fn cancel_presentation(
 /// `Promise` regardless. See `docs/phase-3-8-4-audit.md` section D.
 #[tauri::command]
 pub async fn open_presentation_display(
+    screen: String,
     app: AppHandle,
     _state: State<'_, AppState>,
 ) -> Result<(), AppError> {
-    presentation_display::open_display_window(&app)
+    let screen = parse_display_screen(&screen).map_err(log_and_return)?;
+    presentation_display::open_display_window(&app, screen)
         .map_err(|e| {
             AppError::from(presentation::PresentationError::DisplayUnavailable(
                 e.to_string(),
@@ -2682,12 +2700,22 @@ pub async fn open_presentation_display(
         .map_err(log_and_return)
 }
 
-/// Whether the display window currently exists, which item (if any) is
+/// One screen's open/closed state, as reported to the operator UI -
+/// Phase 3.10.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresentationScreenState {
+    pub screen: String,
+    pub label: String,
+    pub window_open: bool,
+}
+
+/// Which display screens currently exist, which item (if any) is
 /// currently `Active` for the active service, and that item already
 /// rendered - the operator UI's sync point on mount, never assumed from
 /// local state alone.
 ///
-/// `active_slide` (Phase 3.8.2) exists specifically so the display window
+/// `active_slide` (Phase 3.8.2) exists specifically so a display window
 /// itself can hydrate on mount rather than depending solely on catching
 /// the `PRESENTATION_STARTED` event live: `WebviewWindowBuilder::build()`
 /// returning in Rust does not mean the new window's JavaScript has loaded
@@ -2700,7 +2728,7 @@ pub async fn open_presentation_display(
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresentationDisplayState {
-    pub window_open: bool,
+    pub screens: Vec<PresentationScreenState>,
     pub active_item: Option<PresentationItem>,
     pub active_slide: Option<RenderedSlide>,
 }
@@ -2735,15 +2763,23 @@ pub fn get_presentation_display_state(
             })
             .ok()
     });
-    let window_open = presentation_display::is_display_window_open(&app);
+    let screens: Vec<PresentationScreenState> = presentation_display::DisplayScreen::ALL
+        .into_iter()
+        .map(|screen| PresentationScreenState {
+            screen: screen.id().to_string(),
+            label: screen.operator_label().to_string(),
+            window_open: presentation_display::is_display_window_open(&app, screen),
+        })
+        .collect();
     log::info!(
         target: crate::logging::LogCategory::Presentation.target(),
-        "[diagnostic] get_presentation_display_state (checkpoint 5/6): windowOpen={window_open} activeItem={} activeSlide={}",
+        "[diagnostic] get_presentation_display_state (checkpoint 5/6): screensOpen={} activeItem={} activeSlide={}",
+        screens.iter().filter(|s| s.window_open).count(),
         active_item.is_some(),
         active_slide.is_some()
     );
     Ok(PresentationDisplayState {
-        window_open,
+        screens,
         active_item,
         active_slide,
     })
@@ -2783,7 +2819,12 @@ pub async fn display_presentation(
         slide.footer
     );
 
-    presentation_display::open_display_window(&app)
+    // Phase 3.10: always opens Stage specifically, preserving this
+    // command's pre-3.10 contract exactly. Confidence Monitor/Lobby are
+    // opened separately, by explicit operator choice, via
+    // `open_presentation_display` - once open they receive the same
+    // broadcast `PresentationStarted` event below with no separate path.
+    presentation_display::open_display_window(&app, presentation_display::DisplayScreen::Stage)
         .map_err(|e| {
             AppError::from(presentation::PresentationError::DisplayUnavailable(
                 e.to_string(),
@@ -2874,7 +2915,7 @@ pub(crate) fn clear_active_presentation(
     Ok(stopped)
 }
 
-/// Closes the presentation display window outright (as opposed to
+/// Closes `screen`'s presentation display window outright (as opposed to
 /// `clear_presentation_display`, which blanks it but leaves it open).
 ///
 /// Phase 3.8.2: reconciles the active item to `Stopped` *synchronously*,
@@ -2891,13 +2932,32 @@ pub(crate) fn clear_active_presentation(
 /// handler still exists for a manual OS-level close (Alt+F4, window-manager
 /// close), and is a safe, proven-idempotent no-op here since the item is
 /// already `Stopped` by the time it fires.
+///
+/// Phase 3.10: only reconciles when `screen` is the *last* open screen -
+/// closing one of several simultaneously open screens must never blank
+/// the others that are still genuinely showing the active item to the
+/// congregation/room they're driving. When exactly one screen is open
+/// (the pre-3.10 case, and by far the common one), this is identical to
+/// the pre-3.10 behavior: reconcile, then close.
 #[tauri::command]
 pub fn close_presentation_display(
+    screen: String,
     app: AppHandle,
     _state: State<'_, AppState>,
 ) -> Result<(), AppError> {
-    clear_active_presentation(&app).map_err(log_and_return)?;
-    presentation_display::close_display_window(&app)
+    let screen = parse_display_screen(&screen).map_err(log_and_return)?;
+
+    let open_screens_before: Vec<_> = presentation_display::DisplayScreen::ALL
+        .into_iter()
+        .filter(|s| presentation_display::is_display_window_open(&app, *s))
+        .collect();
+    let is_last_open_screen = open_screens_before.len() == 1 && open_screens_before[0] == screen;
+
+    if is_last_open_screen {
+        clear_active_presentation(&app).map_err(log_and_return)?;
+    }
+
+    presentation_display::close_display_window(&app, screen)
         .map_err(|e| {
             AppError::from(presentation::PresentationError::DisplayUnavailable(
                 e.to_string(),
@@ -6044,6 +6104,28 @@ mod tests {
             Err(AppError::InvalidInput(_))
         ));
         assert!(matches!(parse_uuid(""), Err(AppError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn parse_display_screen_accepts_all_three_known_ids_and_rejects_anything_else() {
+        assert_eq!(
+            parse_display_screen("stage").unwrap(),
+            presentation_display::DisplayScreen::Stage
+        );
+        assert_eq!(
+            parse_display_screen("confidence").unwrap(),
+            presentation_display::DisplayScreen::Confidence
+        );
+        assert_eq!(
+            parse_display_screen("lobby").unwrap(),
+            presentation_display::DisplayScreen::Lobby
+        );
+        assert!(matches!(
+            parse_display_screen("projector"),
+            Err(AppError::Presentation(
+                presentation::PresentationError::UnknownDisplayScreen(_)
+            ))
+        ));
     }
 
     #[test]

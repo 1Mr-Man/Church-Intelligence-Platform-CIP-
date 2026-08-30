@@ -14,6 +14,7 @@ import type {
   MusicQueryType,
   PresentationItem,
   PresentationPreview,
+  PresentationScreenState,
   ScriptureContext,
   ScriptureDetection,
   ScriptureReference,
@@ -139,7 +140,11 @@ export function LiveChurchBrain() {
   // automatically. See `docs/presentation.md`'s "Local display
   // architecture" section.
   const [activeDisplayItem, setActiveDisplayItem] = useState<PresentationItem | null>(null);
-  const [displayWindowOpen, setDisplayWindowOpen] = useState(false);
+  // Phase 3.10: one entry per display screen (Stage/Confidence Monitor/
+  // Lobby-Overflow), each independently open/closed - see
+  // `docs/phase-3-10-multi-screen-audit.md`.
+  const [screens, setScreens] = useState<PresentationScreenState[]>([]);
+  const anyScreenOpen = screens.some((s) => s.windowOpen);
   // Non-mutating previews, keyed by suggestion id / search reference -
   // Preview never changes `suggestions`/`approvedSuggestions`/`preparedItems`
   // (section 14: preview and prepare are separate actions).
@@ -290,7 +295,7 @@ export function LiveChurchBrain() {
       commands
         .getPresentationDisplayState()
         .then((s) => {
-          setDisplayWindowOpen(s.windowOpen);
+          setScreens(s.screens);
           setActiveDisplayItem(s.activeItem);
         })
         .catch(() => {});
@@ -389,7 +394,10 @@ export function LiveChurchBrain() {
       liveEvents.onPresentationStarted(({ item }) => {
         setPreparedItems((prev) => prev.filter((x) => x.id !== item.id));
         setActiveDisplayItem(item);
-        setDisplayWindowOpen(true);
+        // display_presentation always opens Stage specifically before
+        // activating (Phase 3.10) - other screens' open/closed state is
+        // unaffected by this event.
+        setScreens((prev) => prev.map((s) => (s.screen === "stage" ? { ...s, windowOpen: true } : s)));
       }),
       liveEvents.onPresentationStopped(() => setActiveDisplayItem(null)),
       liveEvents.onMusicFindingDetected((finding) => setMusicFindings((prev) => [finding, ...prev])),
@@ -680,7 +688,7 @@ export function LiveChurchBrain() {
       />
 
       <WorkspaceHeader status={status} sermonFoundation={sermonFoundation} serviceIntel={serviceIntel} />
-      <SystemStatusStrip status={status} deviceCount={devices.length} displayWindowOpen={displayWindowOpen} />
+      <SystemStatusStrip status={status} deviceCount={devices.length} displayWindowOpen={anyScreenOpen} />
 
       <AttentionQueue items={attentionQueue} busy={busy} onAction={handleUnifiedAction} />
       <IntelligenceFeed items={unifiedFeed} />
@@ -690,7 +698,7 @@ export function LiveChurchBrain() {
         previews={previews}
         preparedItems={preparedItems}
         activeDisplayItem={activeDisplayItem}
-        displayWindowOpen={displayWindowOpen}
+        screens={screens}
         busy={busy}
         onPreviewApproved={(id) =>
           withBusy(`preview-${id}`, async () => {
@@ -703,17 +711,20 @@ export function LiveChurchBrain() {
             await commands.preparePresentation(id);
           })
         }
-        onOpenDisplay={() =>
-          withBusy("open-display", async () => {
-            await commands.openPresentationDisplay();
-            setDisplayWindowOpen(true);
+        onOpenScreen={(screen) =>
+          withBusy(`open-screen-${screen}`, async () => {
+            await commands.openPresentationDisplay(screen);
+            setScreens((prev) => prev.map((s) => (s.screen === screen ? { ...s, windowOpen: true } : s)));
           })
         }
-        onCloseDisplay={() =>
-          withBusy("close-display", async () => {
-            await commands.closePresentationDisplay();
-            setDisplayWindowOpen(false);
-            setActiveDisplayItem(null);
+        onCloseScreen={(screen) =>
+          withBusy(`close-screen-${screen}`, async () => {
+            await commands.closePresentationDisplay(screen);
+            // Whether the active item itself stops is decided by the
+            // backend (only when this was the last open screen) and
+            // reflected via the PresentationStopped event listener above -
+            // never guessed here.
+            setScreens((prev) => prev.map((s) => (s.screen === screen ? { ...s, windowOpen: false } : s)));
           })
         }
         onDisplay={(id) => withBusy(`display-${id}`, async () => { await commands.displayPresentation(id); })}

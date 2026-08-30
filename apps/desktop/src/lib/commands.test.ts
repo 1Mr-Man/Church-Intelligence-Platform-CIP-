@@ -168,18 +168,18 @@ describe("commands.ts Tauri IPC guard", () => {
     });
   });
 
-  it("openPresentationDisplay calls open_presentation_display with no arguments", async () => {
+  it("openPresentationDisplay calls open_presentation_display with the screen argument", async () => {
     isTauriMock.mockReturnValue(true);
     invokeMock.mockResolvedValue(undefined);
 
-    await openPresentationDisplay();
+    await openPresentationDisplay("stage");
 
-    expect(invokeMock).toHaveBeenCalledWith("open_presentation_display", undefined);
+    expect(invokeMock).toHaveBeenCalledWith("open_presentation_display", { screen: "stage" });
   });
 
   it("getPresentationDisplayState calls get_presentation_display_state with no arguments", async () => {
     isTauriMock.mockReturnValue(true);
-    invokeMock.mockResolvedValue({ windowOpen: false, activeItem: null });
+    invokeMock.mockResolvedValue({ screens: [], activeItem: null });
 
     await getPresentationDisplayState();
 
@@ -205,23 +205,23 @@ describe("commands.ts Tauri IPC guard", () => {
     expect(invokeMock).toHaveBeenCalledWith("clear_presentation_display", undefined);
   });
 
-  it("closePresentationDisplay calls close_presentation_display with no arguments", async () => {
+  it("closePresentationDisplay calls close_presentation_display with the screen argument", async () => {
     isTauriMock.mockReturnValue(true);
     invokeMock.mockResolvedValue(undefined);
 
-    await closePresentationDisplay();
+    await closePresentationDisplay("confidence");
 
-    expect(invokeMock).toHaveBeenCalledWith("close_presentation_display", undefined);
+    expect(invokeMock).toHaveBeenCalledWith("close_presentation_display", { screen: "confidence" });
   });
 
   it("rejects every presentation display command outside the Tauri runtime, without calling invoke()", async () => {
     isTauriMock.mockReturnValue(false);
 
-    await expect(openPresentationDisplay()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(openPresentationDisplay("stage")).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(getPresentationDisplayState()).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(displayPresentation("id")).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(clearPresentationDisplay()).rejects.toBeInstanceOf(TauriUnavailableError);
-    await expect(closePresentationDisplay()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(closePresentationDisplay("stage")).rejects.toBeInstanceOf(TauriUnavailableError);
     expect(invokeMock).not.toHaveBeenCalled();
   });
 

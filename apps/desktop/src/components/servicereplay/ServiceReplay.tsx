@@ -49,6 +49,7 @@ import type {
   LiveStatus,
   PresentationItem,
   PresentationPreview,
+  PresentationScreenState,
   SermonFoundationSummary,
   SermonStateSnapshot,
   ServiceIntelligenceSummary,
@@ -234,7 +235,10 @@ export function ServiceReplay() {
   const [serviceIntel, setServiceIntel] = useState<ServiceIntelligenceSummary | null>(null);
   const [preparedItems, setPreparedItems] = useState<PresentationItem[]>([]);
   const [activeDisplayItem, setActiveDisplayItem] = useState<PresentationItem | null>(null);
-  const [displayWindowOpen, setDisplayWindowOpen] = useState(false);
+  // Phase 3.10: one entry per display screen (Stage/Confidence Monitor/
+  // Lobby-Overflow) - see docs/phase-3-10-multi-screen-audit.md.
+  const [screens, setScreens] = useState<PresentationScreenState[]>([]);
+  const anyScreenOpen = screens.some((s) => s.windowOpen);
   const [previews, setPreviews] = useState<Record<string, PresentationPreview>>({});
   const [deviceCount, setDeviceCount] = useState(0);
   const [workspaceBusy, setWorkspaceBusy] = useState<string | null>(null);
@@ -287,7 +291,7 @@ export function ServiceReplay() {
       setServiceAnomalies([]);
       setPreparedItems([]);
       setActiveDisplayItem(null);
-      setDisplayWindowOpen(false);
+      setScreens([]);
       return;
     }
     commands.listSuggestions("pending").then(setSuggestions).catch(() => {});
@@ -304,7 +308,7 @@ export function ServiceReplay() {
     commands
       .getPresentationDisplayState()
       .then((s) => {
-        setDisplayWindowOpen(s.windowOpen);
+        setScreens(s.screens);
         setActiveDisplayItem(s.activeItem);
       })
       .catch(() => {});
@@ -362,7 +366,10 @@ export function ServiceReplay() {
       liveEvents.onPresentationStarted(({ item }) => {
         setPreparedItems((prev) => prev.filter((x) => x.id !== item.id));
         setActiveDisplayItem(item);
-        setDisplayWindowOpen(true);
+        // display_presentation always opens Stage specifically before
+        // activating (Phase 3.10) - other screens' open/closed state is
+        // unaffected by this event.
+        setScreens((prev) => prev.map((s) => (s.screen === "stage" ? { ...s, windowOpen: true } : s)));
       }),
       liveEvents.onPresentationStopped(() => setActiveDisplayItem(null)),
     ];
@@ -835,7 +842,7 @@ export function ServiceReplay() {
       </section>
 
       <WorkspaceHeader status={status} sermonFoundation={sermonFoundation} serviceIntel={serviceIntel} />
-      <SystemStatusStrip status={status} deviceCount={deviceCount} displayWindowOpen={displayWindowOpen} />
+      <SystemStatusStrip status={status} deviceCount={deviceCount} displayWindowOpen={anyScreenOpen} />
 
       <AttentionQueue items={attentionQueue} busy={workspaceBusy} onAction={handleUnifiedAction} />
 
@@ -873,7 +880,7 @@ export function ServiceReplay() {
         previews={previews}
         preparedItems={preparedItems}
         activeDisplayItem={activeDisplayItem}
-        displayWindowOpen={displayWindowOpen}
+        screens={screens}
         busy={workspaceBusy}
         onPreviewApproved={(id) =>
           withWorkspaceBusy(`preview-${id}`, async () => {
@@ -882,17 +889,20 @@ export function ServiceReplay() {
           })
         }
         onPrepare={(id) => withWorkspaceBusy(`prepare-${id}`, async () => { await commands.preparePresentation(id); })}
-        onOpenDisplay={() =>
-          withWorkspaceBusy("open-display", async () => {
-            await commands.openPresentationDisplay();
-            setDisplayWindowOpen(true);
+        onOpenScreen={(screen) =>
+          withWorkspaceBusy(`open-screen-${screen}`, async () => {
+            await commands.openPresentationDisplay(screen);
+            setScreens((prev) => prev.map((s) => (s.screen === screen ? { ...s, windowOpen: true } : s)));
           })
         }
-        onCloseDisplay={() =>
-          withWorkspaceBusy("close-display", async () => {
-            await commands.closePresentationDisplay();
-            setDisplayWindowOpen(false);
-            setActiveDisplayItem(null);
+        onCloseScreen={(screen) =>
+          withWorkspaceBusy(`close-screen-${screen}`, async () => {
+            await commands.closePresentationDisplay(screen);
+            // Whether the active item itself stops is decided by the
+            // backend (only when this was the last open screen) and
+            // reflected via the PresentationStopped event listener above -
+            // never guessed here.
+            setScreens((prev) => prev.map((s) => (s.screen === screen ? { ...s, windowOpen: false } : s)));
           })
         }
         onDisplay={(id) => withWorkspaceBusy(`display-${id}`, async () => { await commands.displayPresentation(id); })}

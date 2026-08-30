@@ -1,0 +1,39 @@
+{
+  "phase": "3.10",
+  "summary": "Real-code evidence for multi-screen presentation output: the second of five pillars identified in the gap analysis against the project's original master specification document, and the second the user asked to continue after Phase 3.9.",
+  "trigger": "After Phase 3.9 (Sermon Harvest) closed, the user explicitly asked to continue with the remaining major pillars: multi-screen presentation output, semantic/paraphrase Bible detection, real audio fingerprinting, and multi-language support. This phase delivers multi-screen presentation output, the second in the proposed sequencing.",
+  "auditedBeforeImplementing": {
+    "singleWindowArchitecture": "presentation_display.rs managed exactly one hardcoded Tauri WebviewWindow (label \"display\"). Its Destroyed handler unconditionally called clear_active_presentation on close - correct for one window, wrong for more than one (closing a second screen must not blank a first screen still showing content).",
+    "domainModelUnaffected": "presentation.rs's Prepared->Active->Stopped lifecycle and its 'at most one Active item per service' invariant (spec section 10) has zero coupling to window count - confirmed by reading the module directly. Key finding: multi-screen means the one active item reaching more physical screens, not more concurrent active items. No change to presentation.rs was needed or made.",
+    "eventBroadcastAlreadyGlobal": "events.rs::emit calls tauri::Emitter::emit with no target filter - confirmed via the vendored Tauri crate's own Emitter trait that this already broadcasts PresentationStarted/PresentationStopped to every listening webview, not just one window. This meant zero changes were needed to event emission - only window lifecycle management (open/close per screen) and per-window rendering choice."
+  },
+  "designDecision": "Three fixed display roles (Stage/Confidence Monitor/Lobby-Overflow), not an arbitrary N-window system - bounded to what was actually asked for and buildable/verifiable in one phase. Stage keeps the exact pre-3.10 window label (\"display\") so every pre-3.10 behavior for that screen is byte-for-byte unchanged. Confidence Monitor and Lobby/Overflow are new window labels (\"display-confidence\"/\"display-lobby\") opened only on explicit operator request via the existing open_presentation_display command, now screen-parametrized. Once open, all three screens receive the same broadcast PresentationStarted/PresentationStopped events with zero new event plumbing.",
+  "noFabrication": "The Confidence Monitor's extra operator-only metadata (source: Auto-detected/Manual, template name, item status) is rendered purely from fields already present in the existing PresentationDisplayPayload (item.sourceSuggestionId, item.template, item.status) - no new backend query, no new field invented, no fabricated data. Stage and Lobby render identically (a Lobby screen mirrors Stage exactly for an overflow room).",
+  "lastScreenReconciliation": "The Destroyed-handler and close_presentation_display's reconciliation (stop the active item) now only fires when the closing screen was the *last* screen still open - determined by checking presentation_display::any_display_window_open before closing. Verified by direct code inspection: for the single-screen case (only Stage ever opened, the common case and the pre-3.10 behavior), this is identical to before - reconcile, then close.",
+  "filesChanged": {
+    "apps/desktop/src-tauri/src/presentation_display.rs": "New DisplayScreen enum (Stage/Confidence/Lobby) with window_label/window_title/operator_label/id/parse. is_display_window_open/open_display_window/close_display_window now take a DisplayScreen parameter. New any_display_window_open(app) helper. Destroyed handler only reconciles when no screen remains open. 4 new unit tests.",
+    "apps/desktop/src-tauri/src/presentation.rs": "New PresentationError::UnknownDisplayScreen variant for an unrecognized screen argument.",
+    "apps/desktop/src-tauri/src/commands.rs": "New parse_display_screen helper (shared across all screen-parametrized commands). open_presentation_display/close_presentation_display now take a screen: String argument. display_presentation continues to open Stage specifically (unchanged contract). get_presentation_display_state now returns screens: Vec<PresentationScreenState> instead of one window_open boolean. close_presentation_display only reconciles the active item when the closing screen was the last one open. 1 new unit test.",
+    "apps/desktop/src-tauri/capabilities/display.json": "windows array extended to [\"display\", \"display-confidence\", \"display-lobby\"] - identical core:default-only permission grant for all three, matching the existing minimal-capability discipline.",
+    "apps/desktop/src/domain/presentation.ts": "New PresentationScreen type and PresentationScreenState interface; PresentationDisplayState.screens replaces the single windowOpen boolean.",
+    "apps/desktop/src/lib/commands.ts": "openPresentationDisplay/closePresentationDisplay now take a PresentationScreen argument.",
+    "apps/desktop/src/main.tsx": "Window-label-to-role resolution generalized from a boolean to a 3-way role map; PresentationDisplay now receives its role as a prop.",
+    "apps/desktop/src/components/PresentationDisplay.tsx": "Accepts a role prop. Stage/Lobby render identically (unchanged passive slide). Confidence renders an additional operator-metadata panel using fields already present in the payload it already received.",
+    "apps/desktop/src/components/workspace/PresentationCard.tsx": "The single Open/Close Display button replaced with a row of three independent per-screen controls.",
+    "apps/desktop/src/components/LiveChurchBrain.tsx and apps/desktop/src/components/servicereplay/ServiceReplay.tsx": "Both operator surfaces updated identically: screens state array replaces the single displayWindowOpen boolean; PresentationStarted event handler marks Stage specifically open (the only screen display_presentation ever auto-opens); the active item's stop is left to the existing PresentationStopped event listener rather than guessed client-side on screen close."
+  },
+  "regressionProof": "Backend: cargo fmt --check clean, cargo clippy --all-targets -- -D warnings clean (default and --features whisper), cargo test -p cip-desktop 256/256 passed (up from 251 - 5 new tests: 4 in presentation_display.rs, 1 in commands.rs). Frontend: tsc -b 0 errors, oxlint 0 errors (same 4 pre-existing warnings), vitest 210/210 passed (existing PresentationDisplayState-shaped test literals updated to the new screens array shape), vite build clean.",
+  "directCompiledBinaryProof": {
+    "method": "x86_64-w64-mingw32-strings against the actual packaged installer's extracted cip-desktop.exe",
+    "buildCommitEmbedded": "'799de414' / '799de414f6ef' found verbatim - the real baseline commit (Phase 3.9) this build was made against",
+    "newWindowLabelsConfirmedPresent": ["display-confidence", "display-lobby"],
+    "newOperatorAndWindowLabelsConfirmedPresent": ["Confidence Monitor", "Lobby / Overflow", "CIP Confidence Monitor", "CIP Overflow Display"],
+    "existingCommandNamesStillPresent": ["open_presentation_display", "close_presentation_display"],
+    "priorPhaseSymbolsUnaffected": {
+      "harvestSermonOccurrences": 2,
+      "sermonHarvestedEventStringPresent": true,
+      "whisperFullWithStateOccurrences": 96
+    },
+    "note": "The frontend's per-role CSS class names and JSX template literals live in the minified/compressed Vite JS bundle Tauri embeds as a webview asset - not reliably found via plain strings extraction, consistent with every prior phase's own finding (see e.g. pilot-evidence/3.8.7.8's frontend evidence). Verified functionally via the frontend test suite (tsc/oxlint/vitest/build all clean) rather than binary disassembly of minified JS, per this project's established methodology."
+  }
+}

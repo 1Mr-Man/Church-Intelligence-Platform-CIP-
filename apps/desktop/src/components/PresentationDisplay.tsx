@@ -1,14 +1,15 @@
 /**
- * The presentation display window's own React component - a passive
+ * A presentation display screen's own React component - a passive
  * renderer only. Rendered by `main.tsx` instead of `App` when the current
- * webview's own label is `"display"` (see `main.tsx`'s docs). Loads the
- * exact same frontend bundle as the operator's main window.
+ * webview's own label maps to one of the three display roles (see
+ * `main.tsx`'s docs). Loads the exact same frontend bundle as the
+ * operator's main window.
  *
  * Phase 3.8.2: in addition to listening for the two events the backend
  * emits (`onPresentationStarted`/`onPresentationStopped`), this component
  * also pulls current state once on mount via `getPresentationDisplayState`
  * - the same command the operator's own window already uses to sync on
- * mount. This closes a real race: `display_presentation` opens this
+ * mount. This closes a real race: `display_presentation` opens the Stage
  * window and emits `PRESENTATION_STARTED` immediately afterward in Rust,
  * but the new window's JavaScript (this component, its `useEffect`, its
  * event subscription) loads and runs asynchronously - if the event fires
@@ -17,19 +18,35 @@
  * on mount means the display always reflects the true current state
  * regardless of that ordering, exactly like the operator's own window.
  *
- * No operator controls, no navigation, no debug output - just the current
- * `RenderedSlide`, or a blank/inactive state when nothing is active. See
- * `docs/presentation.md`'s "Local display architecture" section.
+ * Phase 3.10: this same component now backs all three display roles.
+ * `PRESENTATION_STARTED`/`PRESENTATION_STOPPED` are broadcast to every
+ * open webview (not targeted at one window), so no per-screen event
+ * plumbing was needed - only which extra, already-present fields to
+ * render differs by `role`. Stage/Lobby render identically (a Lobby
+ * screen mirrors Stage exactly, e.g. for an overflow room); Confidence
+ * additionally shows operator-only metadata already carried in the same
+ * payload (`item.template`, whether `item.sourceSuggestionId` is set,
+ * `item.status`) - no new backend query, no fabricated data.
+ *
+ * No operator controls, no navigation, no debug output beyond the
+ * Confidence role's own metadata - just the current `RenderedSlide`, or a
+ * blank/inactive state when nothing is active. See `docs/presentation.md`'s
+ * "Local display architecture" section and
+ * `docs/phase-3-10-multi-screen-audit.md`.
  */
 import { useEffect, useState } from "react";
-import type { PresentationDisplayPayload } from "../domain";
+import type { PresentationDisplayPayload, PresentationScreen } from "../domain";
 import * as commands from "../lib/commands";
 import * as liveEvents from "../lib/liveEvents";
 import { logCheckpoint } from "./presentationDiagnostics";
 import { resolveHydratedPayload } from "./presentationDisplayHydration";
 import "./PresentationDisplay.css";
 
-export function PresentationDisplay() {
+export interface PresentationDisplayProps {
+  role: PresentationScreen;
+}
+
+export function PresentationDisplay({ role }: PresentationDisplayProps) {
   const [payload, setPayload] = useState<PresentationDisplayPayload | null>(null);
 
   useEffect(() => {
@@ -41,9 +58,10 @@ export function PresentationDisplay() {
     commands
       .getPresentationDisplayState()
       .then((state) => {
+        const openScreens = state.screens.filter((s) => s.windowOpen).map((s) => s.screen);
         logCheckpoint(
           "hydration-result",
-          `windowOpen=${state.windowOpen} activeItem=${state.activeItem !== null} activeSlide=${state.activeSlide !== null} (checkpoint 6)`,
+          `openScreens=${openScreens.join(",")} activeItem=${state.activeItem !== null} activeSlide=${state.activeSlide !== null} (checkpoint 6)`,
         );
         if (cancelled) return;
         const hydrated = resolveHydratedPayload(state);
@@ -84,12 +102,17 @@ export function PresentationDisplay() {
   }, []);
 
   if (!payload) {
-    return <div className="presentation-display presentation-display--blank" aria-label="No active presentation" />;
+    return (
+      <div
+        className={`presentation-display presentation-display--blank presentation-display--${role}`}
+        aria-label="No active presentation"
+      />
+    );
   }
 
-  const { slide } = payload;
+  const { slide, item } = payload;
   return (
-    <div className="presentation-display">
+    <div className={`presentation-display presentation-display--${role}`}>
       {slide.heading && <h1 className="presentation-display__heading">{slide.heading}</h1>}
       <div className="presentation-display__body">
         {slide.bodyLines.map((line, i) => (
@@ -97,6 +120,13 @@ export function PresentationDisplay() {
         ))}
       </div>
       {slide.footer && <p className="presentation-display__footer">{slide.footer}</p>}
+      {role === "confidence" && (
+        <div className="presentation-display__monitor-meta" aria-label="Operator metadata">
+          <p>Source: {item.sourceSuggestionId ? "Auto-detected" : "Manual"}</p>
+          {item.template && <p>Template: {item.template}</p>}
+          <p>Status: {item.status}</p>
+        </div>
+      )}
     </div>
   );
 }

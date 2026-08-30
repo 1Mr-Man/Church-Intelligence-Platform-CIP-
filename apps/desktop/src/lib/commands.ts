@@ -34,6 +34,7 @@ import type {
   PresentationDisplayState,
   PresentationItem,
   PresentationPreview,
+  PresentationScreen,
   ProcessedSegment,
   ScriptureContext,
   Sermon,
@@ -276,14 +277,16 @@ export function cancelPresentation(itemId: string): Promise<PresentationItem> {
 // automatic: only `displayPresentation` (an explicit operator click) may
 // cross the Prepared -> Active boundary. See `docs/presentation.md`.
 
-/** Opens (or focuses, if already open) the presentation display window -
- * useful on its own for positioning it on a projector/second monitor
- * before anything is ready to show. */
-export function openPresentationDisplay(): Promise<void> {
-  return invokeCommand("open_presentation_display");
+/** Opens (or focuses, if already open) `screen`'s presentation display
+ * window - useful on its own for positioning it on a projector/second
+ * monitor before anything is ready to show. Phase 3.10: `displayPresentation`
+ * always opens `"stage"` itself when needed; `"confidence"`/`"lobby"` are
+ * only ever opened via this command, on explicit operator request. */
+export function openPresentationDisplay(screen: PresentationScreen): Promise<void> {
+  return invokeCommand("open_presentation_display", { screen });
 }
 
-/** Whether the display window currently exists, and which item (if any) is
+/** Which display screens currently exist, and which item (if any) is
  * currently `active` for the active service - call on mount to sync, never
  * assume from local state alone. */
 export function getPresentationDisplayState(): Promise<PresentationDisplayState> {
@@ -305,10 +308,13 @@ export function clearPresentationDisplay(): Promise<PresentationItem | null> {
   return invokeCommand("clear_presentation_display");
 }
 
-/** Closes the presentation display window outright (as opposed to
- * `clearPresentationDisplay`, which blanks it but leaves it open). */
-export function closePresentationDisplay(): Promise<void> {
-  return invokeCommand("close_presentation_display");
+/** Closes `screen`'s presentation display window outright (as opposed to
+ * `clearPresentationDisplay`, which blanks it but leaves it open). Only
+ * stops the active item when `screen` was the last screen still open
+ * (Phase 3.10) - closing one of several simultaneously open screens never
+ * blanks the others. */
+export function closePresentationDisplay(screen: PresentationScreen): Promise<void> {
+  return invokeCommand("close_presentation_display", { screen });
 }
 
 /** Phase 3.8.3 TEMPORARY DIAGNOSTIC: routes a lifecycle checkpoint from the

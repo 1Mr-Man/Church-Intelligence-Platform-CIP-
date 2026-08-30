@@ -6,21 +6,33 @@ import App from './App.tsx'
 import { PresentationDisplay } from './components/PresentationDisplay.tsx'
 import { logCheckpoint } from './components/presentationDiagnostics'
 import { isTauriRuntime } from './lib/runtime'
+import type { PresentationScreen } from './domain'
 
 /**
- * Two windows share this one frontend bundle: the operator's main window
- * (`App`) and the presentation display window (`PresentationDisplay`,
- * created at runtime by `presentation_display.rs` with the Tauri window
- * label `"display"`). They're distinguished purely by reading the current
- * webview's own label - no second Vite entry point, no second build.
- * `getCurrentWebviewWindow()` itself is safe to import unconditionally
- * (it only reads a global, matching `isTauriRuntime()`'s own discipline in
- * `lib/runtime.ts`); this module-scope check runs once, before React ever
- * renders anything, so outside the Tauri desktop shell (the web runtime)
- * this always resolves to the ordinary `App`, since there is no such
- * window to be.
+ * Four windows share this one frontend bundle: the operator's main window
+ * (`App`) and the three presentation display screens (`PresentationDisplay`,
+ * created at runtime by `presentation_display.rs` - Phase 3.10 generalizes
+ * the original single display window into three fixed roles: `"display"`
+ * (Stage, unchanged from before this phase), `"display-confidence"`
+ * (Confidence Monitor), `"display-lobby"` (Lobby/Overflow). They're
+ * distinguished purely by reading the current webview's own label - no
+ * second Vite entry point, no second build. `getCurrentWebviewWindow()`
+ * itself is safe to import unconditionally (it only reads a global,
+ * matching `isTauriRuntime()`'s own discipline in `lib/runtime.ts`); this
+ * module-scope check runs once, before React ever renders anything, so
+ * outside the Tauri desktop shell (the web runtime) this always resolves
+ * to the ordinary `App`, since there is no such window to be.
  */
-const isDisplayWindow = isTauriRuntime() && getCurrentWebviewWindow().label === 'display'
+const DISPLAY_WINDOW_ROLES: Record<string, PresentationScreen> = {
+  display: 'stage',
+  'display-confidence': 'confidence',
+  'display-lobby': 'lobby',
+}
+
+const currentWindowLabel = isTauriRuntime() ? getCurrentWebviewWindow().label : null
+const displayRole: PresentationScreen | null =
+  currentWindowLabel !== null ? (DISPLAY_WINDOW_ROLES[currentWindowLabel] ?? null) : null
+const isDisplayWindow = displayRole !== null
 
 /**
  * Phase 3.8.4 TEMPORARY DIAGNOSTIC: real Windows testing showed the
@@ -45,7 +57,7 @@ if (isDisplayWindow) {
 }
 
 function Root() {
-  return isDisplayWindow ? <PresentationDisplay /> : <App />
+  return displayRole !== null ? <PresentationDisplay role={displayRole} /> : <App />
 }
 
 createRoot(document.getElementById('root')!).render(

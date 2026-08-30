@@ -73,6 +73,11 @@ pub enum PresentationError {
     /// a reason to claim `Active` anyway (spec section 8).
     #[error("presentation display window unavailable: {0}")]
     DisplayUnavailable(String),
+    /// Phase 3.10: the `screen` argument on a display command did not match
+    /// one of the fixed `stage`/`confidence`/`lobby` ids - rejected
+    /// explicitly rather than silently defaulting to a screen.
+    #[error("unknown display screen: {0}")]
+    UnknownDisplayScreen(String),
 }
 
 /// `"ROM 8:28"` -> `("ROM", 8, 28, None)`; `"ROM 8:28-31"` -> `("ROM", 8,

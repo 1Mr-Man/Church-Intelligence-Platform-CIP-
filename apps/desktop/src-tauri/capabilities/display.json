@@ -1,9 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "display",
-  "description": "Presentation display window - a passive renderer only. Same minimal grant as the main window's own capability (core:default); this app has no fs/shell/http/dialog plugin installed at all, so this window never has filesystem, shell, network, or database access.",
+  "description": "Presentation display windows - passive renderers only. Phase 3.10: covers all three display screens (Stage/Confidence Monitor/Lobby-Overflow), each its own window label, all sharing the exact same minimal grant as the main window's own capability (core:default); this app has no fs/shell/http/dialog plugin installed at all, so none of these windows ever has filesystem, shell, network, or database access.",
   "windows": [
-    "display"
+    "display",
+    "display-confidence",
+    "display-lobby"
   ],
   "permissions": [
     "core:default"
