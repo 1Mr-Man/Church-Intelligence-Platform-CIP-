@@ -1,0 +1,47 @@
+{
+  "phase": "3.8.7.5",
+  "summary": "Real-code evidence for bounded transcript segmentation (Part A) and the Live Intelligence Router (Part B), plus direct compiled-binary proof.",
+  "trigger": "The operator's own two-part design following Phase 3.8.7.4's audit: (A) stop treating Whisper's ~3s buffering window as the unit of persistence/analysis - accumulate into bounded 12-20s logical segments instead, and (B) route each completed segment through Bible, Sermon, Service Phase, Prayer/Worship (via Sermon/Service's own internal detection), and Music-text, reusing each engine's already-tested analyze_and_queue unchanged.",
+  "partA_segmentation": {
+    "newModule": "apps/desktop/src-tauri/src/segmentation.rs - TranscriptSegmenter, deliberately Tauri-agnostic, owned exclusively by one spawn_speech_worker thread per listening session (mirrors acoustic::AcousticWorkerState's ownership pattern).",
+    "windowDesign": "Concatenates consecutive raw Whisper-window segments' text until the accumulated span reaches a 15s target (the middle of the operator's 12-20s band); given Whisper's fixed ~3.0s emission cadence (CHUNK_SAMPLES, unchanged), this lands segments between 15s and ~18s in practice.",
+    "deliberatelyNotImplemented": "Pause/silence-based early flushing - confirmed by re-reading ai/speech/src/whisper.rs fresh this phase that feed_audio triggers run_inference() purely on buffer.len() >= CHUNK_SAMPLES, with no VAD/silence signal anywhere. Inventing one would be guessing at a boundary CIP cannot detect - explicitly deferred as a distinct, larger future design needing new audio-layer evidence.",
+    "overloadInteraction": "spawn_speech_worker's existing Phase 3.8.7.3 overload-drain branch now also calls segmenter.reset() alongside SpeechEngine::discard_buffered_audio(), preventing pre-overload accumulated text from being spliced onto unrelated post-recovery text - the same discontinuous-buffer problem discard_buffered_audio prevents one layer down.",
+    "stopMidWindow": "spawn_speech_worker's loop, on channel closure (stop_listening), now calls segmenter.flush_remaining() and routes any real partial-window text through the same finalize_and_route_segment path (generation-checked) - previously a sub-threshold Whisper buffer was simply lost on stop; at the new coarser 12-20s grain this would otherwise discard far more real speech.",
+    "unitTestsAdded": [
+      "stays_open_below_the_target_window",
+      "flushes_once_the_target_window_is_reached_and_concatenates_text_in_order",
+      "a_new_window_starts_clean_after_a_flush_no_reprocessing_of_old_text",
+      "whitespace_only_raw_segments_never_produce_a_flushed_segment_on_their_own",
+      "flush_remaining_returns_none_when_nothing_is_buffered",
+      "flush_remaining_force_closes_a_short_partial_window_on_stop",
+      "reset_discards_buffered_text_without_producing_a_segment",
+      "averages_confidence_across_every_accumulated_raw_segment",
+      "a_single_raw_segment_at_or_past_the_target_flushes_immediately"
+    ]
+  },
+  "partB_router": {
+    "insertionPoint": "commands.rs::route_segment_to_live_intelligence_engines, called from the new finalize_and_route_segment (shared by handle_audio_chunk's normal flush and spawn_speech_worker's stop-mid-window flush) immediately after handle_final_transcript succeeds - the exact insertion point Phase 3.8.7.4's audit identified.",
+    "contextReuse": "Builds one IntelligenceContext via the existing build_music_context and reuses it for Sermon/Service/Music, rather than each rebuilding/re-locking it independently like three separate manual commands would.",
+    "sermonRouting": "route_segment_to_sermon calls crate::sermon::analyze_and_queue against AppState.sermon_engine unchanged, mirroring analyze_sermon_transcript's post-context logic exactly (same SermonFindingDetected/SermonStateChanged/SermonThemeChanged/SermonStructureUpdated event emissions, snapshot-diffing). Covers Prayer detection for free - PrayerPoint is a SermonElementKind this engine already detects internally, confirmed in Phase 3.8.7.4's audit.",
+    "serviceRouting": "route_segment_to_service calls crate::service::analyze_and_queue against AppState.service_engine unchanged, mirroring analyze_service_transcript's post-context logic exactly (same ServicePhaseChanged/ServiceAnomalyDetected event emissions and timeline records). Covers Worship detection for free - ServicePhase::Worship is a phase this engine already detects internally.",
+    "musicTextRouting": "route_segment_to_music_text resolves the registry's Music engine and calls music::analyze_and_queue unchanged, mirroring analyze_music_transcript's post-context logic exactly. Included because Phase 3.8.7.4's audit found this exact engine already built to accept arbitrary transcript text safely - its own distinctiveness/confidence gating already returns zero findings for non-lyric prose.",
+    "deliberatelyExcluded": "Cross-Domain Correlation and Content Intelligence - both explicitly documented in their own doc comments as 'an explicit operator/diagnostic action, never triggered automatically by a transcript segment arriving,' a considered Phase 2.4/2.7/2.8 design decision this router does not reverse. Automatic Altar Call detection - SermonSectionKind::AltarCall exists only as an operator-assignable label with no phrase detector (Phase 3.8.7.4 Finding); there is no engine to route to.",
+    "noNewEngineLogic": "Every analyze_and_queue call, event name, and timeline record shape is copied verbatim from the corresponding manual command - the router adds a new caller, not new domain logic, no new database schema, no new event contracts, no new Tauri commands."
+  },
+  "directCompiledBinaryProof": {
+    "method": "x86_64-w64-mingw32-strings against the actual packaged installer's extracted cip-desktop.exe",
+    "buildCommitEmbedded": "'88a60b2ac17c' found verbatim - the real baseline commit (Phase 3.8.7.4) this build was made against",
+    "symbolsFound": [
+      "cip_desktop_lib::segmentation::TranscriptSegmenter::push",
+      "cip_desktop_lib::segmentation::TranscriptSegmenter::flush (as an LLVM-suffixed local symbol)",
+      "cip_desktop_lib::segmentation::TranscriptSegmenter::flush_remaining",
+      "cip_desktop_lib::segmentation::TranscriptSegmenter::reset",
+      "cip_desktop_lib::commands::finalize_and_route_segment",
+      "core::ptr::drop_in_place<cip_desktop_lib::segmentation::TranscriptSegmenter>"
+    ],
+    "inlinedAsExpected": "route_segment_to_live_intelligence_engines and its three per-domain helpers (route_segment_to_sermon/service/music_text) were inlined by the release-mode optimizer - each has exactly one call site, the classic case LLVM inlines. Expected, not a gap; their behavior is verified via the full regression suite and via being byte-identical copies of each manual command's already-tested logic.",
+    "whisperSymbolsStillPresent": "whisper_full_with_state, ggml_backend_init - whisper feature unaffected by this phase"
+  },
+  "regressionProof": "cargo fmt --check, cargo clippy --all-targets -D warnings (default and --features whisper): clean. cargo test --workspace (both feature configs): cip-desktop 246/246 passed (up from 237 - 9 new segmentation unit tests), cip-ai-speech --features whisper 7/7 passed, every other workspace crate green, zero failures anywhere. cargo check --target x86_64-pc-windows-gnu --features whisper: clean. Frontend (unchanged this phase - no new commands/events/contracts): typecheck (0 errors), lint (0 errors, 4 pre-existing warnings unchanged), test (210/210 passed, unchanged count), build clean."
+}

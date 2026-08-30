@@ -16,6 +16,7 @@ use crate::persistence;
 use crate::pipeline::handle_final_transcript;
 use crate::presentation;
 use crate::presentation_display;
+use crate::segmentation::TranscriptSegmenter;
 use crate::sermon_foundation;
 use crate::state::{AppState, DEFAULT_TRANSLATION_ID};
 use crate::timeline::{self, TimelineEntry};
@@ -1422,6 +1423,12 @@ fn spawn_speech_worker(
     generation: u64,
 ) {
     std::thread::spawn(move || {
+        // Phase 3.8.7.5 Part A: owned exclusively by this worker thread for
+        // the lifetime of this one listening session - never shared, never
+        // behind a `Mutex` (mirrors `acoustic::AcousticWorkerState`). See
+        // `segmentation.rs`'s own module docs.
+        let mut segmenter = TranscriptSegmenter::new();
+
         while let Ok(chunk) = rx.recv() {
             let chunk_ms = chunk_duration_ms(&chunk);
             saturating_sub_u64(&pending_ms, chunk_ms);
@@ -1455,6 +1462,13 @@ fn spawn_speech_worker(
                     .lock()
                     .expect("speech_engine mutex poisoned")
                     .discard_buffered_audio();
+                // Phase 3.8.7.5: discard any partially-accumulated logical
+                // segment too - otherwise pre-overload text would be
+                // spliced onto unrelated post-recovery text, the same
+                // discontinuous-buffer problem `discard_buffered_audio`
+                // exists to prevent one layer down. See
+                // `docs/phase-3-8-7-5-audit.md`.
+                segmenter.reset();
                 {
                     let mut diag = state
                         .speech_diagnostics
@@ -1471,7 +1485,19 @@ fn spawn_speech_worker(
                 continue;
             }
 
-            handle_audio_chunk(&app, service_id, chunk, generation);
+            handle_audio_chunk(&app, service_id, chunk, generation, &mut segmenter);
+        }
+
+        // Phase 3.8.7.5: `stop_listening` closed the channel - whatever is
+        // still buffered in the segmenter (less than one full 12-20s
+        // window) is real speech that must not be silently dropped just
+        // because listening stopped mid-window.
+        if let Some(mut remaining) = segmenter.flush_remaining() {
+            let state = app.state::<AppState>();
+            if state.listening_generation.load(Ordering::SeqCst) == generation {
+                remaining.sequence = state.transcript_sequence.fetch_add(1, Ordering::SeqCst);
+                finalize_and_route_segment(&app, &state, service_id, remaining);
+            }
         }
     });
 }
@@ -1492,7 +1518,17 @@ fn spawn_speech_worker(
 /// emitted/persisted, so a worker whose channel closed but is still
 /// finishing an in-flight `feed_audio` call cannot write output into a
 /// newer listening session that has since started.
-fn handle_audio_chunk(app: &AppHandle, service_id: Uuid, chunk: AudioChunk, generation: u64) {
+///
+/// `segmenter` (Phase 3.8.7.5 Part A) accumulates each raw ~3s Whisper
+/// window into a bounded 12-20s logical segment - only a completed
+/// window is ever persisted, routed, or emitted. See `segmentation.rs`.
+fn handle_audio_chunk(
+    app: &AppHandle,
+    service_id: Uuid,
+    chunk: AudioChunk,
+    generation: u64,
+    segmenter: &mut TranscriptSegmenter,
+) {
     let state = app.state::<AppState>();
 
     let segments = {
@@ -1632,7 +1668,7 @@ fn handle_audio_chunk(app: &AppHandle, service_id: Uuid, chunk: AudioChunk, gene
         .lock()
         .expect("speech_error mutex poisoned") = None;
 
-    for mut segment in segments {
+    for segment in segments {
         // Phase 3.8.7.3 Finding 4: discard output from a listening session
         // that has since been superseded by a newer `start_listening` call
         // - see this function's own docs and `docs/phase-3-8-7-3-audit.md`.
@@ -1651,63 +1687,308 @@ fn handle_audio_chunk(app: &AppHandle, service_id: Uuid, chunk: AudioChunk, gene
             continue;
         }
 
-        segment.sequence = state.transcript_sequence.fetch_add(1, Ordering::SeqCst);
-        let segment_for_event = segment.clone();
-
-        let pipeline_start = std::time::Instant::now();
-        let processed = {
-            let db = state.db.lock().expect("db connection poisoned");
-            let mut context = state
-                .context_manager
-                .lock()
-                .expect("context_manager mutex poisoned");
-            handle_final_transcript(
-                &db,
-                state.bible_provider.as_ref(),
-                &mut context,
-                service_id,
-                &resolve_default_translation_id(&state),
-                segment,
-            )
+        // Phase 3.8.7.5 Part A: accumulate this raw ~3s Whisper window into
+        // a bounded 12-20s logical segment - only a completed window is
+        // ever persisted/routed/emitted. See `segmentation.rs`.
+        let Some(mut accumulated) = segmenter.push(&segment) else {
+            continue;
         };
-        let pipeline_duration_ms =
-            u64::try_from(pipeline_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-        state
-            .speech_diagnostics
-            .lock()
-            .expect("speech_diagnostics mutex poisoned")
-            .last_transcript_pipeline_duration_ms = Some(pipeline_duration_ms);
+        accumulated.sequence = state.transcript_sequence.fetch_add(1, Ordering::SeqCst);
+        finalize_and_route_segment(app, &state, service_id, accumulated);
+    }
+}
 
-        match processed {
-            Ok(processed) => {
-                // Phase 2.4: the one real signal `service::transcript_freshness`
-                // reads - a genuine final segment from the live audio/
-                // speech pipeline, never the manual/test-mode harnesses
-                // (see `AppState::last_transcript_at`'s own docs).
-                *state
-                    .last_transcript_at
-                    .lock()
-                    .expect("last_transcript_at mutex poisoned") = Some(chrono::Utc::now());
-                let _ = emit(app, AppEvent::TranscriptUpdated, segment_for_event);
+/// Persists + Bible-detects one completed logical segment
+/// (`handle_final_transcript`), then - Phase 3.8.7.5 Part B - routes the
+/// same segment to every other live-connectable intelligence engine.
+/// Called both from `handle_audio_chunk`'s normal per-window flush and
+/// from `spawn_speech_worker`'s stop-mid-window flush, so both paths
+/// share identical persistence/routing/event behavior.
+fn finalize_and_route_segment(
+    app: &AppHandle,
+    state: &tauri::State<'_, AppState>,
+    service_id: Uuid,
+    segment: TranscriptSegment,
+) {
+    let segment_for_event = segment.clone();
+
+    let pipeline_start = std::time::Instant::now();
+    let processed = {
+        let db = state.db.lock().expect("db connection poisoned");
+        let mut context = state
+            .context_manager
+            .lock()
+            .expect("context_manager mutex poisoned");
+        handle_final_transcript(
+            &db,
+            state.bible_provider.as_ref(),
+            &mut context,
+            service_id,
+            &resolve_default_translation_id(state),
+            segment,
+        )
+    };
+    let pipeline_duration_ms =
+        u64::try_from(pipeline_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+    state
+        .speech_diagnostics
+        .lock()
+        .expect("speech_diagnostics mutex poisoned")
+        .last_transcript_pipeline_duration_ms = Some(pipeline_duration_ms);
+
+    match processed {
+        Ok(processed) => {
+            // Phase 2.4: the one real signal `service::transcript_freshness`
+            // reads - a genuine final segment from the live audio/
+            // speech pipeline, never the manual/test-mode harnesses
+            // (see `AppState::last_transcript_at`'s own docs).
+            *state
+                .last_transcript_at
+                .lock()
+                .expect("last_transcript_at mutex poisoned") = Some(chrono::Utc::now());
+            let _ = emit(app, AppEvent::TranscriptUpdated, segment_for_event.clone());
+            {
                 let db = state.db.lock().expect("db connection poisoned");
                 emit_processed_segment_events(app, &db, service_id, &processed);
             }
+            route_segment_to_live_intelligence_engines(app, state, service_id, &segment_for_event);
+        }
+        Err(e) => {
+            log::error!(target: LogCategory::Database.target(), "failed to persist transcript segment: {e}");
+            // Phase 1.3 database failure recovery: report clearly,
+            // never silently swallow - this segment's persistence is
+            // lost, but the service/runtime state is untouched and
+            // the next segment still gets a fresh attempt.
+            let db = state.db.lock().expect("db connection poisoned");
+            record_timeline(
+                &db,
+                Some(service_id),
+                AppEvent::ErrorOccurred,
+                LogCategory::Database,
+                serde_json::json!({ "context": "persist_transcript_segment", "error": e.to_string() }),
+            );
+        }
+    }
+}
+
+/// Phase 3.8.7.5 Part B - the Live Intelligence Router
+/// (`docs/phase-3-8-7-4-audit.md`'s "smallest safe insertion point",
+/// `docs/phase-3-8-7-5-audit.md`). Runs immediately after Bible detection
+/// on the exact same bounded logical segment `handle_final_transcript`
+/// just persisted, calling each other live-connectable domain's
+/// already-tested `analyze_and_queue` the same way its own manual Tauri
+/// command already does - no new engine logic, no new database schema,
+/// no new event contracts, only a new caller.
+///
+/// Deliberately excludes Cross-Domain Correlation and Content
+/// Intelligence: both are explicitly documented, in their own doc
+/// comments, as "an explicit operator/diagnostic action, never triggered
+/// automatically by a transcript segment arriving" - a considered
+/// design decision from Phase 2.4/2.7/2.8 this router does not reverse.
+///
+/// Builds one `IntelligenceContext` and reuses it for all three engines
+/// below, rather than each rebuilding/re-locking it independently like
+/// three separate manual commands would.
+fn route_segment_to_live_intelligence_engines(
+    app: &AppHandle,
+    state: &tauri::State<'_, AppState>,
+    service_id: Uuid,
+    segment: &TranscriptSegment,
+) {
+    let context = match build_music_context(state, service_id) {
+        Ok(context) => context,
+        Err(e) => {
+            log::error!(
+                target: LogCategory::App.target(),
+                "live intelligence router: failed to build context: {e}"
+            );
+            return;
+        }
+    };
+
+    route_segment_to_sermon(app, state, service_id, segment, &context);
+    route_segment_to_service(app, state, service_id, segment, &context);
+    route_segment_to_music_text(app, state, service_id, segment, &context);
+}
+
+/// Covers Sermon Intelligence **and** Prayer detection: `PrayerPoint` is
+/// a `SermonElementKind` this engine already detects internally
+/// (`core/sermon/src/detection.rs`) - no separate call is needed or
+/// exists (`docs/phase-3-8-7-4-audit.md`). Mirrors
+/// `analyze_sermon_transcript`'s post-context logic exactly.
+fn route_segment_to_sermon(
+    app: &AppHandle,
+    state: &tauri::State<'_, AppState>,
+    service_id: Uuid,
+    segment: &TranscriptSegment,
+    context: &IntelligenceContext,
+) {
+    let before = state.sermon_engine.snapshot();
+    let input = IntelligenceInput::new(service_id, segment.clone());
+    let queued = {
+        let mut findings = state
+            .intelligence_findings
+            .lock()
+            .expect("intelligence_findings mutex poisoned");
+        match crate::sermon::analyze_and_queue(&state.sermon_engine, &input, context, &mut findings)
+        {
+            Ok(queued) => queued,
             Err(e) => {
-                log::error!(target: LogCategory::Database.target(), "failed to persist transcript segment: {e}");
-                // Phase 1.3 database failure recovery: report clearly,
-                // never silently swallow - this segment's persistence is
-                // lost, but the service/runtime state is untouched and
-                // the next segment still gets a fresh attempt.
-                let db = state.db.lock().expect("db connection poisoned");
-                record_timeline(
-                    &db,
-                    Some(service_id),
-                    AppEvent::ErrorOccurred,
-                    LogCategory::Database,
-                    serde_json::json!({ "context": "persist_transcript_segment", "error": e.to_string() }),
+                log::warn!(
+                    target: LogCategory::App.target(),
+                    "live intelligence router: sermon analysis failed: {e}"
                 );
+                return;
             }
         }
+    };
+    let after = state.sermon_engine.snapshot();
+
+    for finding in &queued {
+        let _ = emit(app, AppEvent::SermonFindingDetected, finding.clone());
+    }
+    if after.state != before.state {
+        let _ = emit(app, AppEvent::SermonStateChanged, after.state);
+    }
+    if after.theme != before.theme {
+        let _ = emit(app, AppEvent::SermonThemeChanged, after.theme.clone());
+    }
+    if after.points.len() != before.points.len()
+        || after.points.last().map(|p| p.sub_points.len())
+            != before.points.last().map(|p| p.sub_points.len())
+    {
+        let _ = emit(app, AppEvent::SermonStructureUpdated, after.points.clone());
+    }
+}
+
+/// Covers Service Phase Intelligence **and** Worship detection:
+/// `ServicePhase::Worship` is a phase this engine already detects
+/// internally (`core/intelligence/src/service_adapter.rs`) - no separate
+/// call is needed or exists (`docs/phase-3-8-7-4-audit.md`). Mirrors
+/// `analyze_service_transcript`'s post-context logic exactly.
+fn route_segment_to_service(
+    app: &AppHandle,
+    state: &tauri::State<'_, AppState>,
+    service_id: Uuid,
+    segment: &TranscriptSegment,
+    context: &IntelligenceContext,
+) {
+    let input = IntelligenceInput::new(service_id, segment.clone());
+    let queued = {
+        let mut findings = state
+            .intelligence_findings
+            .lock()
+            .expect("intelligence_findings mutex poisoned");
+        match crate::service::analyze_and_queue(
+            &state.service_engine,
+            &input,
+            context,
+            &mut findings,
+        ) {
+            Ok(queued) => queued,
+            Err(e) => {
+                log::warn!(
+                    target: LogCategory::App.target(),
+                    "live intelligence router: service analysis failed: {e}"
+                );
+                return;
+            }
+        }
+    };
+    if queued.is_empty() {
+        return;
+    }
+    {
+        let db = state.db.lock().expect("db connection poisoned");
+        for finding in &queued {
+            let event = if crate::service::is_anomaly_finding(finding) {
+                AppEvent::ServiceAnomalyDetected
+            } else {
+                AppEvent::ServicePhaseChanged
+            };
+            record_timeline(
+                &db,
+                Some(service_id),
+                event,
+                LogCategory::App,
+                serde_json::json!({
+                    "findingId": finding.id,
+                    "summary": &finding.summary,
+                    "confidence": finding.confidence.score,
+                }),
+            );
+        }
+    }
+    for finding in &queued {
+        let event = if crate::service::is_anomaly_finding(finding) {
+            AppEvent::ServiceAnomalyDetected
+        } else {
+            AppEvent::ServicePhaseChanged
+        };
+        let _ = emit(app, event, finding.clone());
+    }
+}
+
+/// Music's text/lyric path - included because Phase 3.8.7.4's audit
+/// found this exact engine already built to accept arbitrary transcript
+/// text safely: its own distinctiveness/confidence gating already
+/// returns zero findings for non-lyric prose (Phase 2.1's own design),
+/// so routing ordinary sermon speech through it is not a new safety
+/// concern this router introduces. Mirrors `analyze_music_transcript`'s
+/// post-context logic exactly.
+fn route_segment_to_music_text(
+    app: &AppHandle,
+    state: &tauri::State<'_, AppState>,
+    service_id: Uuid,
+    segment: &TranscriptSegment,
+    context: &IntelligenceContext,
+) {
+    let Some(engine) = state
+        .intelligence_registry
+        .resolve(IntelligenceDomain::Music)
+    else {
+        // Not registered in this build - `lib.rs` always registers it
+        // today, so this is defensive, not an expected runtime state.
+        return;
+    };
+    let input = IntelligenceInput::new(service_id, segment.clone());
+    let queued = {
+        let mut findings = state
+            .intelligence_findings
+            .lock()
+            .expect("intelligence_findings mutex poisoned");
+        match music::analyze_and_queue(engine, &input, context, &mut findings) {
+            Ok(queued) => queued,
+            Err(e) => {
+                log::warn!(
+                    target: LogCategory::App.target(),
+                    "live intelligence router: music transcript analysis failed: {e}"
+                );
+                return;
+            }
+        }
+    };
+    if queued.is_empty() {
+        return;
+    }
+    {
+        let db = state.db.lock().expect("db connection poisoned");
+        for finding in &queued {
+            record_timeline(
+                &db,
+                Some(service_id),
+                AppEvent::MusicFindingDetected,
+                LogCategory::Music,
+                serde_json::json!({
+                    "findingId": finding.id,
+                    "summary": &finding.summary,
+                    "confidence": finding.confidence.score,
+                }),
+            );
+        }
+    }
+    for finding in &queued {
+        let _ = emit(app, AppEvent::MusicFindingDetected, finding.clone());
     }
 }
 

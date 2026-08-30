@@ -15,6 +15,7 @@ mod pilot_evidence;
 mod pipeline;
 mod presentation;
 mod presentation_display;
+mod segmentation;
 mod sermon;
 mod sermon_foundation;
 mod service;
