@@ -4817,6 +4817,43 @@ pub fn get_sermon(sermon_id: String, state: State<'_, AppState>) -> Result<Sermo
         .map_err(log_and_return)
 }
 
+/// Phase 3.9: assembles the currently-active sermon's already-captured
+/// data (sections, findings, Bible suggestions, transcript, timeline)
+/// into one read-only bundle - see `crate::harvest`'s own module docs for
+/// why this is deliberately not a new detection pass. Scoped to the
+/// active sermon only: `IntelligenceFinding`'s `sermon_id` linkage lives
+/// in the in-memory `FindingQueue` (never persisted, by the same Phase
+/// 2.0 design `docs/phase-3-8-7-6-live-intelligence-integration-audit.md`
+/// documents for every other domain), so harvesting a past sermon after
+/// an app restart would silently produce an empty `elements` list - this
+/// command refuses that case honestly instead.
+#[tauri::command]
+pub fn harvest_sermon(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::harvest::SermonHarvest, AppError> {
+    let sermon = active_sermon_or_error(&state).map_err(log_and_return)?;
+    let db = state.db.lock().expect("db connection poisoned");
+    let findings = state
+        .intelligence_findings
+        .lock()
+        .expect("intelligence_findings mutex poisoned");
+    let harvest = crate::harvest::harvest_sermon(&db, &findings, &sermon)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
+    drop(findings);
+    record_timeline(
+        &db,
+        Some(sermon.service_id),
+        AppEvent::SermonHarvested,
+        LogCategory::App,
+        serde_json::json!({ "sermonId": sermon.id, "elementCount": harvest.elements.len() }),
+    );
+    drop(db);
+    let _ = emit(&app, AppEvent::SermonHarvested, harvest.clone());
+    Ok(harvest)
+}
+
 // --- cross-domain intelligence (Phase 2.4, extended in Phase 2.8) -----------
 //
 // The correlation layer only ever *reads* `state.intelligence_findings`

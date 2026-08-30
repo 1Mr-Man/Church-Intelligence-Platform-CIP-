@@ -1,0 +1,40 @@
+{
+  "phase": "3.9",
+  "summary": "Real-code evidence for the Sermon Harvest one-click aggregation bundle: the first of five pillars identified in the gap analysis against the project's original master specification document.",
+  "trigger": "The user shared the project's original master architecture document plus example videos and asked to continue building out the remaining vision, explicitly authorizing all five identified gaps: multi-screen presentation output, semantic/paraphrase Bible detection, Sermon Harvest, real audio fingerprinting, and multi-language support (the latter confirmed as a near-term priority). The user also confirmed keeping Sermon Intelligence strict/evidence-only rather than adopting the document's LLM-based generative AI Summary/Reflection framing.",
+  "whySequencedFirst": "Sermon Harvest required zero new dependencies, zero new detection logic, and zero new AI - it only assembles data this application already captures through five separately-tested pipelines (sermon foundation sections, Sermon Intelligence findings, Bible suggestions, transcript, timeline) into one response. This kept the first phase of a five-pillar scope small, reviewable, and consistent with this project's one-phase-at-a-time discipline.",
+  "auditedBeforeImplementing": {
+    "sermonIdLinkage": "IntelligenceFinding already carries a sermon_id: Option<Uuid> field (added Phase 2.6), confirmed by reading core/intelligence's finding.rs directly rather than assuming.",
+    "findingQueuePersistence": "FindingQueue is in-memory only, never persisted to SQLite - a deliberate Phase 2.0 design already documented in docs/phase-3-8-7-6-live-intelligence-integration-audit.md. This is the one real scope boundary this phase surfaces honestly: Harvest only ever works for the currently active sermon, same app session.",
+    "existingReadFunctions": "persistence::list_sermon_sections, persistence::list_suggestions, persistence::list_transcript_segments (bounded), timeline::list_timeline (bounded) all already existed and needed no changes - confirmed via grep before writing harvest.rs, not assumed.",
+    "elementKindTaxonomy": "SermonElementKind (19 kinds: MainPoint/SubPoint/PrayerPoint/FoodForThought/Takeaway/Question/etc.) is embedded only as a text prefix in IntelligenceFinding.summary, never a structured field - confirmed no re-classification was attempted; the taxonomy is presented exactly as the Sermon engine already wrote it."
+  },
+  "designDecision": "harvest_sermon(conn, findings, sermon) is a pure aggregation function with no detection logic of its own: it does not classify text, does not invent a title/summary when one is absent, and runs no new pass over the transcript. Elements are filtered to domain==Sermon && sermon_id==Some(sermon.id) && status != Rejected (excludes operator-rejected findings but deliberately keeps Detected/Reviewed/Accepted - harvesting only Accepted would silently drop everything the operator hadn't reviewed yet). The Tauri command calls active_sermon_or_error (the same guard every other active-sermon-scoped command uses) and refuses cleanly for a past/restarted-session sermon rather than silently returning an incomplete elements: [] bundle.",
+  "filesChanged": {
+    "apps/desktop/src-tauri/src/harvest.rs": "New module - SermonHarvest struct, harvest_sermon() pure aggregation function, HARVEST_TRANSCRIPT_LIMIT/HARVEST_TIMELINE_LIMIT bounds (5,000 each, generous for a multi-hour service), 3 unit tests.",
+    "apps/desktop/src-tauri/src/commands.rs": "New harvest_sermon Tauri command - resolves the active sermon via active_sermon_or_error, calls harvest::harvest_sermon, records a SermonHarvested timeline entry, emits a SermonHarvested event.",
+    "apps/desktop/src-tauri/src/lib.rs": "Registered mod harvest; and commands::harvest_sermon in the invoke_handler.",
+    "apps/desktop/src-tauri/src/events.rs": "New AppEvent::SermonHarvested variant, mapped to the SERMON_HARVESTED name.",
+    "apps/desktop/src/events/eventNames.ts": "Added SermonHarvested: \"SERMON_HARVESTED\" to the AppEvents object mirroring the Rust enum.",
+    "apps/desktop/src/domain/sermon.ts": "New SermonHarvest interface, importing from the ai/intelligence/live domain barrels.",
+    "apps/desktop/src/lib/commands.ts": "New harvestSermon(): Promise<SermonHarvest> wrapper.",
+    "apps/desktop/src/components/LiveChurchBrain.tsx": "New \"Sermon Harvest\" panel - a single button (disabled when no sermon is active) that fetches and displays the bundle in five collapsible <details> sections (Sections/Elements/Scripture/Transcript/Timeline)."
+  },
+  "scopeConfirmedNarrow": "No new database migration, no new persistence, no new detection engine, no new dependency. Only a read-back aggregation of already-persisted/already-in-memory data plus one new event/command/UI panel following the exact record_timeline + emit convention every other explicit operator action in this codebase already uses.",
+  "regressionProof": "Backend: cargo fmt --check clean, cargo clippy --all-targets -- -D warnings clean (both default and --features whisper), cargo test -p cip-desktop 251/251 passed (up from 248 - 3 new harvest tests: assembly correctness including cross-sermon leak exclusion, no-title-fabrication, keeps-not-only-accepted-findings). Frontend: tsc -b 0 errors, oxlint 0 errors (same 4 pre-existing warnings), vitest 210/210 passed (eventNames.test.ts count guard updated from 53 to 54 for the new SERMON_HARVESTED event), vite build clean.",
+  "directCompiledBinaryProof": {
+    "method": "x86_64-w64-mingw32-strings against the actual packaged installer's extracted cip-desktop.exe",
+    "buildCommitEmbedded": "'af7223a8' / 'af7223a85dde' found verbatim - the real baseline commit (Phase 3.8.7.8) this build was made against",
+    "commandSymbolsConfirmedPresent": [
+      "harvest_sermon literal command name, present in the invoke handler's registered command-name table alongside every other existing command",
+      "_ZN15cip_desktop_lib8commands14harvest_sermon17h66da0d91da7a8686E - the harvest_sermon command function symbol itself"
+    ],
+    "typeSymbolsConfirmedPresent": [
+      "_ZN4core3ptr60drop_in_place$LT$cip_desktop_lib..harvest..SermonHarvest$GT$... - drop glue for the new SermonHarvest struct",
+      "_ZN15cip_desktop_lib7harvest1_96_$LT$impl$u20$serde_core..ser..Serialize$u20$for$u20$cip_desktop_lib..harvest..SermonHarvest$GT$9serialize... - the generated Serialize impl for SermonHarvest"
+    ],
+    "eventStringConfirmedPresent": "SERMON_HARVESTED literal string found in the binary",
+    "whisperFeatureUnaffected": "whisper_full_with_state still present (96 occurrences, same as prior phases) - direct proof the whisper feature build is unaffected by this phase's changes",
+    "note": "harvest_sermon's own body (mostly calls into already-tested persistence/timeline functions) is small enough that most of its logic is verified via the 3 dedicated unit tests rather than binary disassembly, consistent with how this project verifies non-trivial-but-small orchestration functions elsewhere."
+  }
+}

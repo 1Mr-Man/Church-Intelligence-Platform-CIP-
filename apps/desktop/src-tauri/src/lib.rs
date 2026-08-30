@@ -7,6 +7,7 @@ mod content_intelligence;
 mod cross_domain;
 mod errors;
 pub mod events;
+mod harvest;
 mod intelligence;
 pub mod logging;
 mod music;
@@ -455,6 +456,7 @@ pub fn run() {
             commands::list_sermon_sections,
             commands::list_sermon_history,
             commands::get_sermon,
+            commands::harvest_sermon,
             commands::analyze_bible_transcript,
             commands::analyze_cross_domain,
             commands::list_cross_domain_correlations,

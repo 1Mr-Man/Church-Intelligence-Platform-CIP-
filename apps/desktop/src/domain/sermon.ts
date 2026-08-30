@@ -8,6 +8,9 @@
  * types here are the taxonomy label and the read-only theme/state/
  * structure snapshot `getSermonState` returns.
  */
+import type { Suggestion, TranscriptSegment } from "./ai";
+import type { IntelligenceFinding } from "./intelligence";
+import type { TimelineEntry } from "./live";
 
 /** The closed sermon element taxonomy (spec section 6) - informational
  * only on the frontend (every real finding already carries a human-
@@ -169,4 +172,23 @@ export interface SermonSegment {
 export interface SermonFoundationSummary {
   activeSermon: Sermon | null;
   currentSection: SermonSection | null;
+}
+
+/** Phase 3.9: everything `harvestSermon` already had captured for one
+ * sermon, assembled into one bundle - see `crate::harvest`'s own module
+ * docs (Rust side) for why this is a pure read-only aggregation with no
+ * new detection/generation of its own. Every field mirrors data already
+ * shown elsewhere in the app (sections, findings, suggestions, transcript,
+ * timeline); nothing here is unique to this command except the bundling. */
+export interface SermonHarvest {
+  sermon: Sermon;
+  sections: SermonSection[];
+  /** Non-rejected `IntelligenceFinding`s (`domain: "sermon"`) tied to this
+   * sermon - see `domain/intelligence.ts`. Each finding's own `summary`
+   * is already presentation-ready text (e.g. "Prayer Point: ..."). */
+  elements: IntelligenceFinding[];
+  scripture: Suggestion[];
+  transcript: TranscriptSegment[];
+  timeline: TimelineEntry[];
+  generatedAt: string; // ISO-8601
 }

@@ -152,6 +152,10 @@ pub enum AppEvent {
     /// transcript segment itself was created, modified, or reassigned
     /// silently.
     SermonSegmentLinked,
+    /// The operator explicitly ran `harvest_sermon` (Phase 3.9) - a
+    /// read-only aggregation of already-captured data; never implies any
+    /// new detection ran or any data changed.
+    SermonHarvested,
 
     /// The Phase 2.7 content-intelligence layer structured a new content
     /// candidate from an already-proven finding (per the authoritative
@@ -234,6 +238,7 @@ impl AppEvent {
             AppEvent::SermonSpeakerChanged => "SERMON_SPEAKER_CHANGED",
             AppEvent::SermonMetadataChanged => "SERMON_METADATA_CHANGED",
             AppEvent::SermonSegmentLinked => "SERMON_SEGMENT_LINKED",
+            AppEvent::SermonHarvested => "SERMON_HARVESTED",
 
             AppEvent::ContentCandidateDetected => "CONTENT_CANDIDATE_DETECTED",
             AppEvent::ContentCandidateAccepted => "CONTENT_CANDIDATE_ACCEPTED",

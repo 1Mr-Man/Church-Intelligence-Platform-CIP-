@@ -18,6 +18,7 @@ import type {
   ScriptureDetection,
   ScriptureReference,
   SermonFoundationSummary,
+  SermonHarvest,
   SermonSegment,
   ServiceIntelligenceSummary,
   ServiceSession,
@@ -195,6 +196,11 @@ export function LiveChurchBrain() {
   const [sermonSpeakerNameInput, setSermonSpeakerNameInput] = useState("");
   const [sermonSpeakerRoleInput, setSermonSpeakerRoleInput] = useState<"primary" | "guest">("primary");
   const [sermonSectionChoice, setSermonSectionChoice] = useState("main_message");
+  // Sermon Harvest (Phase 3.9) - a read-only, on-demand aggregation of
+  // already-captured data (see `domain/sermon.ts`'s `SermonHarvest` docs).
+  // `null` until the operator explicitly requests it; never fetched
+  // automatically.
+  const [harvest, setHarvest] = useState<SermonHarvest | null>(null);
   // Cross-Domain Intelligence (Phase 2.4) - read-only: correlations only
   // ever appear from an explicit "Run analysis" action or the
   // review/dismiss operator actions below, never automatically. `bibleManualText`
@@ -1704,6 +1710,113 @@ export function LiveChurchBrain() {
               </li>
             ))}
           </ul>
+        )}
+      </section>
+
+      <section className="live-brain__panel">
+        <h2>Sermon Harvest</h2>
+        <p className="live-brain__hint">
+          One-click, read-only aggregation of everything already captured for the active sermon - sections, findings,
+          Bible suggestions, transcript, and timeline (Phase 3.9). Runs no new detection and generates no new text;
+          see `docs/phase-3-9-sermon-harvest.md`.
+        </p>
+        <button
+          type="button"
+          disabled={!sermonFoundation?.activeSermon || isBusy("harvest-sermon")}
+          title={!sermonFoundation?.activeSermon ? "No sermon is currently active" : undefined}
+          onClick={() =>
+            withBusy("harvest-sermon", async () => {
+              const result = await commands.harvestSermon();
+              setHarvest(result);
+            })
+          }
+        >
+          Harvest Sermon
+        </button>
+
+        {harvest && (
+          <div className="live-brain__suggestion-card">
+            <p>
+              <strong>{harvest.sermon.title ?? "(untitled sermon)"}</strong>
+              {harvest.sermon.speaker && <> &middot; {harvest.sermon.speaker.name}</>}
+            </p>
+            <p className="live-brain__hint">Generated {formatClockTime(harvest.generatedAt)}</p>
+
+            <details className="live-brain__manual-entry" open>
+              <summary>Sections ({harvest.sections.length})</summary>
+              {harvest.sections.length === 0 ? (
+                <p className="live-brain__hint">No sections recorded.</p>
+              ) : (
+                <ul className="live-brain__content-items">
+                  {harvest.sections.map((s) => (
+                    <li key={s.id}>
+                      {s.kind.toUpperCase()} - {formatClockTime(s.startedAt)}
+                      {s.endedAt && <> to {formatClockTime(s.endedAt)}</>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </details>
+
+            <details className="live-brain__manual-entry">
+              <summary>Sermon elements ({harvest.elements.length})</summary>
+              {harvest.elements.length === 0 ? (
+                <p className="live-brain__hint">No sermon elements recorded.</p>
+              ) : (
+                <ul className="live-brain__content-items">
+                  {harvest.elements.map((f) => (
+                    <li key={f.id}>
+                      {f.summary} ({Math.round(f.confidence.score * 100)}%, {f.status.toUpperCase()})
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </details>
+
+            <details className="live-brain__manual-entry">
+              <summary>Scripture ({harvest.scripture.length})</summary>
+              {harvest.scripture.length === 0 ? (
+                <p className="live-brain__hint">No Scripture suggestions recorded.</p>
+              ) : (
+                <ul className="live-brain__content-items">
+                  {harvest.scripture.map((s) => (
+                    <li key={s.id}>
+                      {s.kind.type === "scripture" ? s.kind.reference : s.kind.label} ({s.status.toUpperCase()})
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </details>
+
+            <details className="live-brain__manual-entry">
+              <summary>Transcript ({harvest.transcript.length} segments)</summary>
+              {harvest.transcript.length === 0 ? (
+                <p className="live-brain__hint">No transcript recorded.</p>
+              ) : (
+                <ul className="live-brain__transcript">
+                  {harvest.transcript.map((seg) => (
+                    <li key={seg.id}>&ldquo;{seg.text}&rdquo;</li>
+                  ))}
+                </ul>
+              )}
+            </details>
+
+            <details className="live-brain__manual-entry">
+              <summary>Timeline ({harvest.timeline.length} events)</summary>
+              {harvest.timeline.length === 0 ? (
+                <p className="live-brain__hint">No timeline events recorded.</p>
+              ) : (
+                <ul className="live-brain__timeline">
+                  {harvest.timeline.map((entry) => (
+                    <li key={entry.id}>
+                      <span className="live-brain__timestamp">{formatClockTime(entry.createdAt)}</span>
+                      {describeTimelineEntry(entry)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </details>
+          </div>
         )}
       </section>
 

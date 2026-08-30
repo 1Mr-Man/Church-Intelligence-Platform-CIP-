@@ -1,0 +1,38 @@
+{
+  "phase": "3.9",
+  "summary": "Direct extraction and inspection of the rebuilt NSIS installer, confirming this phase's new Sermon Harvest code is genuinely compiled in and every prior phase's fix still holds.",
+  "extractionMethod": "7z x \"Church Intelligence Platform_0.1.0_x64-setup.exe\"",
+  "installerChecksum": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "d72008247cf05bfb92681912b32bd5fe730ae1e8297436bac654121e089e2199",
+    "sizeBytes": 8606001,
+    "previousPhaseSha256": "5587f4ec47a80a2062995e35fc48b222fae27f5dd96722d98dea562fa3910634",
+    "previousPhaseSizeBytes": 8587913,
+    "sizeChangeNote": "Larger by 18,088 bytes - expected for a new module (harvest.rs), a new Tauri command, a new event, and a new frontend UI panel with five collapsible result sections, on top of an already-optimized codebase."
+  },
+  "extractedInstallerContents": [
+    "libwinpthread-1.dll",
+    "cip-desktop.exe",
+    "WebView2Loader.dll",
+    "uninstall.exe",
+    "libstdc++-6.dll",
+    "libgcc_s_seh-1.dll"
+  ],
+  "runtimeDllsStillPresent": {
+    "libstdc++-6.dll": { "sizeBytes": 4596950 },
+    "libgcc_s_seh-1.dll": { "sizeBytes": 169919 },
+    "libwinpthread-1.dll": { "sizeBytes": 94077 },
+    "note": "Byte sizes identical to every prior phase's - same source DLLs, same toolchain, unaffected by this phase."
+  },
+  "cipDesktopExeVerification": {
+    "fileCommand": "PE32+ executable (GUI) x86-64 (stripped to external PDB), for MS Windows, 11 sections",
+    "fileSizeBytes": 34529766,
+    "buildCommitEmbeddedProof": "x86_64-w64-mingw32-strings finds the literal substrings 'af7223a8' and 'af7223a85dde' embedded in the binary - the real Phase 3.8.7.8 baseline commit this build was made against.",
+    "sermonHarvestSymbolProof": "x86_64-w64-mingw32-strings confirms: (1) the literal command name 'harvest_sermon' is present in the invoke handler's registered command-name string table alongside every other existing command; (2) the mangled function symbol '_ZN15cip_desktop_lib8commands14harvest_sermon17h66da0d91da7a8686E' is present; (3) drop-glue and Serialize-impl symbols for the new SermonHarvest struct ('cip_desktop_lib..harvest..SermonHarvest') are present; (4) the literal event name string 'SERMON_HARVESTED' is present. Direct proof this phase's new backend code is genuinely compiled into this exact binary, not just present in source.",
+    "whisperFeatureSymbolProof": "whisper_full_with_state found 96 times (same count as the Phase 3.8.7.8 build) - unaffected by this phase.",
+    "dialogPluginSymbolProof": "tauri_plugin_dialog symbols still present - Phase 3.8.7.1's model-picker feature unaffected.",
+    "displayShortcutSymbolProof": "approve_suggestion, prepare_presentation, display_presentation command names still present in the invoke handler's command-name table - Phase 3.8.7.8's Bible Display shortcut unaffected.",
+    "overloadSegmenterSymbolProof": "commands::handle_audio_chunk, commands::finalize_and_route_segment, segmentation::TranscriptSegmenter symbols still present - Phase 3.8.7.7's fix unaffected."
+  },
+  "automatedVerification": "scripts/build-windows-whisper.sh's own final step (7z-extraction DLL-presence check) passed on this build, unchanged automation from Phase 3.8.6.1 - 'confirmed: libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll are all present in the installer'."
+}

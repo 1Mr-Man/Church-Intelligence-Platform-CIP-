@@ -89,6 +89,9 @@ export const AppEvents = {
   SermonMetadataChanged: "SERMON_METADATA_CHANGED",
   /** Payload is a `SermonSegment` (Phase 2.5). */
   SermonSegmentLinked: "SERMON_SEGMENT_LINKED",
+  /** Payload is a `SermonHarvest` (Phase 3.9) - a read-only aggregation,
+   * never implies any new detection ran or any data changed. */
+  SermonHarvested: "SERMON_HARVESTED",
 
   /** Payload is the new/updated `ContentCandidate` (Phase 2.7, per the
    * authoritative Phase 2 roadmap) - never a publish/schedule/presentation

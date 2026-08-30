@@ -38,6 +38,7 @@ import type {
   ScriptureContext,
   Sermon,
   SermonFoundationSummary,
+  SermonHarvest,
   SermonSection,
   SermonSegment,
   ServiceIntelligenceSummary,
@@ -624,6 +625,15 @@ export function listSermonHistory(limit: number): Promise<Sermon[]> {
  * currently active - the sermon archive's detail view. */
 export function getSermon(sermonId: string): Promise<Sermon> {
   return invokeCommand("get_sermon", { sermonId });
+}
+
+/** Phase 3.9: assembles the currently-active sermon's already-captured
+ * data (sections, findings, Bible suggestions, transcript, timeline) into
+ * one read-only bundle - see `domain/sermon.ts`'s `SermonHarvest` docs.
+ * Rejects if no sermon is currently active (mirrors every other
+ * active-sermon-scoped command). */
+export function harvestSermon(): Promise<SermonHarvest> {
+  return invokeCommand("harvest_sermon");
 }
 
 // --- bible intelligence bridge (Phase 2.4) --------------------------------------
