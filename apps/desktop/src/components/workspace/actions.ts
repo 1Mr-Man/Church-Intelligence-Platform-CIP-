@@ -8,14 +8,28 @@
  * so they can never duplicate IPC logic already living in one place (spec
  * rule 10).
  */
-export type UnifiedItemAction = "approve" | "reject" | "accept" | "acknowledge" | "review" | "dismiss";
+export type UnifiedItemAction =
+  | "approve"
+  | "display"
+  | "reject"
+  | "accept"
+  | "acknowledge"
+  | "review"
+  | "dismiss";
 
 /**
  * The actions available for one item, by domain and current status.
  * Mirrors exactly what the existing per-domain panels already offer -
  * never invents a new action a real command doesn't back:
  *
- * - `bible` (a `Suggestion`): approve / reject.
+ * - `bible` (a `Suggestion`): display / reject. "Display" replaces the old
+ *   "Approve" here (operator feedback: a live Bible reference shouldn't
+ *   need a second trip to the Presentation card and an extra click to
+ *   reach the screen) - it chains the same `approve_suggestion` +
+ *   `prepare_presentation` + `display_presentation` commands the
+ *   Presentation card's own three separate buttons already call, in one
+ *   operator action. No new backend command; see `handleUnifiedAction` in
+ *   `LiveChurchBrain.tsx`.
  * - `music` / `sermon` (an `IntelligenceFinding`): accept / reject.
  * - `service` (only ever an anomaly here - see `unifiedFeed.ts`'s docs on
  *   why transitions never reach the attention queue): acknowledge only.
@@ -25,7 +39,7 @@ export type UnifiedItemAction = "approve" | "reject" | "accept" | "acknowledge" 
 export function actionsFor(domain: string): UnifiedItemAction[] {
   switch (domain) {
     case "bible":
-      return ["approve", "reject"];
+      return ["display", "reject"];
     case "music":
     case "sermon":
       return ["accept", "reject"];
@@ -42,6 +56,7 @@ export function actionsFor(domain: string): UnifiedItemAction[] {
 
 export const ACTION_LABELS: Record<UnifiedItemAction, string> = {
   approve: "Approve",
+  display: "Display",
   reject: "Reject",
   accept: "Accept",
   acknowledge: "Acknowledge",

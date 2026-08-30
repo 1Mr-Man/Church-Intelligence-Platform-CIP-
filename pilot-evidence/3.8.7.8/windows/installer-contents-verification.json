@@ -1,0 +1,35 @@
+{
+  "phase": "3.8.7.8",
+  "summary": "Direct extraction and inspection of the rebuilt NSIS installer, confirming every prior phase's fix still holds after this frontend-only Bible Display shortcut change.",
+  "extractionMethod": "7z x \"Church Intelligence Platform_0.1.0_x64-setup.exe\"",
+  "installerChecksum": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "5587f4ec47a80a2062995e35fc48b222fae27f5dd96722d98dea562fa3910634",
+    "sizeBytes": 8587913,
+    "previousPhaseSha256": "3335f5101d0dbeb1d83dbeac567b83f9d56c5e836459c104459012a1ba2e9cbd",
+    "previousPhaseSizeBytes": 8587492,
+    "sizeChangeNote": "Slightly larger (+421 bytes) - expected for a small frontend bundle change (new action string, new handler branch), on top of an already-optimized codebase."
+  },
+  "extractedInstallerContents": [
+    "libwinpthread-1.dll",
+    "cip-desktop.exe",
+    "WebView2Loader.dll",
+    "uninstall.exe",
+    "libstdc++-6.dll",
+    "libgcc_s_seh-1.dll"
+  ],
+  "runtimeDllsStillPresent": {
+    "libstdc++-6.dll": { "sizeBytes": 4596950 },
+    "libgcc_s_seh-1.dll": { "sizeBytes": 169919 },
+    "libwinpthread-1.dll": { "sizeBytes": 94077 },
+    "note": "Byte sizes identical to prior phases' - same source DLLs, same toolchain, unaffected by this phase."
+  },
+  "cipDesktopExeVerification": {
+    "fileCommand": "PE32+ executable (GUI) x86-64 (stripped to external PDB), for MS Windows, 11 sections",
+    "buildCommitEmbeddedProof": "x86_64-w64-mingw32-strings finds the literal substring 'f410eb40' embedded in the binary - the real Phase 3.8.7.7 baseline commit this build was made against.",
+    "bibleDisplayShortcutSymbolProof": "x86_64-w64-mingw32-strings confirms the three chained command names (approve_suggestion, prepare_presentation, display_presentation) are still present in the invoke handler's registered command-name table and as their own function symbols - direct proof the pre-existing commands this phase's new frontend code calls are genuinely compiled into this exact binary. The frontend orchestration logic (which action label maps to which command sequence) lives in the minified JS bundle embedded in the binary and is verified via the frontend test suite rather than binary disassembly.",
+    "whisperFeatureSymbolProof": "whisper_full_with_state, ggml_backend_init still present - unaffected by this phase.",
+    "dialogPluginSymbolProof": "tauri_plugin_dialog FileDialogBuilder symbols still present - Phase 3.8.7.1's model-picker feature unaffected."
+  },
+  "automatedVerification": "scripts/build-windows-whisper.sh's own final step (7z-extraction DLL-presence check) passed on this build, unchanged automation from Phase 3.8.6.1 - 'confirmed: libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll are all present in the installer'."
+}

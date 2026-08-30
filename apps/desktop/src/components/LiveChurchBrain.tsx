@@ -580,6 +580,17 @@ export function LiveChurchBrain() {
       switch (item.domain) {
         case "bible":
           if (action === "approve") void withBusy(busyKey, async () => { await commands.approveSuggestion(item.id); });
+          else if (action === "display")
+            // Chains the exact same three commands the Presentation card's
+            // own Approve -> Prepare -> Display buttons already call, in
+            // one operator click - no new backend command. displayPresentation
+            // opens the display window itself if it isn't already open, so
+            // no separate "open display" step is needed here either.
+            void withBusy(busyKey, async () => {
+              await commands.approveSuggestion(item.id);
+              const prepared = await commands.preparePresentation(item.id);
+              await commands.displayPresentation(prepared.id);
+            });
           else if (action === "reject") void withBusy(busyKey, async () => { await commands.rejectSuggestion(item.id); });
           return;
         case "music":

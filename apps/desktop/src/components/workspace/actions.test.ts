@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { actionsFor } from "./actions";
 
 describe("actionsFor", () => {
-  it("offers approve/reject for the bible domain (a Suggestion)", () => {
-    expect(actionsFor("bible")).toEqual(["approve", "reject"]);
+  it("offers display/reject for the bible domain (a Suggestion) - display replaces approve so a live reference reaches the screen in one click", () => {
+    expect(actionsFor("bible")).toEqual(["display", "reject"]);
   });
 
   it("offers accept/reject for music and sermon findings", () => {

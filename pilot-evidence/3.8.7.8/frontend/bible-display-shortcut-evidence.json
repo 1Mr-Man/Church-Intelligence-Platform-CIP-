@@ -1,0 +1,29 @@
+{
+  "phase": "3.8.7.8",
+  "summary": "Real-code evidence for the Bible finding 'Display' shortcut in the Needs Attention queue, replacing 'Approve'.",
+  "trigger": "Operator screenshots comparing Live Service and Service Replay on real Windows hardware: Service Replay reached a detected Bible reference (MAT 6:9) and displayed it correctly on the presentation window, confirming the downstream Bible/presentation pipeline genuinely works end to end. The operator's own explicit follow-up request: 'At the needs attention when CIP detect Bible reference we have approve and reject can include display there so that the operator will not need to scroll down for 2 seconds before Bible can be displayed. Or replace approve with display.'",
+  "auditedBeforeImplementing": {
+    "existingFlow": "Needs Attention (AttentionQueue.tsx) Approve -> calls approve_suggestion -> operator scrolls to the Presentation card -> Prepare -> calls prepare_presentation -> Display -> calls display_presentation. Three separate clicks across two UI regions for a reference the operator already wants on screen.",
+    "displayPresentationAlreadyOpensTheWindow": "commands.rs:2786 (display_presentation) already calls presentation_display::open_display_window(&app) unconditionally before committing activation - no separate 'open display' step was needed in the new chain.",
+    "displayPresentationAlreadyHandlesSwap": "presentation::prepare_to_activate/commit_activation (called by display_presentation) are the existing, already-tested mechanism for crossing Prepared -> Active - reused unchanged, not reimplemented."
+  },
+  "designDecision": "Replaced 'Approve' with 'Display' for the bible domain only (the operator's own stated preference over adding a third button), keeping 'Reject' unchanged. No new Tauri command, event, or persistence - the new 'display' action chains the three pre-existing commands (approve_suggestion, prepare_presentation, display_presentation) inside one withBusy-wrapped async handler in LiveChurchBrain.tsx's handleUnifiedAction, using prepare_presentation's own returned PresentationItem.id to call display_presentation - never relying on React state having caught up via events in between.",
+  "filesChanged": {
+    "apps/desktop/src/components/workspace/actions.ts": "Added 'display' to the UnifiedItemAction union and ACTION_LABELS; actionsFor('bible') now returns ['display', 'reject'] instead of ['approve', 'reject'].",
+    "apps/desktop/src/components/LiveChurchBrain.tsx": "handleUnifiedAction's bible case gained a 'display' branch that awaits approveSuggestion, then preparePresentation (capturing the returned PresentationItem), then displayPresentation(prepared.id) - all three pre-existing commands, called in the pre-existing order the Presentation card's own three buttons already use.",
+    "apps/desktop/src/components/workspace/actions.test.ts": "Updated the existing bible-domain assertion from ['approve','reject'] to ['display','reject']."
+  },
+  "scopeConfirmedNarrow": "Only the bible domain's Needs Attention actions changed. Music/Sermon/Service/Content/Correlation actionsFor entries are untouched. The separate diagnostics-mode 'Pending Suggestions' panel (which calls approveSuggestion directly, not through actionsFor) is untouched - it was not part of the operator's request.",
+  "regressionProof": "Frontend: tsc -b clean (0 errors), oxlint clean (0 errors, same 4 pre-existing warnings), vitest 210/210 passed (unchanged count - one existing assertion updated, no new test file needed since no sibling action has dedicated LiveChurchBrain-level test coverage either), vite build clean. Zero Rust files changed - no Rust regression re-run needed.",
+  "directCompiledBinaryProof": {
+    "method": "x86_64-w64-mingw32-strings against the actual packaged installer's extracted cip-desktop.exe",
+    "buildCommitEmbedded": "'f410eb40' found verbatim - the real baseline commit (Phase 3.8.7.7) this build was made against",
+    "commandSymbolsConfirmedPresent": [
+      "cip_desktop_lib::commands::approve_suggestion",
+      "cip_desktop_lib::commands::prepare_presentation",
+      "cip_desktop_lib::commands::display_presentation (via its async closure/drop-glue symbols)",
+      "cip_desktop_lib::commands::reject_suggestion"
+    ],
+    "note": "These three commands are not new to this phase - what's new is the frontend orchestration calling them in sequence from one button. That JS logic lives in the minified bundle Tauri embeds into the binary (the string 'Display' is present in the extracted binary); functional correctness is verified via the frontend test suite rather than disassembling minified JS, consistent with how this project verifies other frontend-only changes."
+  }
+}
