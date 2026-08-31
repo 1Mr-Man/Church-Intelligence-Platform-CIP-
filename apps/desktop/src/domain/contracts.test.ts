@@ -23,6 +23,8 @@ import type {
   IntelligenceFinding,
 } from "./intelligence";
 import type {
+  Display,
+  DisplayRole,
   PresentationDisplayPayload,
   PresentationDisplayState,
   PresentationItem,
@@ -275,6 +277,38 @@ describe("domain contracts", () => {
     expect(state.screens.every((s) => !s.windowOpen)).toBe(true);
     expect(state.activeItem).toBeNull();
     expect(state.activeSlide).toBeNull();
+  });
+
+  it("constructs a Display for every DisplayRole, and a disconnected-but-assigned Display carries placeholder geometry (Phase 3.10.2)", () => {
+    const roles: DisplayRole[] = ["unassigned", "operator", "projector", "stage", "confidence", "lobby"];
+    const displays: Display[] = roles.map((role, i) => ({
+      monitorId: `monitor-${i}`,
+      name: `Monitor ${i}`,
+      x: 0,
+      y: 0,
+      width: 1920,
+      height: 1080,
+      scaleFactor: 1,
+      isPrimary: i === 0,
+      assignedRole: role,
+      connected: true,
+    }));
+    expect(displays.map((d) => d.assignedRole)).toEqual(roles);
+
+    const disconnected: Display = {
+      monitorId: "tv",
+      name: null,
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      scaleFactor: 1,
+      isPrimary: false,
+      assignedRole: "projector",
+      connected: false,
+    };
+    expect(disconnected.connected).toBe(false);
+    expect(disconnected.assignedRole).toBe("projector");
   });
 
   it("constructs a TimelineEntry describing a service-lifecycle event", () => {

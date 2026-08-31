@@ -8,6 +8,7 @@
 use crate::acoustic;
 use crate::config::AppConfig;
 use crate::content;
+use crate::display_registry;
 use crate::errors::AppError;
 use crate::events::{emit, AppEvent};
 use crate::logging::LogCategory;
@@ -2666,13 +2667,38 @@ fn parse_display_screen(screen: &str) -> Result<presentation_display::DisplayScr
     })
 }
 
+/// Resolves which physical monitor (if any) `screen` should open on, per
+/// the Display Registry (Phase 3.10.2) - `None` when nothing is assigned
+/// to that screen's role, or the assigned monitor is not currently
+/// connected, in which case the caller passes `None` through to
+/// `open_display_window` and gets the exact pre-3.10.2 unpositioned
+/// behavior. Never fails the caller's own command: enumeration/lookup
+/// errors are treated the same as "nothing assigned" (best-effort, since
+/// a Display Registry problem must never block the operator from
+/// displaying something at all).
+fn resolve_screen_placement(
+    app: &AppHandle,
+    state: &AppState,
+    screen: presentation_display::DisplayScreen,
+) -> Option<display_registry::MonitorPlacement> {
+    let physical = display_registry::enumerate_monitors(app);
+    let assignments = {
+        let db = state.db.lock().expect("db connection poisoned");
+        persistence::list_display_role_assignments(&db).ok()?
+    };
+    let displays = display_registry::merge_displays(physical, &assignments);
+    display_registry::resolve_role_position(&displays, display_registry::screen_role(screen))
+}
+
 /// Opens (or, if already open, focuses) `screen`'s presentation display
 /// window - useful on its own for positioning it on a projector/second
 /// monitor before anything is ready to show. `display_presentation` calls
 /// this internally for the Stage screen specifically when needed; the
 /// Confidence Monitor and Lobby/Overflow screens are only ever opened via
 /// this command, on explicit operator request (Phase 3.10 - see
-/// `docs/phase-3-10-multi-screen-audit.md`).
+/// `docs/phase-3-10-multi-screen-audit.md`). Phase 3.10.2: opens directly
+/// on the monitor assigned that screen's role in the Display Registry,
+/// when one is connected - see `resolve_screen_placement`.
 ///
 /// Phase 3.8.4: `async fn`, not a plain synchronous command - real
 /// Windows testing showed the display window appearing but staying
@@ -2688,10 +2714,11 @@ fn parse_display_screen(screen: &str) -> Result<presentation_display::DisplayScr
 pub async fn open_presentation_display(
     screen: String,
     app: AppHandle,
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<(), AppError> {
     let screen = parse_display_screen(&screen).map_err(log_and_return)?;
-    presentation_display::open_display_window(&app, screen)
+    let placement = resolve_screen_placement(&app, &state, screen);
+    presentation_display::open_display_window(&app, screen, placement)
         .map_err(|e| {
             AppError::from(presentation::PresentationError::DisplayUnavailable(
                 e.to_string(),
@@ -2824,13 +2851,21 @@ pub async fn display_presentation(
     // opened separately, by explicit operator choice, via
     // `open_presentation_display` - once open they receive the same
     // broadcast `PresentationStarted` event below with no separate path.
-    presentation_display::open_display_window(&app, presentation_display::DisplayScreen::Stage)
-        .map_err(|e| {
-            AppError::from(presentation::PresentationError::DisplayUnavailable(
-                e.to_string(),
-            ))
-        })
-        .map_err(log_and_return)?;
+    // Phase 3.10.2: opens directly on the monitor assigned the Projector
+    // role, when one is connected - see `resolve_screen_placement`.
+    let placement =
+        resolve_screen_placement(&app, &state, presentation_display::DisplayScreen::Stage);
+    presentation_display::open_display_window(
+        &app,
+        presentation_display::DisplayScreen::Stage,
+        placement,
+    )
+    .map_err(|e| {
+        AppError::from(presentation::PresentationError::DisplayUnavailable(
+            e.to_string(),
+        ))
+    })
+    .map_err(log_and_return)?;
 
     let db = state.db.lock().expect("db connection poisoned");
     let activated = presentation::commit_activation(&db, id)
@@ -2984,6 +3019,59 @@ pub fn log_display_diagnostic(stage: String, detail: String) {
         target: crate::logging::LogCategory::Presentation.target(),
         "[diagnostic] display window: {stage} - {detail}"
     );
+}
+
+// --- display registry (Phase 3.10.2) ---------------------------------------
+//
+// Which physical monitor plays which presentation role - global, not
+// service-scoped (a property of the machine CIP runs on). Built from the
+// same `AppHandle::available_monitors`/`primary_monitor` API
+// `get_pilot_diagnostics` has used since Phase 3.2-3.4, now also driving
+// where `presentation_display::open_display_window` actually places a
+// window (see `resolve_screen_placement` above). See
+// `docs/phase-3-10-2-display-registry.md`.
+
+/// Every currently-known display - every connected monitor (role
+/// `Unassigned` if nothing has been assigned yet) plus every previously
+/// assigned monitor that is not currently connected, so a prior setup is
+/// never silently dropped by an unplugged cable.
+#[tauri::command]
+pub fn list_displays(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<display_registry::Display>, AppError> {
+    let physical = display_registry::enumerate_monitors(&app);
+    let db = state.db.lock().expect("db connection poisoned");
+    let assignments = persistence::list_display_role_assignments(&db)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
+    Ok(display_registry::merge_displays(physical, &assignments))
+}
+
+/// Assigns `role` (`"unassigned"`/`"operator"`/`"projector"`/`"stage"`/
+/// `"confidence"`/`"lobby"`) to `monitor_id` (one of the ids `list_displays`
+/// returned), replacing any prior assignment for that monitor. Takes
+/// effect the next time a presentation display window for the
+/// corresponding screen is opened - never moves an already-open window
+/// (see `docs/phase-3-10-2-display-registry.md`'s known limitations).
+#[tauri::command]
+pub fn assign_display_role(
+    monitor_id: String,
+    role: String,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let parsed_role = display_registry::DisplayRole::parse(&role)
+        .ok_or_else(|| AppError::InvalidInput(format!("unknown display role: {role}")))
+        .map_err(log_and_return)?;
+    let db = state.db.lock().expect("db connection poisoned");
+    persistence::assign_display_role(&db, &monitor_id, parsed_role)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
+    log::info!(
+        target: crate::logging::LogCategory::Presentation.target(),
+        "assigned display role {role} to monitor {monitor_id}"
+    );
+    Ok(())
 }
 
 // --- ambiguity resolution & context correction (Phase 1.3) ----------------

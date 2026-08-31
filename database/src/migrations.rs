@@ -66,6 +66,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0011_saved_content_candidates",
         sql: include_str!("../migrations/0011_saved_content_candidates.sql"),
     },
+    Migration {
+        version: 12,
+        name: "0012_display_role_assignments",
+        sql: include_str!("../migrations/0012_display_role_assignments.sql"),
+    },
 ];
 
 /// A migration that was applied during this call to [`run_migrations`].

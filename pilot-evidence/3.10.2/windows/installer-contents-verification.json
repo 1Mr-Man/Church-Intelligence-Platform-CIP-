@@ -1,0 +1,62 @@
+{
+  "phase": "3.10.2",
+  "summary": "Direct extraction and inspection of the rebuilt NSIS installer, confirming the Display Registry & Monitor Placement code is genuinely compiled in and every prior phase's fix still holds.",
+  "extractionMethod": "7z x \"Church Intelligence Platform_0.1.0_x64-setup.exe\"",
+  "installerChecksum": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "5ebc3109f7c0519be9a3e18648fcff562515d5cebf99f3064df4ba90f1483a8b",
+    "sizeBytes": 8626387,
+    "previousPhaseSha256": "50c47988ac3d06342c8d5c6c0e63e1dd7bead34669239cacbf283714375bda9b",
+    "previousPhaseSizeBytes": 8607375,
+    "sizeChangeNote": "Larger by 19,012 bytes - expected for a new database migration, a new module (display_registry.rs, 11 tests), two new commands, extended persistence, and a new frontend operator panel, on top of an already-optimized codebase."
+  },
+  "extractedInstallerContents": [
+    "libwinpthread-1.dll",
+    "cip-desktop.exe",
+    "WebView2Loader.dll",
+    "uninstall.exe",
+    "libstdc++-6.dll",
+    "libgcc_s_seh-1.dll"
+  ],
+  "runtimeDllsStillPresent": {
+    "libstdc++-6.dll": { "sizeBytes": 4596950 },
+    "libgcc_s_seh-1.dll": { "sizeBytes": 169919 },
+    "libwinpthread-1.dll": { "sizeBytes": 94077 },
+    "note": "Byte sizes identical to every prior phase's - same source DLLs, same toolchain, unaffected by this phase."
+  },
+  "cipDesktopExeVerification": {
+    "fileSizeBytes": 34646861,
+    "buildCommitEmbeddedProof": "x86_64-w64-mingw32-strings finds the literal substring '585fb7ce' embedded in the binary - the real Phase 3.10.1 baseline commit this build was made against (Phase 3.10.1 was a pure audit with no code change, so this is the correct/expected baseline).",
+    "displayRegistrySymbolProof": {
+      "commandNamesInInvokeHandlerTable": ["list_displays", "assign_display_role"],
+      "mangledFunctionSymbols": [
+        "_ZN15cip_desktop_lib8commands13list_displays17hb3e8add360ae1b2eE",
+        "_ZN15cip_desktop_lib8commands19assign_display_role17h6ff216e2c56ba100E",
+        "_ZN15cip_desktop_lib11persistence19assign_display_role17hd54c043e2e0b2976E"
+      ],
+      "displayRoleEnumDiscriminants": "the concatenated string 'unassignedoperatorprojectorstageconfidencelobby' (and a second occurrence with 'lobby' truncated by string-table deduplication, 'unassignedoperatorprojectorstagelobby') found verbatim - direct proof the DisplayRole serde discriminants are compiled in",
+      "sqlUpsertText": [
+        "INSERT INTO display_role_assignments (monitor_id, role, updated_at)",
+        "ON CONFLICT(monitor_id) DO UPDATE SET role = excluded.role, updated_at = excluded.updated_at",
+        "SELECT monitor_id, role FROM display_role_assignments"
+      ],
+      "displayStructFieldList": "the concatenated camelCase field string 'monitorIdnamexywidthheightscaleFactorisPrimaryassignedRoleconnected' found verbatim - direct proof the Display struct's Serialize impl (camelCase, matching the TypeScript Display interface) is compiled in",
+      "migrationFileTextEmbedded": [
+        "0012_display_role_assignments",
+        "-- Phase 3.10.2 (Display Registry): persists which physical monitor is",
+        "-- monitor_id is not a real OS-issued identifier - Tauri's monitor API",
+        "CREATE TABLE display_role_assignments (",
+        "    monitor_id TEXT PRIMARY KEY,"
+      ]
+    },
+    "priorPhaseSymbolsUnaffected": {
+      "displayConfidenceAndLobbyWindowLabels": 2,
+      "harvestSermonOccurrences": 3,
+      "sermonHarvestedEventStringPresent": true,
+      "openPresentationDisplayCommandPresent": true,
+      "whisperFullWithStateOccurrences": 96
+    },
+    "frontendBundleNote": "The frontend's DisplayRegistryPanel component and its JSX template literals live in the minified/compressed Vite JS bundle Tauri embeds as a webview asset - not reliably found via plain strings extraction, consistent with every prior phase's own finding. Verified functionally via the frontend test suite (tsc/oxlint/vitest/build all clean) rather than binary disassembly of minified JS, per this project's established methodology."
+  },
+  "automatedVerification": "scripts/build-windows-whisper.sh's own final step (7z-extraction DLL-presence check) passed on this build, unchanged automation from Phase 3.8.6.1 - 'confirmed: libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll are all present in the installer'."
+}

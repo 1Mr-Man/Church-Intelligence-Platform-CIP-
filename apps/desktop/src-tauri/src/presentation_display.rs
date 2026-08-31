@@ -164,21 +164,48 @@ pub fn any_display_window_open(app: &AppHandle) -> bool {
 /// (`commands::display_presentation`, `commands::open_presentation_display`),
 /// which are `async fn` for exactly this reason - see
 /// `docs/phase-3-8-4-audit.md` section D for the real Windows evidence and
-/// the exact vendored-source citation this is based on.
-pub fn open_display_window(app: &AppHandle, screen: DisplayScreen) -> tauri::Result<()> {
+/// the exact vendored-source citation this is based on. Phase 3.10.2 does
+/// not change this ordering: `placement` only changes *what* is passed to
+/// `.position`/`.inner_size` before `.build()`, never *when* `.build()`
+/// itself is called relative to the caller's `async fn` boundary.
+///
+/// `placement`, when `Some` (Phase 3.10.2 - the Display Registry has an
+/// assigned, connected monitor for this screen's role), positions the new
+/// window at that monitor's origin and sizes it to that monitor's full
+/// resolution - opening "directly on" the assigned monitor, filling it,
+/// per the operator's own requested behavior. `WebviewWindowBuilder::position`/
+/// `inner_size` take **logical** pixels while `MonitorPlacement` (built
+/// from `tauri::window::Monitor`) is in **physical** pixels - converted
+/// here via `PhysicalPosition`/`PhysicalSize::to_logical`, never by a
+/// hand-rolled division, to avoid a DPI-scaling placement bug on a
+/// non-100%-scaled monitor (common on Windows laptops). `None` (nothing
+/// assigned, or the assigned monitor is currently disconnected) preserves
+/// the exact pre-3.10.2 behavior: an unpositioned 1280x720 window the
+/// operator places themselves.
+pub fn open_display_window(
+    app: &AppHandle,
+    screen: DisplayScreen,
+    placement: Option<crate::display_registry::MonitorPlacement>,
+) -> tauri::Result<()> {
     if let Some(existing) = app.get_webview_window(screen.window_label()) {
         existing.show()?;
         existing.set_focus()?;
         return Ok(());
     }
 
-    let window = WebviewWindowBuilder::new(
+    let logical_position =
+        placement.map(|p| tauri::PhysicalPosition::new(p.x, p.y).to_logical::<f64>(p.scale_factor));
+    let logical_size = placement
+        .map(|p| tauri::PhysicalSize::new(p.width, p.height).to_logical::<f64>(p.scale_factor))
+        .unwrap_or(tauri::LogicalSize::new(1280.0, 720.0));
+
+    let mut builder = WebviewWindowBuilder::new(
         app,
         screen.window_label(),
         WebviewUrl::App("index.html".into()),
     )
     .title(screen.window_title())
-    .inner_size(1280.0, 720.0)
+    .inner_size(logical_size.width, logical_size.height)
     .resizable(true)
     .visible(true)
     // Phase 3.8.4 TEMPORARY DIAGNOSTIC: the only way to observe, from
@@ -197,12 +224,16 @@ pub fn open_display_window(app: &AppHandle, screen: DisplayScreen) -> tauri::Res
             "[diagnostic] display window: {event_name} url={}",
             payload.url()
         );
-    })
-    .build()?;
+    });
+    if let Some(pos) = logical_position {
+        builder = builder.position(pos.x, pos.y);
+    }
+    let window = builder.build()?;
 
     log::info!(
         target: crate::logging::LogCategory::Presentation.target(),
-        "[diagnostic] display window created (checkpoint 1)"
+        "[diagnostic] display window created (checkpoint 1) placed={}",
+        logical_position.is_some()
     );
 
     // Phase 3.8.3: a real Windows-only defect class (a newly created
@@ -215,10 +246,14 @@ pub fn open_display_window(app: &AppHandle, screen: DisplayScreen) -> tauri::Res
     // near-zero-delay timing (see docs/phase-3-8-3-audit.md section D-F).
     // Forcing an explicit resize to the same target size immediately
     // after creation triggers WebView2's paint without touching any
-    // other platform's already-proven-correct behavior.
+    // other platform's already-proven-correct behavior. Phase 3.10.2:
+    // nudges to `logical_size` (whatever was actually requested above),
+    // not a separately hardcoded constant - nudging to a stale 1280x720
+    // here would silently override a real monitor-fill placement on
+    // Windows specifically, the one platform this workaround targets.
     #[cfg(target_os = "windows")]
     {
-        if let Err(e) = window.set_size(tauri::LogicalSize::new(1280.0, 720.0)) {
+        if let Err(e) = window.set_size(logical_size) {
             log::warn!(
                 target: crate::logging::LogCategory::Presentation.target(),
                 "failed to nudge the display window's initial paint via resize: {e}"

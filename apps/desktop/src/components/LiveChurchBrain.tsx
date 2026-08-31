@@ -44,6 +44,7 @@ import { IntelligenceFeed } from "./workspace/IntelligenceFeed";
 import { ServiceControlBar } from "./workspace/ServiceControlBar";
 import { SystemStatusStrip } from "./workspace/SystemStatusStrip";
 import { PresentationCard } from "./workspace/PresentationCard";
+import { DisplayRegistryPanel } from "./workspace/DisplayRegistryPanel";
 import type { UnifiedItemAction } from "./workspace/actions";
 import "./LiveChurchBrain.css";
 import "./workspace/workspace.css";
@@ -731,6 +732,8 @@ export function LiveChurchBrain() {
         onCancel={(id) => withBusy(`cancel-${id}`, async () => { await commands.cancelPresentation(id); })}
         onStopDisplay={() => withBusy("stop-display", async () => { await commands.clearPresentationDisplay(); })}
       />
+
+      <DisplayRegistryPanel />
 
       {mode === "diagnostics" && <PilotDiagnosticsPanel />}
       {mode === "diagnostics" && <StatusBar status={status} />}

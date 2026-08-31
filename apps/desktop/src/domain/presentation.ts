@@ -79,3 +79,39 @@ export interface PresentationDisplayState {
   activeItem: PresentationItem | null;
   activeSlide: RenderedSlide | null;
 }
+
+/** Phase 3.10.2: the role a *physical monitor* plays - mirrors
+ * `display_registry::DisplayRole` (Rust). Distinct from
+ * `PresentationScreen` above: a `PresentationScreen` identifies a
+ * content stream/window (what CIP shows), while a `DisplayRole`
+ * identifies which physical monitor that stream is placed on. `stage`
+ * here means "speaker-facing information" per the operator's own
+ * taxonomy and has no corresponding `PresentationScreen` yet - CIP maps
+ * `PresentationScreen: "stage"` (the confidence-monitor-facing content
+ * stream) to `DisplayRole: "projector"` for placement purposes. See
+ * `docs/phase-3-10-2-display-registry.md`. */
+export type DisplayRole =
+  | "unassigned"
+  | "operator"
+  | "projector"
+  | "stage"
+  | "confidence"
+  | "lobby";
+
+/** One physical monitor, merged with its persisted role assignment (if
+ * any) - mirrors `display_registry::Display` (Rust). `connected: false`
+ * means the role was assigned to a monitor that isn't currently
+ * detected (e.g. unplugged); its geometry fields are then placeholder
+ * values, never fabricated real ones. */
+export interface Display {
+  monitorId: string;
+  name: string | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scaleFactor: number;
+  isPrimary: boolean;
+  assignedRole: DisplayRole;
+  connected: boolean;
+}

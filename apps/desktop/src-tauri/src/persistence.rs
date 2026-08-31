@@ -32,6 +32,7 @@
 //! never writes `approved`/`edited`/`rejected`; only the operator-facing
 //! commands in `commands.rs` do.
 
+use crate::display_registry::DisplayRole;
 use chrono::{DateTime, Utc};
 use cip_core_ai::{Suggestion, SuggestionKind, SuggestionStatus};
 use cip_core_bible::ReferenceKind;
@@ -39,6 +40,7 @@ use cip_core_confidence::{ConfidenceLevel, ConfidenceResult, ConfidenceSource};
 use cip_core_service::{ScriptureDetection, ServiceSession, ServiceStatus};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -1359,6 +1361,44 @@ pub fn list_saved_content_candidates_for_service(
         .collect()
 }
 
+// --- display role assignments (Phase 3.10.2) -------------------------------
+
+/// Assigns `role` to `monitor_id`, replacing any prior assignment for
+/// that monitor - see `0012_display_role_assignments.sql` for why this
+/// is the one upsert table in this schema (a role assignment has
+/// "current value" semantics, not "one row per event").
+pub fn assign_display_role(
+    conn: &Connection,
+    monitor_id: &str,
+    role: DisplayRole,
+) -> Result<(), PersistError> {
+    conn.execute(
+        "INSERT INTO display_role_assignments (monitor_id, role, updated_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(monitor_id) DO UPDATE SET role = excluded.role, updated_at = excluded.updated_at",
+        params![monitor_id, role.as_str(), Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+/// Every persisted display role assignment, keyed by `monitor_id` - the
+/// input `display_registry::merge_displays` combines with a live monitor
+/// enumeration to produce the full Display Registry.
+pub fn list_display_role_assignments(
+    conn: &Connection,
+) -> Result<HashMap<String, DisplayRole>, PersistError> {
+    let mut stmt = conn.prepare("SELECT monitor_id, role FROM display_role_assignments")?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(monitor_id, role)| DisplayRole::parse(&role).map(|r| (monitor_id, r)))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2301,5 +2341,40 @@ mod tests {
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].id, second.id, "most recently saved first");
         assert_eq!(all[1].id, first.id);
+    }
+
+    // --- display role assignments (Phase 3.10.2) ---------------------------
+
+    #[test]
+    fn assign_display_role_then_list_round_trips() {
+        let conn = migrated_conn();
+        assign_display_role(&conn, "tv", DisplayRole::Projector).unwrap();
+        assign_display_role(&conn, "laptop", DisplayRole::Operator).unwrap();
+
+        let assignments = list_display_role_assignments(&conn).unwrap();
+        assert_eq!(assignments.get("tv"), Some(&DisplayRole::Projector));
+        assert_eq!(assignments.get("laptop"), Some(&DisplayRole::Operator));
+        assert_eq!(assignments.len(), 2);
+    }
+
+    #[test]
+    fn assigning_a_role_twice_replaces_rather_than_duplicates() {
+        let conn = migrated_conn();
+        assign_display_role(&conn, "tv", DisplayRole::Unassigned).unwrap();
+        assign_display_role(&conn, "tv", DisplayRole::Projector).unwrap();
+
+        let assignments = list_display_role_assignments(&conn).unwrap();
+        assert_eq!(
+            assignments.len(),
+            1,
+            "re-assigning must update the existing row, not add a second one"
+        );
+        assert_eq!(assignments.get("tv"), Some(&DisplayRole::Projector));
+    }
+
+    #[test]
+    fn list_display_role_assignments_is_empty_when_nothing_assigned_yet() {
+        let conn = migrated_conn();
+        assert!(list_display_role_assignments(&conn).unwrap().is_empty());
     }
 }

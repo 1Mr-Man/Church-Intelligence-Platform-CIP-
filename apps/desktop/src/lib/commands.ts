@@ -23,6 +23,8 @@ import type {
   SavedScripture,
   ContentMetadata,
   ContentType,
+  Display,
+  DisplayRole,
   DomainCapabilityReport,
   ImportReport,
   IntegrityReport,
@@ -325,6 +327,25 @@ export function closePresentationDisplay(screen: PresentationScreen): Promise<vo
  * critical rendering path. */
 export function logDisplayDiagnostic(stage: string, detail: string): Promise<void> {
   return invokeCommand("log_display_diagnostic", { stage, detail });
+}
+
+// --- display registry (Phase 3.10.2) ---------------------------------------
+
+/** Every physical monitor CIP currently detects, merged with any persisted
+ * role assignment - the operator configuration UI's sync point. A monitor
+ * whose assigned role's physical hardware is currently unplugged still
+ * appears here (`connected: false`), so the operator can see and change
+ * its assignment without it being plugged in. */
+export function listDisplays(): Promise<Display[]> {
+  return invokeCommand("list_displays");
+}
+
+/** Assigns `role` to `monitorId` and persists it immediately. The next
+ * presentation window opened for a screen mapped to that role (see
+ * `domain/presentation.ts`'s `DisplayRole` docs) is placed on this
+ * monitor - existing open windows are not moved retroactively. */
+export function assignDisplayRole(monitorId: string, role: DisplayRole): Promise<void> {
+  return invokeCommand("assign_display_role", { monitorId, role });
 }
 
 // --- ambiguity resolution & context correction (Phase 1.3) ----------------

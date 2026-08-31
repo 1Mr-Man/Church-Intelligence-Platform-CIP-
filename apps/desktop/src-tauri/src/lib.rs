@@ -5,6 +5,7 @@ mod config;
 mod content;
 mod content_intelligence;
 mod cross_domain;
+mod display_registry;
 mod errors;
 pub mod events;
 mod harvest;
@@ -412,6 +413,8 @@ pub fn run() {
             commands::clear_presentation_display,
             commands::close_presentation_display,
             commands::log_display_diagnostic,
+            commands::list_displays,
+            commands::assign_display_role,
             commands::list_presentation_history,
             commands::search_bible,
             commands::list_bible_books,
