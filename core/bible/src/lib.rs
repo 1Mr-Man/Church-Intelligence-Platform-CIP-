@@ -13,6 +13,7 @@ pub mod detection;
 mod fixtures;
 pub mod integrity;
 pub mod normalize;
+pub mod paraphrase;
 mod provider;
 pub mod range;
 mod reference;

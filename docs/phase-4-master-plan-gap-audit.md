@@ -15,6 +15,16 @@ its own `Phase 0-6` roadmap.
 This document is an honest audit, not an implementation. Nothing in this
 document was built this phase.
 
+## Update (Phase 4.1)
+
+The user chose "Semantic/paraphrase Bible detection" as the first Phase 4
+item to build. Phase 4.1 delivered the **lexical/keyword-overlap** slice
+of that gap (no embedding model is reachable in this network-restricted
+container) - see `docs/phase-4-1-semantic-paraphrase-bible-detection.md`
+for the full build record and the "Paraphrase detection" row below,
+updated in place to reflect it. The rest of this document is left exactly
+as it was written, as a point-in-time audit.
+
 ## How to read this
 
 Each of the master plan's eight major platform modules (its own section
@@ -41,8 +51,8 @@ software-only reading into more than what was actually verified.
 | Bible translation registry | PARTIAL | `bible_translations` table + `BibleProvider` trait exist (`core/bible`); only **KJV** is actually seeded/available. No licensing-tier metadata (public-domain/licensed/church-owned) on translation rows. |
 | Direct/abbreviated/incomplete reference detection | DONE | `core/bible`'s reference detector, live since Phase 1.1. |
 | Quotation detection | DONE | `DetectionType::Quotation`, tested. |
-| **Paraphrase detection** | **NOT STARTED** | No embedding/semantic-similarity engine anywhere in the codebase. `DetectionType::Paraphrase` exists as an enum variant but nothing ever produces it - confirmed by grep, zero call sites construct that variant outside its own type definition. This is one of the five pillars named explicitly in every phase's `knownLimitations` since Phase 3.10. |
-| Conceptual/semantic Scripture matching | **NOT STARTED** | Same root cause - no vector/embedding search exists in this codebase at all. |
+| **Paraphrase detection** | PARTIAL (Phase 4.1) | `core/bible::paraphrase` + `core/service::try_paraphrase` deliver lexical/keyword-overlap paraphrase detection (a near-quotation of a verse without a citation, e.g. the master plan's own Section 8.4 example, is now suggested with a confidence score - always `Pending`, never auto-projected). This is **not** embedding/semantic matching - see `docs/phase-4-1-semantic-paraphrase-bible-detection.md`. The harder "conceptual references" tier (little/no shared vocabulary) remains not started; folded into the row below. |
+| Conceptual/semantic Scripture matching | **NOT STARTED** | No vector/embedding search exists in this codebase at all - confirmed again during Phase 4.1's own audit (no `candle`/`onnxruntime`/`hnsw`/`faiss`/`usearch`/`tantivy` anywhere in `Cargo.lock`). A paraphrase sharing little or no vocabulary with its source verse (e.g. "Jesus said we should love our enemies" for Matthew 5:44) will not be found by Phase 4.1's lexical-overlap detector. |
 | Sequential verse detection ("and verse 29...") | **NOT STARTED** | No "smart verse continuation" logic exists. |
 | Bible name/pronunciation normalization | PARTIAL | Book-name alias normalization exists (`core/bible`'s alias module); no pronunciation-variant handling for spoken input. |
 | Semantic Bible search ("verses about...") | **NOT STARTED** | `search_bible` (Phase 1.5) is FTS/keyword-based only - confirmed by reading `cip_core_bible::search`. No embedding-backed natural-language search. |

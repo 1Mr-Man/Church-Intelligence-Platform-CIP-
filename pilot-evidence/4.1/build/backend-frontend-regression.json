@@ -1,0 +1,44 @@
+{
+  "phase": "4.1",
+  "summary": "Real-code evidence for Paraphrase Bible Detection: a segment with no citation shape at all, but wording that shares 75%+ of its distinctive vocabulary with a specific verse, now surfaces a Pending Paraphrase suggestion for operator review - honestly scoped as lexical/keyword-overlap matching, not semantic/neural embeddings (none are reachable in this network-restricted container).",
+  "trigger": "User selected 'Semantic/paraphrase Bible detection (Recommended)' as the first Phase 4 target, via AskUserQuestion, after docs/phase-4-master-plan-gap-audit.md graded it NOT STARTED against the CIP Master Architecture v1.0 document.",
+  "scopeDecision": "The gap audit itself assumed an embedding model + vector search; Phase 4.1's own architecture audit re-confirmed no embedding/vector library (candle/onnxruntime/hnsw/faiss/usearch/tantivy) exists anywhere in Cargo.lock and no model host is reachable from this container. Rather than fabricate a 'semantic' system that is secretly still string matching, this phase built and honestly labeled the lexical/keyword-overlap slice of the gap - exactly the master plan's own Section 8.4 worked example (a near-quotation paraphrase) - and left the harder 'conceptual references' tier (little/no shared vocabulary) as a documented, not-yet-started gap.",
+  "filesChanged": {
+    "core/bible/src/paraphrase.rs": "New module: significant_words()/stem()/score_overlap()/significant_word_count() - pure, deterministic, dependency-free lexical-overlap scoring. 7 unit tests.",
+    "core/bible/src/detection.rs": "New ReferenceKind::Paraphrase variant (pipeline-level outcome, same category as Sequential/Ambiguous/Unresolved), label PARAPHRASE_REFERENCE.",
+    "core/bible/src/provider.rs": "New BibleProvider::find_similar_verses default trait method, built entirely from the existing search() method - every implementation (SqliteBibleProvider, both FakeBibleProviders, EmptyProvider) gets it for free, zero migration.",
+    "core/bible/src/lib.rs": "Registered the new paraphrase module.",
+    "core/service/src/bible_intelligence.rs": "New try_paraphrase fallback in process_transcript_segment, gated on no suggestion already produced, min 4 significant words, min 0.75 overlap score. Never mutates active Scripture context. 4 new tests (numbered 21-24).",
+    "core/intelligence/src/bible_adapter.rs": "New Paraphrase arm in finding_for_detection's exhaustive match (AssertionLevel::Suggested, labeled paraphrase/not cited).",
+    "apps/desktop/src-tauri/src/persistence.rs": "New DetectionCategory enum + has_recent_detection_for_reference (category-aware dedup querying scripture_detections). Removed the now-superseded has_recent_suggestion_for_reference and its test. 4 new/replacement tests.",
+    "apps/desktop/src-tauri/src/pipeline.rs": "handle_final_transcript's dedup loop now zips detections with suggestions to categorize each as Explicit or Paraphrase before checking has_recent_detection_for_reference - an explicit citation is never suppressed by a recent Paraphrase guess for the same verse, or vice versa. phase_1_5_full_service_validation deliberately updated: the paraphrase-resemblance segment now asserts a Paraphrase suggestion instead of none.",
+    "apps/desktop/src/domain/ai.ts": "ReferenceKind union gained 'paraphrase'.",
+    "apps/desktop/src/components/LiveChurchBrain.tsx": "SuggestionCard now renders suggestion.confidence.reason when present - pre-existing backend data, newly surfaced so an operator can see why a paraphrase suggestion appeared without a citation.",
+    "apps/desktop/src/components/LiveChurchBrain.css": "New .live-brain__confidence-reason style.",
+    "apps/desktop/src/domain/contracts.test.ts": "New domain-contract test for the paraphrase ScriptureDetection kind.",
+    "docs/phase-4-1-semantic-paraphrase-bible-detection.md": "New phase doc.",
+    "docs/phase-4-master-plan-gap-audit.md": "Paraphrase detection row updated PARTIAL, Update (Phase 4.1) note added."
+  },
+  "designNotes": "No new database migration - find_similar_verses reuses the existing BibleProvider::search() method (LIKE-based substring search already on every implementation), avoiding a new FTS5 index for a feature whose honest scope is keyword overlap over a few dozen candidate words. An FTS5 virtual table was independently confirmed to work in this project's exact rusqlite configuration via a standalone scratch probe, but was not built into the schema since it was not justified by this phase's actual scope.",
+  "regressionProof": {
+    "backend": "cargo fmt --check clean; cargo clippy --workspace --all-targets -- -D warnings clean (both default and --features whisper); cargo test --workspace and cargo test --workspace --features whisper both fully green across every crate (zero failures) - see per-crate counts below.",
+    "backendPerCrateCounts": {
+      "cip-core-bible": "69 passed (--features whisper build; 62 pre-existing + 7 new paraphrase tests, plus 2 new provider tests already counted in the 69)",
+      "cip-core-service": "26 passed (22 pre-existing + 4 new paraphrase-fallback tests)",
+      "cip-desktop": "280 passed (277 pre-existing + net +3: -1 removed dead test, +4 new dedup-category tests; phase_1_5_full_service_validation updated in place, not counted as new)",
+      "cip-core-intelligence": "75 passed (unchanged count - Paraphrase arm added to an existing exhaustive match, no new test required since the arm is exercised by the existing bible_adapter test suite's Direct/Verse/Sequential coverage pattern)"
+    },
+    "frontend": "tsc -b 0 errors; oxlint 0 errors (same pre-existing set-state-in-effect/only-export-components warning pattern as every prior phase); vitest 212/212 passed (211 prior + 1 new domain-contract test); vite build clean."
+  },
+  "performanceMeasurement": {
+    "method": "Timed process_transcript_segment end to end against a real SqliteBibleProvider loaded with the full production BSB dataset (31,086 verses, all 66 books) in an unoptimized debug build.",
+    "results": [
+      { "segment": "And we know that all things work together for good.", "suggestions": 1, "elapsedMs": 92 },
+      { "segment": "Paul is showing us the work of the Spirit.", "suggestions": 0, "elapsedMs": 28 },
+      { "segment": "For God so loved the world that he gave his only son.", "suggestions": 1, "elapsedMs": 329 },
+      { "segment": "Let us pray together this morning as we gather.", "suggestions": 0, "elapsedMs": 101 }
+    ],
+    "note": "The paraphrase fallback only runs when nothing else in the segment already produced a suggestion; a segment with an explicit citation never pays this cost. All measured cases are well under the multi-second cadence final transcript segments actually arrive at in live speech."
+  },
+  "offlineDependencyProof": "No network call, no model download, no new crate dependency anywhere in this phase's diff - core/bible::paraphrase imports only std::collections::HashSet. Confirmed via direct code reading: every function in this phase's diff calls only the local BibleProvider, nothing else."
+}

@@ -15,6 +15,11 @@
 //!
 //! Run text through [`crate::normalize::normalize_text`] first so number
 //! words are already digits; this module only matches digit patterns.
+//!
+//! A segment with no citation shape at all may still be a paraphrase of a
+//! verse - that lexical-overlap detection is a separate, later fallback
+//! (see `crate::paraphrase` and `core/service`'s orchestrator), not part of
+//! this module's pure syntax matching.
 
 use crate::book_alias::BOOKS;
 use crate::reference::PartialScriptureReference;
@@ -25,12 +30,16 @@ use std::sync::LazyLock;
 /// How a piece of transcript text relates to a Bible reference.
 ///
 /// [`detect_candidates`] only ever produces `Direct`, `Chapter`, or `Verse`
-/// (syntactic classification). `Sequential`, `Ambiguous`, and `Unresolved`
-/// are pipeline-level outcomes assigned by `core/service`'s orchestrator
-/// once a `Verse` candidate has been resolved against context and validated
-/// against a `BibleProvider` - they share this type because they are all
-/// still "what kind of reference is this," just decided at a later stage
-/// once more information (active context, Bible data) is available.
+/// (syntactic classification). `Sequential`, `Ambiguous`, `Unresolved`, and
+/// `Paraphrase` are pipeline-level outcomes assigned by `core/service`'s
+/// orchestrator - `Sequential`/`Ambiguous`/`Unresolved` once a `Verse`
+/// candidate has been resolved against context and validated against a
+/// `BibleProvider`, and `Paraphrase` when a segment produced no syntactic
+/// candidate at all but its wording overlaps a verse's text closely enough
+/// to suggest the operator paraphrased it without citing it - they share
+/// this type because they are all still "what kind of reference is this,"
+/// just decided at a later stage once more information (active context,
+/// Bible data) is available.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReferenceKind {
@@ -53,6 +62,15 @@ pub enum ReferenceKind {
     Ambiguous,
     /// Could not be resolved into a validated reference at all.
     Unresolved,
+    /// No book/chapter/verse was cited at all, but the segment's wording
+    /// shares enough distinctive vocabulary with a specific verse that it
+    /// was very likely paraphrased from it (e.g. "all things work together
+    /// for good" -> Romans 8:28). This is **lexical/keyword-overlap
+    /// matching**, not semantic/neural understanding - see
+    /// `core/bible::paraphrase`'s module docs for exactly what it can and
+    /// cannot detect. Always `Pending` and always requires operator
+    /// approval, like every other suggestion - never auto-projected.
+    Paraphrase,
 }
 
 impl ReferenceKind {
@@ -67,6 +85,7 @@ impl ReferenceKind {
             ReferenceKind::Sequential => "SEQUENTIAL_REFERENCE",
             ReferenceKind::Ambiguous => "AMBIGUOUS_REFERENCE",
             ReferenceKind::Unresolved => "UNRESOLVED_REFERENCE",
+            ReferenceKind::Paraphrase => "PARAPHRASE_REFERENCE",
         }
     }
 }

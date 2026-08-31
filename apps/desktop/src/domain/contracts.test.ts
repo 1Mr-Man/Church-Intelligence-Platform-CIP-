@@ -178,6 +178,28 @@ describe("domain contracts", () => {
     expect(processed.suggestions[0].status).toBe("pending");
   });
 
+  it("constructs a paraphrase ScriptureDetection with a lexical-overlap confidence reason", () => {
+    const confidence: ConfidenceResult = {
+      score: 0.9,
+      level: "high",
+      source: "heuristic",
+      reason: "lexical overlap with ROM 8:28 (90% of significant words matched, not a citation)",
+    };
+    const reference: ScriptureReference = { translationId: "KJV", book: "ROM", chapter: 8, verseStart: 28, verseEnd: null };
+    const detection: ScriptureDetection = {
+      kind: "paraphrase",
+      reference,
+      context: null,
+      candidates: [],
+      confidence,
+      rawText: "And we know that all things work together for good.",
+    };
+    expect(detection.kind).toBe("paraphrase");
+    expect(detection.reference?.book).toBe("ROM");
+    expect(detection.confidence.source).toBe("heuristic");
+    expect(detection.confidence.reason).not.toBeNull();
+  });
+
   it("constructs a LiveStatus reflecting an active, listening service", () => {
     const status: LiveStatus = {
       service: {

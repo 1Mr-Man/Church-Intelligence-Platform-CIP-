@@ -294,6 +294,13 @@
   opacity: 0.8;
 }
 
+.live-brain__confidence-reason {
+  margin: 0 0 0.4rem;
+  font-size: 0.75rem;
+  color: var(--text);
+  opacity: 0.65;
+}
+
 .live-brain__confidence-group {
   margin-top: 0.75rem;
 }

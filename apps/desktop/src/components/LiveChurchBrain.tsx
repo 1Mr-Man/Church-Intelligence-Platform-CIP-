@@ -2389,6 +2389,9 @@ function SuggestionCard({
             <span className="live-brain__confidence">Confidence: {confidencePercent}%</span>
           </div>
           {suggestion.sourceText && <p className="live-brain__source-text">&ldquo;{suggestion.sourceText}&rdquo;</p>}
+          {suggestion.confidence.reason && (
+            <p className="live-brain__confidence-reason">{suggestion.confidence.reason}</p>
+          )}
           <div className="live-brain__row">
             <button
               type="button"

@@ -67,9 +67,20 @@ export interface Suggestion {
 /**
  * How a piece of transcript text relates to a Bible reference. Mirrors
  * `core/bible::ReferenceKind` (Rust) - see its doc comments for exactly
- * which pipeline stage assigns which variant.
+ * which pipeline stage assigns which variant. `"paraphrase"` (Phase 4.1) is
+ * never a citation - it's a lexical/keyword-overlap guess that the
+ * segment's wording echoes a specific verse closely enough to be worth an
+ * operator's review; it carries the same `pending`-suggestion guarantees
+ * as every other kind, never auto-approved or auto-projected.
  */
-export type ReferenceKind = "direct" | "chapter" | "verse" | "sequential" | "ambiguous" | "unresolved";
+export type ReferenceKind =
+  | "direct"
+  | "chapter"
+  | "verse"
+  | "sequential"
+  | "ambiguous"
+  | "unresolved"
+  | "paraphrase";
 
 /**
  * One reference candidate after context resolution and Bible validation -

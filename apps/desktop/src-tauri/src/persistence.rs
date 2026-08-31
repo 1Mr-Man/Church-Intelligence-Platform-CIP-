@@ -16,12 +16,12 @@
 //! Interim segments are never persisted (runtime/UI state only).
 //!
 //! A `scripture_detections` row is written for `Direct`, `Chapter`,
-//! `Verse`, and `Sequential` detections - i.e. everything that resolved to
-//! a real, Bible-validated piece of context or reference. `Chapter`
-//! detections (no verse yet) store the book+chapter as `reference` (e.g.
-//! `"ROM 8"`) since the column is free text, not a strict verse citation.
-//! `Ambiguous` and `Unresolved` detections are **not** persisted - the
-//! existing schema's `status` values (`detected`/`confirmed`/`rejected`/
+//! `Verse`, `Sequential`, and `Paraphrase` detections - i.e. everything
+//! that resolved to a real, Bible-validated piece of context or reference.
+//! `Chapter` detections (no verse yet) store the book+chapter as
+//! `reference` (e.g. `"ROM 8"`) since the column is free text, not a
+//! strict verse citation. `Ambiguous` and `Unresolved` detections are
+//! **not** persisted - the existing schema's `status` values (`detected`/`confirmed`/`rejected`/
 //! `updated`) have no "this failed to resolve" state, and inventing one
 //! would misrepresent a parser miss as a confirmed reference. They're
 //! still visible to the operator in-session via the emitted event
@@ -358,34 +358,73 @@ pub fn persist_suggestion(conn: &Connection, suggestion: &Suggestion) -> Result<
     Ok(())
 }
 
-/// Phase 1.3 session-aware suggestion deduplication: has this exact
-/// reference already been suggested for this service within the last
+/// Which dedup category a detection's reference falls into - see
+/// [`has_recent_detection_for_reference`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetectionCategory {
+    /// `DIRECT_REFERENCE` / `VERSE_REFERENCE` / `SEQUENTIAL_REFERENCE` - an
+    /// explicit citation.
+    Explicit,
+    /// `PARAPHRASE_REFERENCE` - a lexical-overlap guess, never a citation.
+    Paraphrase,
+}
+
+/// Phase 1.3 session-aware suggestion deduplication, extended in Phase 4.1
+/// with a `category` split: has this exact reference already had a
+/// same-category detection for this service within the last
 /// `window_seconds`? A pastor repeating "Romans 8:28" mid-explanation
-/// should not flood the queue with identical suggestions, but a
-/// *genuine* repeat later in the service (past the window) is legitimate
-/// and must not be silently suppressed - see `docs/live-service.md`'s
-/// deduplication policy. Scoped to one service (never cross-service or
-/// permanent/global), and status-independent (a reference the operator
-/// already approved or rejected moments ago still counts - re-suggesting
-/// it immediately would be noise either way).
+/// should not flood the queue with identical suggestions, but a *genuine*
+/// repeat later in the service (past the window) is legitimate and must
+/// not be silently suppressed - see `docs/live-service.md`'s deduplication
+/// policy. Scoped to one service (never cross-service or
+/// permanent/global).
 ///
-/// Matches on `payload LIKE '%"reference":"<text>"%'` rather than a
-/// dedicated column: `reference` is always a string this application
-/// generated itself (`ScriptureReference::to_string()`, e.g. `"ROM 8:28"`),
-/// using only alphanumerics, spaces, colons, and hyphens, so it can never
-/// contain a SQL LIKE wildcard (`%`/`_`) that would need escaping.
-pub fn has_recent_suggestion_for_reference(
+/// Queries `scripture_detections` (written for every detection, not just
+/// the ones that survived dedup as a suggestion) and filters by
+/// `category` - so a repeated `Paraphrase` guess for the same verse is
+/// suppressed, and a repeated explicit citation is suppressed, but an
+/// explicit citation is **never** suppressed just because a `Paraphrase`
+/// guess for the same verse was already made moments earlier (or vice
+/// versa). A pastor who paraphrases a verse and then reads it verbatim -
+/// or the reverse - should see both, since the second one is new, more
+/// specific information.
+///
+/// `excluding_transcript_segment_id` must be the current segment's id: the
+/// caller (`pipeline::handle_final_transcript`) always persists every
+/// detection's `scripture_detections` row *before* running this dedup
+/// check, so without excluding the current segment's own just-written row,
+/// every suggestion would look like a duplicate of itself.
+pub fn has_recent_detection_for_reference(
     conn: &Connection,
     service_id: Uuid,
     reference_display: &str,
+    category: DetectionCategory,
     window_seconds: i64,
+    excluding_transcript_segment_id: Uuid,
 ) -> Result<bool, PersistError> {
     let cutoff = (Utc::now() - chrono::Duration::seconds(window_seconds)).to_rfc3339();
-    let pattern = format!("%\"reference\":\"{reference_display}\"%");
+    let sql = match category {
+        DetectionCategory::Explicit => {
+            "SELECT count(*) FROM scripture_detections
+             WHERE service_id = ?1 AND reference = ?2 AND detected_at >= ?3
+             AND (transcript_segment_id IS NULL OR transcript_segment_id != ?4)
+             AND detection_type IN ('DIRECT_REFERENCE', 'VERSE_REFERENCE', 'SEQUENTIAL_REFERENCE')"
+        }
+        DetectionCategory::Paraphrase => {
+            "SELECT count(*) FROM scripture_detections
+             WHERE service_id = ?1 AND reference = ?2 AND detected_at >= ?3
+             AND (transcript_segment_id IS NULL OR transcript_segment_id != ?4)
+             AND detection_type = 'PARAPHRASE_REFERENCE'"
+        }
+    };
     let count: i64 = conn.query_row(
-        "SELECT count(*) FROM ai_suggestions
-         WHERE service_id = ?1 AND kind = 'scripture' AND payload LIKE ?2 AND created_at >= ?3",
-        params![service_id.to_string(), pattern, cutoff],
+        sql,
+        params![
+            service_id.to_string(),
+            reference_display,
+            cutoff,
+            excluding_transcript_segment_id.to_string()
+        ],
         |row| row.get(0),
     )?;
     Ok(count > 0)
@@ -1921,25 +1960,179 @@ mod tests {
         ));
     }
 
+    /// A small helper for the `has_recent_detection_for_reference` tests
+    /// below - builds a validated, reference-bearing detection of the
+    /// given kind for "ROM 8:28" with unremarkable placeholder fields.
+    fn rom_8_28_detection(kind: ReferenceKind) -> ScriptureDetection {
+        ScriptureDetection {
+            kind,
+            reference: Some(ScriptureReference::single("KJV", "ROM", 8, 28)),
+            context: None,
+            candidates: vec![],
+            confidence: ConfidenceResult::new(0.9, ConfidenceSource::Heuristic, None),
+            raw_text: "Romans 8:28".into(),
+        }
+    }
+
     #[test]
-    fn recent_duplicate_suggestion_is_detected_within_the_window_and_not_after() {
+    fn recent_same_category_detection_is_a_duplicate_within_the_window_and_not_after() {
         let conn = migrated_conn();
         let session = seeded_service(&conn);
-        let suggestion = Suggestion::new(
+        let earlier_segment = sample_transcript_segment("Romans 8:28", 0);
+        let earlier_segment_id = earlier_segment.id;
+        persist_transcript_segment(&conn, session.id, &earlier_segment).unwrap();
+        persist_scripture_detection(
+            &conn,
             session.id,
-            SuggestionKind::Scripture {
-                reference: "ROM 8:28".into(),
-            },
-            ConfidenceResult::new(0.95, ConfidenceSource::Heuristic, None),
-        );
-        persist_suggestion(&conn, &suggestion).unwrap();
+            Some(earlier_segment_id),
+            "KJV",
+            &rom_8_28_detection(ReferenceKind::Direct),
+        )
+        .unwrap();
 
-        assert!(has_recent_suggestion_for_reference(&conn, session.id, "ROM 8:28", 60).unwrap());
+        let current_segment = sample_transcript_segment("Romans 8:28 again", 1);
+        let current_segment_id = current_segment.id;
+        persist_transcript_segment(&conn, session.id, &current_segment).unwrap();
+        assert!(has_recent_detection_for_reference(
+            &conn,
+            session.id,
+            "ROM 8:28",
+            DetectionCategory::Explicit,
+            60,
+            current_segment_id,
+        )
+        .unwrap());
         // A different reference in the same service is not a duplicate.
-        assert!(!has_recent_suggestion_for_reference(&conn, session.id, "ROM 8:31", 60).unwrap());
-        // A window of 0 seconds excludes even a suggestion from "now" once
-        // any time at all has elapsed since `created_at` was recorded.
-        assert!(!has_recent_suggestion_for_reference(&conn, session.id, "ROM 8:28", -1).unwrap());
+        assert!(!has_recent_detection_for_reference(
+            &conn,
+            session.id,
+            "ROM 8:31",
+            DetectionCategory::Explicit,
+            60,
+            current_segment_id,
+        )
+        .unwrap());
+        // A window of -1 seconds excludes even a detection from "now" once
+        // any time at all has elapsed since `detected_at` was recorded.
+        assert!(!has_recent_detection_for_reference(
+            &conn,
+            session.id,
+            "ROM 8:28",
+            DetectionCategory::Explicit,
+            -1,
+            current_segment_id,
+        )
+        .unwrap());
+    }
+
+    /// The Phase 4.1 case: an explicit citation is never suppressed just
+    /// because a `Paraphrase` guess for the same verse was already made
+    /// moments earlier - only a repeat *within the same category* is a
+    /// duplicate.
+    #[test]
+    fn an_explicit_citation_is_not_suppressed_by_a_recent_paraphrase_for_the_same_verse() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+
+        let paraphrase_segment =
+            sample_transcript_segment("And we know that all things work together for good.", 0);
+        let paraphrase_segment_id = paraphrase_segment.id;
+        persist_transcript_segment(&conn, session.id, &paraphrase_segment).unwrap();
+        persist_scripture_detection(
+            &conn,
+            session.id,
+            Some(paraphrase_segment_id),
+            "KJV",
+            &rom_8_28_detection(ReferenceKind::Paraphrase),
+        )
+        .unwrap();
+
+        let explicit_segment = sample_transcript_segment("Look at verse twenty-eight", 1);
+        let explicit_segment_id = explicit_segment.id;
+        persist_transcript_segment(&conn, session.id, &explicit_segment).unwrap();
+        assert!(
+            !has_recent_detection_for_reference(
+                &conn,
+                session.id,
+                "ROM 8:28",
+                DetectionCategory::Explicit,
+                60,
+                explicit_segment_id,
+            )
+            .unwrap(),
+            "an explicit citation must never be suppressed by a recent Paraphrase guess for the same verse"
+        );
+    }
+
+    /// The reverse of the case above: a `Paraphrase` guess is never
+    /// suppressed just because an explicit citation for the same verse
+    /// was already made moments earlier.
+    #[test]
+    fn a_paraphrase_is_not_suppressed_by_a_recent_explicit_citation_for_the_same_verse() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+
+        let explicit_segment = sample_transcript_segment("Romans 8:28", 0);
+        let explicit_segment_id = explicit_segment.id;
+        persist_transcript_segment(&conn, session.id, &explicit_segment).unwrap();
+        persist_scripture_detection(
+            &conn,
+            session.id,
+            Some(explicit_segment_id),
+            "KJV",
+            &rom_8_28_detection(ReferenceKind::Direct),
+        )
+        .unwrap();
+
+        let paraphrase_segment = sample_transcript_segment(
+            "All things work together for good for those who love God",
+            1,
+        );
+        let paraphrase_segment_id = paraphrase_segment.id;
+        persist_transcript_segment(&conn, session.id, &paraphrase_segment).unwrap();
+        assert!(
+            !has_recent_detection_for_reference(
+                &conn,
+                session.id,
+                "ROM 8:28",
+                DetectionCategory::Paraphrase,
+                60,
+                paraphrase_segment_id,
+            )
+            .unwrap(),
+            "a Paraphrase guess must never be suppressed by a recent explicit citation for the same verse"
+        );
+    }
+
+    /// `pipeline::handle_final_transcript` always persists a segment's own
+    /// detections before running this dedup check - without excluding the
+    /// current segment's own just-written row, the very first occurrence
+    /// of a reference would always look like a duplicate of itself.
+    #[test]
+    fn has_recent_detection_for_reference_excludes_the_current_segments_own_row() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let segment = sample_transcript_segment("Romans 8:28", 0);
+        let segment_id = segment.id;
+        persist_transcript_segment(&conn, session.id, &segment).unwrap();
+        persist_scripture_detection(
+            &conn,
+            session.id,
+            Some(segment_id),
+            "KJV",
+            &rom_8_28_detection(ReferenceKind::Direct),
+        )
+        .unwrap();
+
+        assert!(!has_recent_detection_for_reference(
+            &conn,
+            session.id,
+            "ROM 8:28",
+            DetectionCategory::Explicit,
+            60,
+            segment_id,
+        )
+        .unwrap());
     }
 
     // --- sermon foundation (Phase 2.5, per the authoritative Phase 2 roadmap) --

@@ -43,13 +43,31 @@
 
 use cip_core_ai::{Suggestion, SuggestionKind};
 use cip_core_bible::{
-    detect_candidates, normalize::normalize_text, AmbiguousCandidate, BibleProvider,
+    detect_candidates, normalize::normalize_text, paraphrase, AmbiguousCandidate, BibleProvider,
     ContextResolution, DefaultScriptureContextManager, DetectedCandidate, ReferenceKind,
     ScriptureContext, ScriptureContextManager, ScriptureReference,
 };
 use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+/// A segment must have at least this many *distinct* significant words
+/// before the paraphrase fallback even attempts scoring - short utterances
+/// ("Praise God", "Let's pray") could otherwise reach a perfect overlap
+/// ratio against some verse by sharing just one or two words.
+const MIN_PARAPHRASE_SIGNIFICANT_WORDS: usize = 4;
+
+/// How much of a segment's significant vocabulary must be found in a
+/// candidate verse before it's trusted as a paraphrase of that verse,
+/// rather than a coincidental partial overlap. Deliberately high - see
+/// `cip_core_bible::paraphrase`'s module docs for what this scoring can and
+/// cannot tell apart.
+const MIN_PARAPHRASE_SCORE: f32 = 0.75;
+
+/// How many candidate verses the paraphrase fallback will score per
+/// segment - bounds the cost of a pass that runs only when nothing else in
+/// the segment already produced a suggestion.
+const MAX_PARAPHRASE_CANDIDATES: usize = 25;
 
 /// One reference candidate after context resolution and Bible validation -
 /// the pipeline's per-candidate output.
@@ -128,12 +146,13 @@ pub fn process_transcript_segment(
             ReferenceKind::Direct => resolve_direct(translation_id, provider, context, candidate),
             ReferenceKind::Verse => resolve_bare_verse(provider, context, candidate),
             // detect_candidates never emits these - see ReferenceKind docs.
-            ReferenceKind::Sequential | ReferenceKind::Ambiguous | ReferenceKind::Unresolved => {
-                ScriptureDetection::unresolved(
-                    candidate.raw_text.clone(),
-                    "unexpected candidate kind",
-                )
-            }
+            ReferenceKind::Sequential
+            | ReferenceKind::Ambiguous
+            | ReferenceKind::Unresolved
+            | ReferenceKind::Paraphrase => ScriptureDetection::unresolved(
+                candidate.raw_text.clone(),
+                "unexpected candidate kind",
+            ),
         };
 
         if let Some(suggestion) = suggestion_for(service_id, &detection) {
@@ -142,11 +161,85 @@ pub fn process_transcript_segment(
         detections.push(detection);
     }
 
+    // Fallback: nothing in this segment cited a reference explicitly (or
+    // what was cited never validated), but its wording might still
+    // paraphrase a specific verse closely enough to be worth surfacing for
+    // operator review. Only attempted when the segment produced no
+    // suggestion at all through the normal citation-based path, so an
+    // explicit "Romans 8:28" is never second-guessed by a lexical-overlap
+    // heuristic.
+    if suggestions.is_empty() {
+        if let Some(detection) =
+            try_paraphrase(translation_id, provider, &normalized, segment_text, context)
+        {
+            if let Some(suggestion) = suggestion_for(service_id, &detection) {
+                suggestions.push(suggestion);
+            }
+            detections.push(detection);
+        }
+    }
+
     ProcessedSegment {
         service_id,
         detections,
         suggestions,
     }
+}
+
+/// Fallback for a segment with no confirmed suggestion at all: checks
+/// whether its wording closely echoes a specific verse's text via
+/// lexical/keyword overlap (see `cip_core_bible::paraphrase`'s module docs
+/// for exactly what this can and cannot detect - it is not semantic or
+/// neural matching). Never mutates `context` - a paraphrase is not an
+/// explicit citation, so it must never establish or replace the active
+/// Scripture context the way a real `Chapter`/`Direct` reference does.
+/// Produces, at most, a `Pending` detection like every other path in this
+/// module - never auto-projected.
+fn try_paraphrase(
+    translation_id: &str,
+    provider: &dyn BibleProvider,
+    normalized_text: &str,
+    raw_text: &str,
+    context: &DefaultScriptureContextManager,
+) -> Option<ScriptureDetection> {
+    if paraphrase::significant_word_count(normalized_text) < MIN_PARAPHRASE_SIGNIFICANT_WORDS {
+        return None;
+    }
+
+    let candidates = provider
+        .find_similar_verses(translation_id, normalized_text, MAX_PARAPHRASE_CANDIDATES)
+        .ok()?;
+
+    let mut best: Option<(f32, cip_core_bible::BibleVerse)> = None;
+    for verse in candidates {
+        let score = paraphrase::score_overlap(normalized_text, &verse.text);
+        let is_better = best.as_ref().map(|(s, _)| score > *s).unwrap_or(true);
+        if is_better {
+            best = Some((score, verse));
+        }
+    }
+
+    let (score, verse) = best?;
+    if score < MIN_PARAPHRASE_SCORE {
+        return None;
+    }
+
+    let reference_display = verse.reference.to_string();
+    Some(ScriptureDetection {
+        kind: ReferenceKind::Paraphrase,
+        reference: Some(verse.reference),
+        context: context.active_context(),
+        candidates: Vec::new(),
+        confidence: ConfidenceResult::new(
+            score,
+            ConfidenceSource::Heuristic,
+            Some(format!(
+                "lexical overlap with {reference_display} ({:.0}% of significant words matched, not a citation)",
+                score * 100.0
+            )),
+        ),
+        raw_text: raw_text.to_string(),
+    })
 }
 
 /// A `Suggestion` is only ever created for a detection that resolved to a
@@ -174,6 +267,10 @@ fn confidence_for_kind(kind: ReferenceKind) -> ConfidenceResult {
             "resolved against an established active context; validated",
         ),
         ReferenceKind::Ambiguous | ReferenceKind::Unresolved => (0.1, "unresolved"),
+        // Never reached: try_paraphrase builds its own ConfidenceResult
+        // from the real overlap score rather than calling this function -
+        // a fixed score here would misrepresent it.
+        ReferenceKind::Paraphrase => (0.1, "unexpected: paraphrase scored elsewhere"),
     };
     ConfidenceResult::new(score, ConfidenceSource::Heuristic, Some(reason.to_string()))
 }
@@ -484,10 +581,21 @@ mod tests {
 
         fn search(
             &self,
-            _query: &str,
-            _translation_id: &str,
+            query: &str,
+            translation_id: &str,
         ) -> Result<Vec<BibleVerse>, BibleProviderError> {
-            Ok(vec![])
+            let needle = query.to_lowercase();
+            Ok(self
+                .verses
+                .iter()
+                .filter(|((t, _, _, _), text)| {
+                    t == translation_id && text.to_lowercase().contains(&needle)
+                })
+                .map(|((_, b, c, v), text)| BibleVerse {
+                    reference: ScriptureReference::single(translation_id, b, *c, *v),
+                    text: text.clone(),
+                })
+                .collect())
         }
 
         fn list_chapters(
@@ -865,5 +973,95 @@ mod tests {
         };
 
         assert_eq!(run(), run());
+    }
+
+    // 21. Paraphrase detection: a segment with no citation shape at all,
+    // but wording that closely echoes Romans 8:28, produces a Pending
+    // suggestion for that verse.
+    #[test]
+    fn a_close_paraphrase_with_no_citation_produces_a_paraphrase_suggestion() {
+        let provider = FakeBibleProvider::kjv_fixture();
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        let result = process(
+            &provider,
+            &mut context,
+            "And we know that all things work together for good.",
+        );
+
+        assert_eq!(result.detections.len(), 1);
+        let detection = &result.detections[0];
+        assert_eq!(detection.kind, ReferenceKind::Paraphrase);
+        assert_eq!(
+            detection.reference.as_ref().unwrap().to_string(),
+            "ROM 8:28"
+        );
+        assert_eq!(detection.confidence.source, ConfidenceSource::Heuristic);
+        assert_eq!(result.suggestions.len(), 1);
+        assert_eq!(result.suggestions[0].status, SuggestionStatus::Pending);
+        assert!(
+            matches!(&result.suggestions[0].kind, SuggestionKind::Scripture { reference } if reference == "ROM 8:28")
+        );
+    }
+
+    // 22. Paraphrase detection never overrides an explicit citation - it
+    // only ever runs when nothing else already produced a suggestion.
+    #[test]
+    fn an_explicit_citation_is_never_second_guessed_by_the_paraphrase_fallback() {
+        let provider = FakeBibleProvider::kjv_fixture();
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        let result = process(&provider, &mut context, "John 3:16");
+
+        assert_eq!(result.detections.len(), 1, "no extra paraphrase detection");
+        assert_eq!(result.detections[0].kind, ReferenceKind::Direct);
+        assert_eq!(result.suggestions.len(), 1);
+    }
+
+    // 23. Paraphrase detection never mutates the active Scripture context -
+    // it is not a citation, so it must not change what a later bare
+    // "verse N" resolves against.
+    #[test]
+    fn paraphrase_detection_never_mutates_the_active_context() {
+        let provider = FakeBibleProvider::kjv_fixture();
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        process(&provider, &mut context, "Romans 8");
+        let result = process(
+            &provider,
+            &mut context,
+            "And we know that all things work together for good.",
+        );
+
+        assert_eq!(result.detections[0].kind, ReferenceKind::Paraphrase);
+        assert_eq!(
+            context.active_context().unwrap().chapter,
+            8,
+            "context must survive a paraphrase detection unchanged"
+        );
+        assert_eq!(
+            context.active_context().unwrap().last_verse,
+            None,
+            "a paraphrase must never be recorded as a resolved verse in context"
+        );
+    }
+
+    // 24. Short utterances and low-overlap prose never trigger the
+    // paraphrase fallback, even when they happen to share one word with a
+    // verse in the dataset.
+    #[test]
+    fn short_or_unrelated_segments_never_trigger_the_paraphrase_fallback() {
+        let provider = FakeBibleProvider::kjv_fixture();
+        for text in [
+            "Chapter eight of our study is important.",
+            "Romans is an important book.",
+            "John was one of the disciples.",
+            "Paul is showing us the work of the Spirit.",
+            "Let us pray together this morning.",
+        ] {
+            let mut context = DefaultScriptureContextManager::new("KJV");
+            let result = process(&provider, &mut context, text);
+            assert!(
+                result.suggestions.is_empty(),
+                "{text:?} must not trigger a paraphrase suggestion"
+            );
+        }
     }
 }

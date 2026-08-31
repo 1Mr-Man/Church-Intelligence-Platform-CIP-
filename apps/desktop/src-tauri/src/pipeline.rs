@@ -16,19 +16,19 @@
 //! see `commands.rs`.
 
 use cip_core_ai::SuggestionKind;
-use cip_core_bible::{BibleProvider, DefaultScriptureContextManager};
+use cip_core_bible::{BibleProvider, DefaultScriptureContextManager, ReferenceKind};
 use cip_core_service::{process_transcript_segment, ProcessedSegment};
 use rusqlite::Connection;
 use std::time::Instant;
 use uuid::Uuid;
 
 use crate::persistence::{
-    has_recent_suggestion_for_reference, persist_scripture_detection, persist_suggestion,
-    persist_transcript_segment, PersistError,
+    has_recent_detection_for_reference, persist_scripture_detection, persist_suggestion,
+    persist_transcript_segment, DetectionCategory, PersistError,
 };
 
 /// Phase 1.3 suggestion deduplication window - see
-/// `persistence::has_recent_suggestion_for_reference`'s docs for the full
+/// `persistence::has_recent_detection_for_reference`'s docs for the full
 /// policy. 60 seconds is long enough to absorb a pastor repeating the same
 /// reference while still explaining it, short enough that a genuinely new
 /// mention later in the service is never suppressed.
@@ -51,10 +51,11 @@ const SUGGESTION_DEDUP_WINDOW_SECONDS: i64 = 60;
 /// the transcript-and-detection record is never edited after the fact.
 /// Only *suggestion* creation is deduplicated: a suggestion is skipped (not
 /// persisted, not emitted, not present in the returned `ProcessedSegment`)
-/// if an identical reference was already suggested for this same service
-/// within `SUGGESTION_DEDUP_WINDOW_SECONDS` - see
-/// `persistence::has_recent_suggestion_for_reference` for exactly why this
-/// scope/window was chosen.
+/// if an identical reference *in the same category* (explicit citation vs.
+/// `Paraphrase` guess - see `persistence::DetectionCategory`) was already
+/// suggested for this same service within `SUGGESTION_DEDUP_WINDOW_SECONDS`.
+/// See `persistence::has_recent_detection_for_reference` for exactly why
+/// this scope/window/category split was chosen.
 ///
 /// ## Performance logging (Phase 1.3 section 44)
 ///
@@ -98,18 +99,43 @@ pub fn handle_final_transcript(
         )?;
     }
 
+    // `process_transcript_segment` only ever produces a suggestion for a
+    // detection that has `Some(reference)`, in the same relative order as
+    // `detections` - zip them so the dedup check below can tell an
+    // explicit citation from a `Paraphrase` guess for the same verse.
+    let detection_kinds = processed
+        .detections
+        .iter()
+        .filter(|d| d.reference.is_some())
+        .map(|d| d.kind);
+
     let mut kept_suggestions = Vec::with_capacity(processed.suggestions.len());
-    for suggestion in processed.suggestions {
+    for (kind, suggestion) in detection_kinds.zip(processed.suggestions) {
         let reference_display = match &suggestion.kind {
             SuggestionKind::Scripture { reference } => reference.clone(),
             _ => String::new(),
         };
+        // The dedup window suppresses a repeat *within the same category*
+        // (an explicit citation repeated soon after, or a fuzzy
+        // `Paraphrase` guess repeated soon after) - but never across
+        // categories: an explicit citation always deserves its own
+        // confident suggestion even if a `Paraphrase` guess for the same
+        // verse was already made moments earlier, and vice versa (e.g. the
+        // pastor paraphrases a verse, then reads it verbatim, or reads it
+        // and later paraphrases it again).
+        let category = if kind == ReferenceKind::Paraphrase {
+            DetectionCategory::Paraphrase
+        } else {
+            DetectionCategory::Explicit
+        };
         let is_duplicate = !reference_display.is_empty()
-            && has_recent_suggestion_for_reference(
+            && has_recent_detection_for_reference(
                 conn,
                 service_id,
                 &reference_display,
+                category,
                 SUGGESTION_DEDUP_WINDOW_SECONDS,
+                segment.id,
             )?;
         if is_duplicate {
             log::debug!(
@@ -1390,22 +1416,51 @@ mod tests {
             "unrelated prose must never invent a reference"
         );
 
-        // Section 32 again, now WITH an active context: wording that
-        // resembles Romans 8:28 but never says "verse" must still not be
-        // treated as that reference - resemblance is not a citation.
+        // Section 32 revisited under Phase 4.1 (semantic/paraphrase Bible
+        // detection): wording that never says "verse" is still not treated
+        // as a citation - the Verse/Direct/Chapter/Sequential resolution
+        // paths above never fire for it - but this project's prior
+        // "resemblance is never enough" stance is deliberately narrowed for
+        // one specific, honest case. When a segment shares almost all of
+        // its distinctive vocabulary with one particular verse (lexical/
+        // keyword overlap, not semantic/neural understanding - see
+        // `cip_core_bible::paraphrase`'s module docs) and nothing else in
+        // the segment already produced a suggestion, it now surfaces as a
+        // `Paraphrase` detection: a `Pending` suggestion for the operator
+        // to approve or reject, exactly like every other detection kind -
+        // never auto-projected, and never a citation that mutates context.
         let p = process(
             &conn,
             &mut context,
             "And we know that all things work together for good.",
         );
-        assert!(
-            p.suggestions.is_empty(),
-            "textual resemblance to a verse must never invent a reference without an explicit citation"
+        assert_eq!(
+            p.suggestions.len(),
+            1,
+            "a close paraphrase of a specific verse must now surface a Pending suggestion for operator review"
+        );
+        assert_eq!(
+            p.detections[0].kind,
+            cip_core_bible::ReferenceKind::Paraphrase
+        );
+        assert_eq!(
+            p.detections[0].reference.as_ref().unwrap().to_string(),
+            "ROM 8:28"
+        );
+        assert_eq!(
+            p.detections[0].confidence.source,
+            cip_core_confidence::ConfidenceSource::Heuristic,
+            "paraphrase confidence must be reported honestly as lexical/heuristic, never as a model/semantic source"
+        );
+        assert_eq!(
+            p.suggestions[0].status,
+            cip_core_ai::SuggestionStatus::Pending,
+            "a paraphrase suggestion is never auto-approved or auto-projected"
         );
         assert_eq!(
             context.active_context().unwrap().chapter,
             8,
-            "context must survive this false-positive-shaped sentence unchanged"
+            "a paraphrase is not a citation - it must never establish or replace the active Scripture context"
         );
 
         // "Look at verse twenty-eight" -> Romans 8:28 -> Approve -> Preview -> Prepare.

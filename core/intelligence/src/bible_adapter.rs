@@ -143,6 +143,13 @@ fn finding_for_detection(
             let reference = detection.reference.as_ref()?;
             (AssertionLevel::Suggested, reference.to_string())
         }
+        ReferenceKind::Paraphrase => {
+            let reference = detection.reference.as_ref()?;
+            (
+                AssertionLevel::Suggested,
+                format!("{reference} (paraphrase, not cited)"),
+            )
+        }
         // Never guess - matches Phase 1's "no suggestion for
         // ambiguous/unresolved" rule exactly.
         ReferenceKind::Ambiguous | ReferenceKind::Unresolved => return None,
