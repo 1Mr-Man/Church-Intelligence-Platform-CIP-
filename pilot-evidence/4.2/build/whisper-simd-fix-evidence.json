@@ -1,0 +1,21 @@
+{
+  "phase": "4.2",
+  "summary": "Direct compiled-binary evidence that Whisper inference is now genuinely built with AVX/AVX2/FMA/F16C for the Windows target, and root-cause evidence for the build-tooling defect the fix's own CMAKE_TOOLCHAIN_FILE mechanism introduced and then had to correct.",
+  "rootCauseChain": {
+    "originalDefect": "whisper.cpp's ggml/CMakeLists.txt sets GGML_NATIVE_DEFAULT=OFF whenever CMAKE_CROSSCOMPILING is TRUE (always true for this project's Linux-to-Windows builds), cascading to GGML_AVX/GGML_AVX2/GGML_FMA/GGML_F16C all defaulting OFF - confirmed by direct read of the vendored whisper-rs-sys 0.13.1 source in the crates.io registry cache.",
+    "mechanismChosen": "CMAKE_TOOLCHAIN_FILE is the only CMAKE_-prefixed env var whisper-rs-sys's build.rs forwards to CMake that is also include()d early enough to pre-seed the cache ahead of GGML's own option() calls.",
+    "secondaryDefectFound": "Setting CMAKE_TOOLCHAIN_FILE caused the `cmake` Rust crate (cmake-0.1.58) to skip its own auto-detection of CMAKE_SYSTEM_NAME/CMAKE_SYSTEM_PROCESSOR (Config::build(), guarded by `if !self.defined(\"CMAKE_TOOLCHAIN_FILE\")`) and, separately, its own selection of CMAKE_C_COMPILER/CMAKE_CXX_COMPILER (same guard, ~300 lines later) - both silently skipped because CMAKE_TOOLCHAIN_FILE was already defined by build.rs's env-var forwarding before Config::build() ran. Without CMAKE_SYSTEM_NAME set, CMake configured as a same-arch native build; without an explicit compiler, it picked up the host's own /usr/bin/cc instead of the mingw-w64 cross compiler, which then failed immediately on Windows-specific linker flags CMake still tried to pass it (e.g. --major-image-version, meaningless to the host's native ld).",
+    "bisectionMethod": "A/B rebuild from a clean whisper-rs-sys cache: with CMAKE_TOOLCHAIN_FILE unset, the classic already-documented 'could not find native static library `ggml`' (ggml lib-name defect) reproduced exactly as expected; with it set (before the CMAKE_SYSTEM_NAME/compiler fix), the failure mode was structurally different (silent absence of -lwhisper/-lggml/-lggml-base/-lggml-cpu from the final linker invocation entirely, confirmed via `cargo build -vv` and by reading whisper-rs-sys's own cached build-script stdout, which DID contain the correct cargo:rustc-link-lib directives - proving the drop happened downstream of build.rs, in cargo/cmake-rs's own processing).",
+    "fix": "scripts/whisper-windows-simd.cmake additionally sets CMAKE_SYSTEM_NAME=Windows, CMAKE_SYSTEM_PROCESSOR=AMD64, and find_program()-locates CMAKE_C_COMPILER/CMAKE_CXX_COMPILER as x86_64-w64-mingw32-gcc/g++ - restoring exactly what cmake-rs would otherwise have set on this project's behalf. After this, a clean rebuild reproduces only the already-understood, already-handled ggml lib-name defect, which scripts/build-windows-whisper.sh's existing two-pass retry logic fixes automatically, unchanged."
+  },
+  "directBinaryEvidence": {
+    "method": "x86_64-w64-mingw32-nm and x86_64-w64-mingw32-objdump against the cip-desktop.exe extracted directly from the built NSIS installer (7z x), not against an intermediate build artifact.",
+    "symbolResolution": "ggml_cpu_has_avx2, ggml_cpu_has_fma, ggml_cpu_has_f16c all resolve as defined text symbols (T) in the final exe - previously these were 'undefined reference' link failures when the CMAKE_SYSTEM_NAME/compiler bug was present.",
+    "disassemblyEvidence": "objdump -d finds genuine AVX/AVX2 YMM-register instructions compiled into the binary, e.g. 'vpbroadcastb %xmm0,%ymm0', 'vmovdqa %ymm0,(%rax)', 'vmovups %ymm0,...' - direct proof the SIMD code paths are compiled in, not merely that the CMake option was set without effect."
+  },
+  "threadCountTuning": {
+    "file": "ai/speech/src/whisper.rs",
+    "change": "run_inference() now calls params.set_n_threads() with std::thread::available_parallelism() capped at 8, instead of relying on whisper.cpp's own default of min(4, hardware_concurrency())."
+  },
+  "regressionUnaffected": "cargo test -p cip-ai-speech --features whisper: 7/7 passed (unchanged count) - detection logic, buffering, resampling, database schema, and event contracts were not touched this phase."
+}

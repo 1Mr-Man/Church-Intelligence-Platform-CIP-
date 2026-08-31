@@ -57,6 +57,28 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Phase 4.2: forces AVX2/AVX/FMA/F16C on for the vendored ggml (whisper.cpp)
+# CMake build - without this, the cross-compiled Windows build silently gets
+# no CPU vectorization beyond the unconditional SSE4.2 baseline, confirmed on
+# real Windows hardware to be the dominant cause of Whisper transcription
+# running far slower than real time. See scripts/whisper-windows-simd.cmake
+# and docs/phase-4-2-live-bible-detection-performance.md for the full root
+# cause and safety rationale. Exported here (not inline per-invocation) so
+# it applies to every `cargo build`/`tauri build` step below, including the
+# CMake-caching retry pass.
+export CMAKE_TOOLCHAIN_FILE="$(pwd)/scripts/whisper-windows-simd.cmake"
+echo "==> CMAKE_TOOLCHAIN_FILE=$CMAKE_TOOLCHAIN_FILE (forces AVX2/FMA/F16C for the ggml build)"
+
+# whisper-rs-sys's build.rs does not declare `rerun-if-env-changed` for
+# CMAKE_TOOLCHAIN_FILE (or any wildcard covering it), so Cargo has no way
+# to know a new/changed toolchain file means CMake needs to reconfigure -
+# a merely-cached build from an earlier run of this script (or a prior
+# phase) would silently keep using its old CMakeCache.txt, ignoring the
+# override above entirely. Force a clean rebuild of just this one crate
+# every run so the toolchain file is guaranteed to actually apply.
+echo "==> Cleaning whisper-rs-sys's cached build so the SIMD toolchain override actually applies"
+cargo clean -p whisper-rs-sys --target x86_64-pc-windows-gnu --release 2>/dev/null || true
+
 if ! command -v 7z >/dev/null 2>&1; then
   echo "ERROR: 7z is required to verify the packaged installer's contents (e.g. 'apt-get install -y p7zip-full')" >&2
   exit 1

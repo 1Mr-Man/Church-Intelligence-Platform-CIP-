@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PresentationItem } from "../domain";
-import { parseVerseRange, presentationHeading, referenceFor } from "./libraryHelpers";
+import { filterBooksByPrefix, parseVerseRange, presentationHeading, referenceFor } from "./libraryHelpers";
 
 describe("referenceFor", () => {
   it("formats a single verse", () => {
@@ -76,5 +76,43 @@ describe("presentationHeading", () => {
       content: { type: "text", title: null, body: "..." },
     };
     expect(presentationHeading(item)).toBe("(untitled)");
+  });
+});
+
+describe("filterBooksByPrefix", () => {
+  const books = [
+    { name: "Acts" },
+    { name: "Amos" },
+    { name: "Romans" },
+    { name: "1 Samuel" },
+    { name: "1 Kings" },
+    { name: "John" },
+  ];
+
+  it("matches a single-letter prefix against the display name, case-insensitively", () => {
+    expect(filterBooksByPrefix(books, "a").map((b) => b.name)).toEqual(["Acts", "Amos"]);
+    expect(filterBooksByPrefix(books, "A").map((b) => b.name)).toEqual(["Acts", "Amos"]);
+  });
+
+  it("matches a numbered book by its leading digit", () => {
+    expect(filterBooksByPrefix(books, "1").map((b) => b.name)).toEqual(["1 Samuel", "1 Kings"]);
+  });
+
+  it("trims whitespace from the prefix before matching", () => {
+    expect(filterBooksByPrefix(books, "  ro  ").map((b) => b.name)).toEqual(["Romans"]);
+  });
+
+  it("returns every book unchanged for an empty or whitespace-only prefix", () => {
+    expect(filterBooksByPrefix(books, "")).toEqual(books);
+    expect(filterBooksByPrefix(books, "   ")).toEqual(books);
+  });
+
+  it("returns an empty list when nothing matches, never guessing a fallback", () => {
+    expect(filterBooksByPrefix(books, "zzz")).toEqual([]);
+  });
+
+  it("does not match a prefix found only mid-name", () => {
+    // "ohn" is inside "John" but is not a prefix of it.
+    expect(filterBooksByPrefix(books, "ohn")).toEqual([]);
   });
 });

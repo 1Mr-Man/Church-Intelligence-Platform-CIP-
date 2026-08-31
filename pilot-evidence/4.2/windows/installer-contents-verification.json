@@ -1,0 +1,46 @@
+{
+  "phase": "4.2",
+  "summary": "Direct extraction and inspection of the rebuilt NSIS installer, confirming the AVX2/FMA/F16C SIMD fix is genuinely compiled into the shipped binary and every prior phase's feature/DLL fix still holds.",
+  "extractionMethod": "7z x \"Church Intelligence Platform_0.1.0_x64-setup.exe\"",
+  "installerChecksum": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "17a5f18f3f3643527960d22b0b26bfc983c5073e728eede24cd8f8771175f48a",
+    "sizeBytes": 8639414,
+    "previousPhaseSha256": "4066768fd59a3d39e2912c04aa8bae4c7bbb4fa7b27807e2bb5a998201f2f2d8",
+    "previousPhaseSizeBytes": 8630234,
+    "sizeChangeNote": "Slightly larger (+9180 bytes) - expected: AVX2-specific ggml kernel code paths are now compiled in (previously entirely absent, SSE4.2-only), plus the small Bible-search filter frontend addition."
+  },
+  "extractedInstallerContents": [
+    "libwinpthread-1.dll",
+    "cip-desktop.exe",
+    "WebView2Loader.dll",
+    "uninstall.exe",
+    "libstdc++-6.dll",
+    "libgcc_s_seh-1.dll",
+    "$PLUGINSDIR/modern-wizard.bmp",
+    "$PLUGINSDIR/System.dll",
+    "$PLUGINSDIR/NSISdl.dll",
+    "$PLUGINSDIR/nsis_tauri_utils.dll",
+    "$PLUGINSDIR/StartMenu.dll",
+    "$PLUGINSDIR/nsDialogs.dll"
+  ],
+  "runtimeDllsStillPresent": {
+    "libstdc++-6.dll": { "sizeBytes": 4596950 },
+    "libgcc_s_seh-1.dll": { "sizeBytes": 169919 },
+    "libwinpthread-1.dll": { "sizeBytes": 94077 },
+    "note": "Byte sizes identical to prior phases - same source DLLs, same toolchain, unaffected by this phase's SIMD/build-tooling fix."
+  },
+  "cipDesktopExeVerification": {
+    "extractedSizeBytes": 34658295,
+    "fileCommand": "PE32+ executable (GUI) x86-64 (stripped to external PDB), for MS Windows, 11 sections",
+    "simdFixDirectEvidence": {
+      "method": "x86_64-w64-mingw32-nm and x86_64-w64-mingw32-objdump against the exe extracted from THIS built installer, not an intermediate build artifact.",
+      "symbolResolution": "ggml_cpu_has_avx2, ggml_cpu_has_fma, ggml_cpu_has_f16c all resolve as defined text symbols (nm shows 'T', not the undefined-reference link failure seen before the fix).",
+      "disassemblyEvidence": "objdump -d finds genuine AVX/AVX2 YMM-register instructions, e.g. 'vpbroadcastb %xmm0,%ymm0', 'vmovdqa %ymm0,(%rax)', 'vmovups %ymm0,...' - proof the SIMD code paths are actually compiled in, not merely that the CMake cache variable was set without effect."
+    },
+    "whisperFeatureSymbolProof": "x86_64-w64-mingw32-nm finds 93 matches for whisper_full_with_state (unchanged from prior phases - the whisper feature itself is unaffected, only its compiled code-generation target changed).",
+    "dialogPluginSymbolProof": "x86_64-w64-mingw32-strings/nm find 144/165 matches for tauri_plugin_dialog respectively - Phase 3.8.7.1's model-picker feature unaffected.",
+    "bibleSearchFilterNote": "The new book-name prefix filter (filterBooksByPrefix) is pure frontend TypeScript, bundled into the Vite build's JS asset - not separately verifiable via native-binary symbol inspection; covered instead by the frontend test suite (218/218 passed, including 6 new tests for this helper)."
+  },
+  "automatedVerification": "scripts/build-windows-whisper.sh's own final step (7z-extraction DLL-presence check) passed on this build - 'confirmed: libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll are all present in the installer'."
+}

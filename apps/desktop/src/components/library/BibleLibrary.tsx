@@ -21,7 +21,7 @@
 import { useEffect, useState } from "react";
 import type { BibleBook, BibleSearchResult, BibleTranslation, PresentationPreview, SavedScripture } from "../../domain";
 import * as commands from "../../lib/commands";
-import { parseVerseRange, referenceFor } from "../../lib/libraryHelpers";
+import { filterBooksByPrefix, parseVerseRange, referenceFor } from "../../lib/libraryHelpers";
 
 type Tab = "browse" | "search" | "saved";
 
@@ -31,6 +31,7 @@ export function BibleLibrary() {
   const [translationId, setTranslationId] = useState<string>("");
   const [books, setBooks] = useState<BibleBook[]>([]);
   const [selectedBook, setSelectedBook] = useState<BibleBook | null>(null);
+  const [bookFilter, setBookFilter] = useState("");
   const [selectedChapter, setSelectedChapter] = useState<number | null>(null);
   const [chapterVerses, setChapterVerses] = useState<BibleSearchResult[]>([]);
   const [rangeFrom, setRangeFrom] = useState("");
@@ -157,8 +158,9 @@ export function BibleLibrary() {
   };
 
   const isBusy = (key: string) => busy === key;
-  const oldTestament = books.filter((b) => b.testament === "old");
-  const newTestament = books.filter((b) => b.testament === "new");
+  const filteredBooks = filterBooksByPrefix(books, bookFilter);
+  const oldTestament = filteredBooks.filter((b) => b.testament === "old");
+  const newTestament = filteredBooks.filter((b) => b.testament === "new");
 
   function renderVerseCard(result: BibleSearchResult) {
     const key = `${result.translationId}-${result.book}-${result.chapter}-${result.verse}`;
@@ -253,26 +255,63 @@ export function BibleLibrary() {
         <section className="library-panel">
           {!selectedBook ? (
             <>
+              <input
+                value={bookFilter}
+                onChange={(e) => setBookFilter(e.target.value)}
+                placeholder="Type a book name, e.g. A for Acts, Amos..."
+                aria-label="Filter books by name"
+                className="library-book-filter"
+              />
               <h2>Old Testament</h2>
-              <div className="library-book-grid">
-                {oldTestament.map((b) => (
-                  <button key={b.code} type="button" className="library-book-tile" onClick={() => setSelectedBook(b)}>
-                    {b.name}
-                  </button>
-                ))}
-              </div>
+              {oldTestament.length === 0 ? (
+                <p className="live-brain__hint">No Old Testament book starts with {JSON.stringify(bookFilter.trim())}.</p>
+              ) : (
+                <div className="library-book-grid">
+                  {oldTestament.map((b) => (
+                    <button
+                      key={b.code}
+                      type="button"
+                      className="library-book-tile"
+                      onClick={() => {
+                        setSelectedBook(b);
+                        setBookFilter("");
+                      }}
+                    >
+                      {b.name}
+                    </button>
+                  ))}
+                </div>
+              )}
               <h2>New Testament</h2>
-              <div className="library-book-grid">
-                {newTestament.map((b) => (
-                  <button key={b.code} type="button" className="library-book-tile" onClick={() => setSelectedBook(b)}>
-                    {b.name}
-                  </button>
-                ))}
-              </div>
+              {newTestament.length === 0 ? (
+                <p className="live-brain__hint">No New Testament book starts with {JSON.stringify(bookFilter.trim())}.</p>
+              ) : (
+                <div className="library-book-grid">
+                  {newTestament.map((b) => (
+                    <button
+                      key={b.code}
+                      type="button"
+                      className="library-book-tile"
+                      onClick={() => {
+                        setSelectedBook(b);
+                        setBookFilter("");
+                      }}
+                    >
+                      {b.name}
+                    </button>
+                  ))}
+                </div>
+              )}
             </>
           ) : !selectedChapter ? (
             <>
-              <button type="button" onClick={() => setSelectedBook(null)}>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedBook(null);
+                  setBookFilter("");
+                }}
+              >
                 &larr; All books
               </button>
               <h2>{selectedBook.name}</h2>

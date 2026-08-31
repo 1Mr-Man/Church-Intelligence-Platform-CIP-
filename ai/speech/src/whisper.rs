@@ -103,6 +103,19 @@ impl WhisperSpeechEngine {
         params.set_print_special(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
+        // whisper.cpp's own default (used if this is never called) is
+        // `min(4, hardware_concurrency())` - a conservative cap that
+        // leaves real parallelism on the table on any machine with more
+        // than 4 logical cores. This already-idle worker thread (see
+        // `spawn_speech_worker` in `apps/desktop/src-tauri`) is the only
+        // thing running inference, so using every available core is safe;
+        // capped at 8 to avoid diminishing-returns oversubscription
+        // overhead on very high-core-count machines.
+        let n_threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .min(8) as std::ffi::c_int;
+        params.set_n_threads(n_threads);
 
         state
             .full(params, &audio_f32)

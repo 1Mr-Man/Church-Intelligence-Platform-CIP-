@@ -6,7 +6,7 @@
  * plain functions with their own `.test.ts`, never tested only through a
  * rendered component).
  */
-import type { PresentationItem } from "../domain";
+import type { BibleBook, PresentationItem } from "../domain";
 
 /** `("ROM", 8, 28)` -> `"ROM 8:28"`; `("ROM", 8, 28, 30)` -> `"ROM
  * 8:28-30"` - the exact display form `searchBible`/`previewScripture`/
@@ -37,4 +37,22 @@ export function parseVerseRange(from: string, to: string): { from: number; to: n
     return null;
   }
   return { from: start, to: end };
+}
+
+/** Filters `books` to those whose display name starts with `prefix`
+ * (case-insensitive, whitespace-trimmed) - the Bible Library's book-name
+ * autocomplete filter: typing "A" narrows the grid to "Acts", "Amos",
+ * etc. without needing the whole name typed out. An empty/whitespace-only
+ * prefix returns `books` unchanged (the default "show everything" state).
+ * Deliberately name-prefix only, not abbreviation/alias matching - most
+ * natural abbreviations (e.g. "Rom") are already name prefixes anyway,
+ * and one simple rule keeps what matches predictable as the operator
+ * types. Filters the same provider-validated book list the Bible Library
+ * already loads via `listBibleBooks` - never a second book-identity
+ * source (see `core/bible::book_alias`'s own docs on why that's the one
+ * place book identity is known). */
+export function filterBooksByPrefix<T extends Pick<BibleBook, "name">>(books: T[], prefix: string): T[] {
+  const needle = prefix.trim().toLowerCase();
+  if (needle === "") return books;
+  return books.filter((b) => b.name.toLowerCase().startsWith(needle));
 }
