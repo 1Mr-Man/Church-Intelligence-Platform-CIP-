@@ -147,6 +147,24 @@ pub fn any_display_window_open(app: &AppHandle) -> bool {
 /// [`crate::commands::clear_active_presentation`], so persistence never
 /// disagrees with what the operator can actually see.
 ///
+/// # Phase 3.10.4: reopening an already-open window can reposition it
+///
+/// Before this phase, calling this function on an already-open screen
+/// only showed/focused it - a monitor reassigned in the Display Registry,
+/// or a previously-disconnected monitor reconnecting, never moved a
+/// window that was already open on the wrong place. This phase makes
+/// that case useful: when `placement` is `Some` (a connected, assigned
+/// monitor is currently resolved for this screen), an already-open
+/// window is also moved/resized to it via `set_position`/`set_size` -
+/// letting the operator's existing "Open"/"Reposition" action in the
+/// Presentation card genuinely reconnect a screen after its monitor came
+/// back, without closing and reopening the window. When `placement` is
+/// `None` (nothing assigned, or the assigned monitor is not currently
+/// connected), an already-open window is left exactly where it is - this
+/// deliberately never undoes an operator's own manual drag on a machine
+/// with no Display Registry assignment, matching this phase's own
+/// "never touch what the operator already positioned by hand" boundary.
+///
 /// # Phase 3.8.4: callers MUST be `async fn` Tauri commands on Windows
 ///
 /// This function's `WebviewWindowBuilder::build()` call is a documented
@@ -187,17 +205,25 @@ pub fn open_display_window(
     screen: DisplayScreen,
     placement: Option<crate::display_registry::MonitorPlacement>,
 ) -> tauri::Result<()> {
-    if let Some(existing) = app.get_webview_window(screen.window_label()) {
-        existing.show()?;
-        existing.set_focus()?;
-        return Ok(());
-    }
-
     let logical_position =
         placement.map(|p| tauri::PhysicalPosition::new(p.x, p.y).to_logical::<f64>(p.scale_factor));
     let logical_size = placement
         .map(|p| tauri::PhysicalSize::new(p.width, p.height).to_logical::<f64>(p.scale_factor))
         .unwrap_or(tauri::LogicalSize::new(1280.0, 720.0));
+
+    if let Some(existing) = app.get_webview_window(screen.window_label()) {
+        existing.show()?;
+        // Phase 3.10.4: only reposition when a real, connected, assigned
+        // monitor is resolved - never move a window an operator placed
+        // manually on a machine with no Display Registry assignment (see
+        // this function's own docs above).
+        if let Some(pos) = logical_position {
+            existing.set_position(pos)?;
+            existing.set_size(logical_size)?;
+        }
+        existing.set_focus()?;
+        return Ok(());
+    }
 
     let mut builder = WebviewWindowBuilder::new(
         app,

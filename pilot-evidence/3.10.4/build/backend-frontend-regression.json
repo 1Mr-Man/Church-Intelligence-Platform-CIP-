@@ -1,0 +1,16 @@
+{
+  "phase": "3.10.4",
+  "summary": "Real-code evidence for the Multi-Window Lifecycle (disconnect/reconnect) phase: an already-open presentation display window can now be repositioned onto its currently resolved monitor, closing the last named gap of the multi-screen pillar (3.10-3.10.4).",
+  "trigger": "Every prior 3.10.x phase's own known-limitations section named this phase explicitly: 'No live monitor hot-plug detection... Live disconnect/reconnect handling is Phase 3.10.4's scope.'",
+  "scopeDecision": "Tauri exposes no monitor hot-plug push event found in the vendored crate, and this container has one display and no tauri::test harness - so speculative real-time OS-level hot-plug handling was deliberately not attempted (would be unverifiable in this environment, violating this project's audit-first/evidence-based discipline). Instead this phase closes the one genuine gap this container's own architecture makes visible: open_display_window's existing-window branch only ever called show()/set_focus(), never reapplied a freshly-resolved placement - so reconnecting a monitor or reassigning a role while a screen's window was already open had no way to move it short of closing and reopening.",
+  "fix": "open_display_window's existing-window branch now reapplies the freshly-resolved placement (set_position + set_size, same DPI-correct logical-pixel conversion as window creation) before showing/focusing - only when placement is Some. A None placement (nothing assigned, or the assigned monitor still disconnected) leaves an already-open window exactly where it is, preserving an operator's manual drag on a machine with no Display Registry assignment - the same principle 3.10.2 established for window creation, now extended to repositioning.",
+  "filesChanged": {
+    "apps/desktop/src-tauri/src/presentation_display.rs": "open_display_window's existing-window branch reorders to compute logical_position/logical_size first, then applies set_position/set_size to an already-open window when placement is Some, before show()/set_focus().",
+    "apps/desktop/src/components/workspace/PresentationCard.tsx": "New Reposition button on each open screen's row, calling the same onOpenScreen handler the closed-state Open button already uses - no new command, no new event."
+  },
+  "designNotes": "No new Tauri command was added (reuses open_presentation_display, now placement-aware for existing windows); no new event; no new database migration. commands.rs required zero changes since it already resolves placement fresh on every call and passes it through unconditionally.",
+  "regressionProof": {
+    "backend": "cargo fmt --check clean; cargo clippy --all-targets -- -D warnings clean (default and --features whisper); cargo test -p cip-desktop 277/277 passed (unchanged count - window-lifecycle glue is not independently unit-testable per this project's established convention; verified via direct code inspection and the full existing suite still passing).",
+    "frontend": "tsc -b 0 errors; oxlint 0 errors (same pre-existing warning pattern); vitest 211/211 passed (unchanged - no new domain contract); vite build clean."
+  }
+}

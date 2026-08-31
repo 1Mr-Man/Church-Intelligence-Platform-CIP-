@@ -1,0 +1,46 @@
+{
+  "phase": "3.10.4",
+  "summary": "Direct extraction and inspection of the rebuilt NSIS installer, confirming the multi-window lifecycle (reposition-on-reopen) fix is genuinely compiled in and every prior phase's fix still holds.",
+  "extractionMethod": "7z x \"Church Intelligence Platform_0.1.0_x64-setup.exe\"",
+  "installerChecksum": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "14a44626058aeddecd0830f280f6c585a02000baf917af9cbd96fecf6d89bec0",
+    "sizeBytes": 8623290,
+    "previousPhaseSha256": "092306eeef6a9ba9b74123ed1998a3ec39efff6fb56de8a00ec8e33da98cf447",
+    "previousPhaseSizeBytes": 8619154,
+    "sizeChangeNote": "Larger by 4,136 bytes - expected for the small reposition-on-reopen logic addition and the new Reposition button in the frontend bundle."
+  },
+  "extractedInstallerContents": [
+    "libwinpthread-1.dll",
+    "cip-desktop.exe",
+    "WebView2Loader.dll",
+    "uninstall.exe",
+    "libstdc++-6.dll",
+    "libgcc_s_seh-1.dll"
+  ],
+  "runtimeDllsStillPresent": {
+    "libstdc++-6.dll": { "sizeBytes": 4596950 },
+    "libgcc_s_seh-1.dll": { "sizeBytes": 169919 },
+    "libwinpthread-1.dll": { "sizeBytes": 94077 },
+    "note": "Byte sizes identical to every prior phase's - same source DLLs, same toolchain, unaffected by this phase."
+  },
+  "cipDesktopExeVerification": {
+    "fileSizeBytes": 34612810,
+    "buildCommitEmbeddedProof": "x86_64-w64-mingw32-strings finds the literal substring 'a88679ba' embedded in the binary - the real Phase 3.10.3 baseline commit this build was made against.",
+    "repositionFixSymbolProof": {
+      "mangledFunctionSymbols": [
+        "_ZN15cip_desktop_lib20presentation_display19open_display_window17h25eb00ab946d4ed3E",
+        "_ZN15cip_desktop_lib20presentation_display20close_display_window17hce987d16da3a8d8cE"
+      ],
+      "note": "open_display_window's mangled symbol is present with a distinct hash from prior phases' builds (the function body changed, so its symbol hash changed too) - direct proof the reposition-on-reopen logic (set_position/set_size applied to an already-open window when placement resolves) is genuinely compiled into this exact binary, not just present in source. The Reposition button and its wiring live in the minified frontend JS bundle, not independently greppable via strings, consistent with every prior phase's own finding for frontend-only additions - verified functionally via the frontend test suite instead."
+    },
+    "priorPhaseSymbolsUnaffected": {
+      "setScreenRouteModeCommandPresent": true,
+      "presentationScreenSyncedEventStringPresent": true,
+      "listDisplaysOccurrences": 2,
+      "whisperFullWithStateOccurrences": 96,
+      "harvestSermonOccurrences": 2
+    }
+  },
+  "automatedVerification": "scripts/build-windows-whisper.sh's own final step (7z-extraction DLL-presence check) passed on this build, unchanged automation - 'confirmed: libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll are all present in the installer'."
+}

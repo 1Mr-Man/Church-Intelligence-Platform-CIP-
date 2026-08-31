@@ -29,6 +29,14 @@
  * takes that one screen out of the live broadcast without affecting the
  * others or the underlying single active item. See
  * `docs/phase-3-10-3-presentation-router.md`.
+ *
+ * Phase 3.10.4: an open screen's row also gets a "Reposition" button -
+ * it calls the exact same `onOpenScreen` handler "Open" already uses
+ * (the underlying command now also repositions an already-open window
+ * when a placement is resolved), giving the operator a way to move a
+ * screen back onto its assigned monitor after it reconnects, or after
+ * reassigning the monitor role, without closing and reopening the
+ * window. See `docs/phase-3-10-4-multi-window-lifecycle.md`.
  */
 import type {
   PresentationItem,
@@ -188,13 +196,23 @@ export function PresentationCard({
                 Open
               </button>
             ) : (
-              <button
-                type="button"
-                disabled={isBusy(`close-screen-${s.screen}`)}
-                onClick={() => onCloseScreen(s.screen)}
-              >
-                Close
-              </button>
+              <>
+                <button
+                  type="button"
+                  disabled={isBusy(`close-screen-${s.screen}`)}
+                  onClick={() => onCloseScreen(s.screen)}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  disabled={isBusy(`open-screen-${s.screen}`)}
+                  title="Move this screen's window to its currently assigned monitor - use this after reconnecting a monitor or reassigning its role"
+                  onClick={() => onOpenScreen(s.screen)}
+                >
+                  Reposition
+                </button>
+              </>
             )}
             <button
               type="button"
