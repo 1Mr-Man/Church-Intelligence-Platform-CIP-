@@ -30,6 +30,12 @@ export const AppEvents = {
   PresentationStarted: "PRESENTATION_STARTED",
   PresentationStopped: "PRESENTATION_STOPPED",
   PresentationCancelled: "PRESENTATION_CANCELLED",
+  /** Phase 3.10.3: a specific screen was just switched from `held` back
+   * to `live` and should re-pull current state - always targeted at one
+   * display window (`emit_to`), never broadcast. No payload; the
+   * receiving window re-fetches via `getPresentationDisplayState`, the
+   * same hydration path it already uses on mount. */
+  PresentationScreenSynced: "PRESENTATION_SCREEN_SYNCED",
 
   ServiceStarted: "SERVICE_STARTED",
   ServicePaused: "SERVICE_PAUSED",

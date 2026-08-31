@@ -98,6 +98,14 @@ export function onPresentationStopped(handler: (item: PresentationItem) => void)
   return listenSafe<PresentationItem>(AppEvents.PresentationStopped, handler);
 }
 
+/** Phase 3.10.3: this display window was just switched from `held` back
+ * to `live` - re-pull current state (`getPresentationDisplayState`)
+ * rather than expecting this event to carry the content itself. Always
+ * targeted at this one window (`emit_to`), never broadcast. */
+export function onPresentationScreenSynced(handler: () => void): Promise<UnlistenFn> {
+  return listenSafe<null>(AppEvents.PresentationScreenSynced, () => handler());
+}
+
 /** A new Music Intelligence finding (Phase 2.1) - never implies a
  * presentation item was created; see `docs/music-intelligence.md`. */
 export function onMusicFindingDetected(

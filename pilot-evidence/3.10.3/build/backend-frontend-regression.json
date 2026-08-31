@@ -1,0 +1,34 @@
+{
+  "phase": "3.10.3",
+  "summary": "Real-code evidence for the Presentation Router phase: per-screen Live/Held routing, letting the operator independently take a screen off the live presentation broadcast without touching the single-active-item domain model or the window-creation pipeline.",
+  "trigger": "The user asked to continue with Phase 3.10.3 (Presentation Router), described in one line as their own prior phrase: 'independently route content to different roles'. Because this phrase is genuinely ambiguous between two very different designs (a per-screen Live/Held toggle vs. true independent concurrent content per screen, which would break presentation.rs's extensively-tested single-active-item invariant), and because this touches the same presentation pipeline the user has repeatedly asked to be careful with, the session asked the user to choose before implementing rather than assuming.",
+  "scopingQuestion": "AskUserQuestion offered two options: (1) per-screen Live/Held toggle - no domain model change, a screen can be independently taken off the live broadcast and freezes on its last content; (2) true independent content per screen - requires breaking the at-most-one-Active-item invariant. The user chose option 1.",
+  "designDecisions": {
+    "twoSeparateConcerns": "DisplayScreen (which content stream/window) and the new RouteMode (whether a screen currently receives that stream's live updates) are kept as unrelated concerns - a screen's identity vs. its current subscription state.",
+    "deliveryLayerOnly": "PresentationStarted/PresentationStopped previously broadcast unconditionally via tauri::Emitter::emit (confirmed no target filter in the 3.10.1 audit). This phase replaces that at exactly the two emission call sites (display_presentation, clear_active_presentation) with broadcast_to_live_screens, which computes the open+Live screens (presentation_router::screens_to_broadcast, pure, unit-tested) and delivers via a new per-window events::emit_to. A screen missing from the route-mode map defaults to Live, so with nothing ever set this behaves identically to the pre-3.10.3 broadcast.",
+    "heldIsAFreezeNotABlank": "A Held screen keeps showing whatever it last received - never force-blanked, never sent fabricated different content. It simply stops being a delivery target until switched back.",
+    "catchUpReusesExistingHydration": "Switching a screen from Held back to Live emits a new payload-less PresentationScreenSynced event targeted (emit_to) at just that window. The frontend's PresentationDisplay component re-runs the exact same hydrate() pull its own mount effect already uses (getPresentationDisplayState -> resolveHydratedPayload) - no second content-delivery mechanism invented.",
+    "routeModeInMemoryOnly": "AppState.screen_route_modes is a plain in-memory HashMap, matching this struct's existing pattern for live-session-only state - resets to Live for every screen on restart, same as every other live-session field in AppState."
+  },
+  "filesChanged": {
+    "apps/desktop/src-tauri/src/presentation_router.rs": "New module: RouteMode enum (Live/Held) + as_str/parse; pure screens_to_broadcast(open_screens, modes). 7 unit tests.",
+    "apps/desktop/src-tauri/src/presentation_display.rs": "DisplayScreen gained Hash (needed as a HashMap key) - the only change to this file, no behavioral change.",
+    "apps/desktop/src-tauri/src/state.rs": "New screen_route_modes: Mutex<HashMap<DisplayScreen, RouteMode>> field.",
+    "apps/desktop/src-tauri/src/events.rs": "New AppEvent::PresentationScreenSynced variant (PRESENTATION_SCREEN_SYNCED); new emit_to helper mirroring the existing emit wrapper.",
+    "apps/desktop/src-tauri/src/commands.rs": "New broadcast_to_live_screens helper used at display_presentation's and clear_active_presentation's emission sites in place of the prior unconditional emit; PresentationScreenState gained route_mode; new set_screen_route_mode command.",
+    "apps/desktop/src-tauri/src/lib.rs": "Registers the new module and command.",
+    "apps/desktop/src/domain/presentation.ts": "New RouteMode type; PresentationScreenState gained routeMode.",
+    "apps/desktop/src/events/eventNames.ts": "New PresentationScreenSynced entry.",
+    "apps/desktop/src/lib/liveEvents.ts": "New onPresentationScreenSynced wrapper.",
+    "apps/desktop/src/lib/commands.ts": "New setScreenRouteMode wrapper.",
+    "apps/desktop/src/components/PresentationDisplay.tsx": "Hydration pull extracted into a reusable hydrate() function, called both on mount and on the new sync event.",
+    "apps/desktop/src/components/workspace/PresentationCard.tsx": "New Live/Held toggle button per screen row; new onSetRouteMode prop.",
+    "apps/desktop/src/components/LiveChurchBrain.tsx and apps/desktop/src/components/servicereplay/ServiceReplay.tsx": "Both wire the new onSetRouteMode prop identically to their existing onOpenScreen/onCloseScreen wiring.",
+    "apps/desktop/src/domain/contracts.test.ts": "PresentationDisplayState contract test extended to cover routeMode across live/held screens.",
+    "apps/desktop/src/events/eventNames.test.ts": "Event-count guard updated from 54 to 55."
+  },
+  "regressionProof": {
+    "backend": "cargo fmt --check clean; cargo clippy --all-targets -- -D warnings clean (default and --features whisper); cargo test -p cip-desktop 277/277 passed (up from 270 at the Phase 3.10.2 commit - 7 new tests, all in presentation_router.rs, verified via a direct #[test] count comparison against git HEAD).",
+    "frontend": "tsc -b 0 errors; oxlint 0 errors (same pre-existing warning pattern); vitest 211/211 passed; vite build clean."
+  }
+}

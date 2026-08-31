@@ -35,6 +35,14 @@ pub enum AppEvent {
     /// A prepared item was cancelled/retracted before being displayed
     /// (Phase 1.4).
     PresentationCancelled,
+    /// Phase 3.10.3: a specific screen was just switched from `Held` back
+    /// to `Live` and needs to catch up to whatever the currently active
+    /// item is - always emitted via `emit_to` (a single targeted window),
+    /// never broadcast, and carries no payload: the receiving display
+    /// window re-pulls current state via the same `get_presentation_display_state`
+    /// hydration path it already uses on mount, rather than this event
+    /// carrying a second copy of the content itself.
+    PresentationScreenSynced,
 
     ServiceStarted,
     ServicePaused,
@@ -194,6 +202,7 @@ impl AppEvent {
             AppEvent::PresentationStarted => "PRESENTATION_STARTED",
             AppEvent::PresentationStopped => "PRESENTATION_STOPPED",
             AppEvent::PresentationCancelled => "PRESENTATION_CANCELLED",
+            AppEvent::PresentationScreenSynced => "PRESENTATION_SCREEN_SYNCED",
 
             AppEvent::ServiceStarted => "SERVICE_STARTED",
             AppEvent::ServicePaused => "SERVICE_PAUSED",
@@ -259,6 +268,23 @@ pub fn emit<R: tauri::Runtime>(
     app.emit(event.name(), payload)
 }
 
+/// Emit an [`AppEvent`] to exactly one window (by its Tauri window label),
+/// never broadcast to every listening webview - the Phase 3.10.3 routing
+/// layer's one point of difference from [`emit`] above. Used to deliver
+/// the single active presentation item's live updates only to display
+/// screens currently in `Live` mode (`presentation_router::screens_to_broadcast`
+/// decides which), and to re-sync a screen just switched back to `Live`
+/// from `Held`.
+pub fn emit_to<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    label: &str,
+    event: AppEvent,
+    payload: impl Serialize + Clone,
+) -> tauri::Result<()> {
+    use tauri::Emitter;
+    app.emit_to(label, event.name(), payload)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,6 +308,7 @@ mod tests {
             AppEvent::PresentationStarted,
             AppEvent::PresentationStopped,
             AppEvent::PresentationCancelled,
+            AppEvent::PresentationScreenSynced,
             AppEvent::ServiceStarted,
             AppEvent::ServicePaused,
             AppEvent::ServiceResumed,

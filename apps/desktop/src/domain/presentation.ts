@@ -60,12 +60,22 @@ export interface PresentationDisplayPayload {
  * `docs/phase-3-10-multi-screen-audit.md`. */
 export type PresentationScreen = "stage" | "confidence" | "lobby";
 
-/** One screen's open/closed state, as reported by
- * `get_presentation_display_state`. */
+/** Phase 3.10.3: whether a screen currently receives the live
+ * presentation broadcast. `held` freezes a screen on whatever it
+ * currently shows - it does not give it different content from a `live`
+ * screen, only opts it out of future updates until switched back. See
+ * `docs/phase-3-10-3-presentation-router.md`. */
+export type RouteMode = "live" | "held";
+
+/** One screen's open/closed state and route mode, as reported by
+ * `get_presentation_display_state`. `routeMode` is independent of
+ * `windowOpen` - a closed screen still has a route mode, applied the next
+ * time its window opens and something is displayed. */
 export interface PresentationScreenState {
   screen: PresentationScreen;
   label: string;
   windowOpen: boolean;
+  routeMode: RouteMode;
 }
 
 /** The `get_presentation_display_state` response - the operator UI's sync

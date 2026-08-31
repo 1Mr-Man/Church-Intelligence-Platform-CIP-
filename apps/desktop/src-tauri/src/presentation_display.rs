@@ -48,7 +48,7 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 /// service can have (spec section 10, unchanged by this phase) - "multi-
 /// screen" means the same output reaching more places, not more outputs.
 /// See `docs/phase-3-10-multi-screen-audit.md`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DisplayScreen {
     Stage,
     Confidence,

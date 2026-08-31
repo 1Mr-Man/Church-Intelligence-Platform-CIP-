@@ -4,8 +4,8 @@ import { AppEvents } from "./eventNames";
 describe("AppEvents", () => {
   const names = Object.values(AppEvents);
 
-  it("defines exactly the 54 events from the Phase 1/1.2/1.3/1.4/2.0-2.7/3.9 event architecture", () => {
-    expect(names).toHaveLength(54);
+  it("defines exactly the 55 events from the Phase 1/1.2/1.3/1.4/2.0-2.7/3.9/3.10.3 event architecture", () => {
+    expect(names).toHaveLength(55);
   });
 
   it("has no duplicate event names", () => {

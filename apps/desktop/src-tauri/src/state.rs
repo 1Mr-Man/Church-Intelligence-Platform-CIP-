@@ -26,8 +26,12 @@ use cip_core_intelligence::{
 use cip_core_music::{AcousticMusicRecognizer, CurrentSong, MusicProvider};
 use cip_core_sermon::foundation::{Sermon, SermonSection};
 use cip_core_service::{AudioEngine, ServiceSession};
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
+
+use crate::presentation_display::DisplayScreen;
+use crate::presentation_router::RouteMode;
 
 /// The one Bible translation Phase 1.2 operates against. Not user-facing
 /// configuration yet - `core/bible::BibleProvider::list_translations` is
@@ -291,6 +295,14 @@ pub struct AppState {
     /// restart (see `docs/content-intelligence.md`'s persistence-decision
     /// section).
     pub content_candidate_queue: Mutex<ContentCandidateQueue>,
+    /// Phase 3.10.3: each display screen's current route mode
+    /// (`presentation_router::RouteMode`) - a screen missing from this map
+    /// is `Live`, the default. In-memory only, matching every other "live
+    /// window state" this struct already tracks (e.g. which screens are
+    /// currently open, which is derived from `AppHandle` rather than
+    /// stored here at all) - a route mode is a live-session operator
+    /// choice, not a durable setting, and resets to Live on restart.
+    pub screen_route_modes: Mutex<HashMap<DisplayScreen, RouteMode>>,
 }
 
 impl AppState {
@@ -339,6 +351,7 @@ impl AppState {
             active_sermon: Mutex::new(None),
             active_sermon_section: Mutex::new(None),
             content_candidate_queue: Mutex::new(ContentCandidateQueue::new()),
+            screen_route_modes: Mutex::new(HashMap::new()),
         }
     }
 }

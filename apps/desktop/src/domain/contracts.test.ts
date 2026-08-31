@@ -264,17 +264,18 @@ describe("domain contracts", () => {
     expect(payload.slide.heading).toBe("ROM 8:28");
   });
 
-  it("constructs a PresentationDisplayState with no active item and every screen closed", () => {
+  it("constructs a PresentationDisplayState with no active item, every screen closed, and every screen live by default (Phase 3.10.3)", () => {
     const state: PresentationDisplayState = {
       screens: [
-        { screen: "stage", label: "Stage", windowOpen: false },
-        { screen: "confidence", label: "Confidence Monitor", windowOpen: false },
-        { screen: "lobby", label: "Lobby / Overflow", windowOpen: false },
+        { screen: "stage", label: "Stage", windowOpen: false, routeMode: "live" },
+        { screen: "confidence", label: "Confidence Monitor", windowOpen: false, routeMode: "live" },
+        { screen: "lobby", label: "Lobby / Overflow", windowOpen: false, routeMode: "held" },
       ],
       activeItem: null,
       activeSlide: null,
     };
     expect(state.screens.every((s) => !s.windowOpen)).toBe(true);
+    expect(state.screens.filter((s) => s.routeMode === "live")).toHaveLength(2);
     expect(state.activeItem).toBeNull();
     expect(state.activeSlide).toBeNull();
   });

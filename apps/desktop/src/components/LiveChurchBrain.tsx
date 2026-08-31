@@ -728,6 +728,12 @@ export function LiveChurchBrain() {
             setScreens((prev) => prev.map((s) => (s.screen === screen ? { ...s, windowOpen: false } : s)));
           })
         }
+        onSetRouteMode={(screen, mode) =>
+          withBusy(`route-${screen}`, async () => {
+            await commands.setScreenRouteMode(screen, mode);
+            setScreens((prev) => prev.map((s) => (s.screen === screen ? { ...s, routeMode: mode } : s)));
+          })
+        }
         onDisplay={(id) => withBusy(`display-${id}`, async () => { await commands.displayPresentation(id); })}
         onCancel={(id) => withBusy(`cancel-${id}`, async () => { await commands.cancelPresentation(id); })}
         onStopDisplay={() => withBusy("stop-display", async () => { await commands.clearPresentationDisplay(); })}

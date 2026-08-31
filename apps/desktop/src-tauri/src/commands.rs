@@ -10,13 +10,14 @@ use crate::config::AppConfig;
 use crate::content;
 use crate::display_registry;
 use crate::errors::AppError;
-use crate::events::{emit, AppEvent};
+use crate::events::{emit, emit_to, AppEvent};
 use crate::logging::LogCategory;
 use crate::music;
 use crate::persistence;
 use crate::pipeline::handle_final_transcript;
 use crate::presentation;
 use crate::presentation_display;
+use crate::presentation_router::{self, RouteMode};
 use crate::segmentation::TranscriptSegmenter;
 use crate::sermon_foundation;
 use crate::state::{AppState, DEFAULT_TRANSLATION_ID};
@@ -2690,6 +2691,42 @@ fn resolve_screen_placement(
     display_registry::resolve_role_position(&displays, display_registry::screen_role(screen))
 }
 
+/// Delivers a presentation event (`PresentationStarted`/`PresentationStopped`)
+/// only to the screens currently `Live` (Phase 3.10.3) - a `Held` screen's
+/// window, even if open, does not receive it, and stays frozen on whatever
+/// it currently shows. Replaces the pre-3.10.3 unconditional broadcast
+/// (`events::emit`, which every open screen received with no way to opt
+/// out); a screen missing from `state.screen_route_modes` is `Live`, so
+/// with nothing ever set this behaves identically to the pre-3.10.3
+/// broadcast. Errors from any one target window are logged and do not
+/// stop delivery to the others.
+fn broadcast_to_live_screens(
+    app: &AppHandle,
+    state: &AppState,
+    event: AppEvent,
+    payload: impl Serialize + Clone,
+) {
+    let open_screens: Vec<_> = presentation_display::DisplayScreen::ALL
+        .into_iter()
+        .filter(|s| presentation_display::is_display_window_open(app, *s))
+        .collect();
+    let modes = state
+        .screen_route_modes
+        .lock()
+        .expect("screen_route_modes mutex poisoned")
+        .clone();
+    for screen in presentation_router::screens_to_broadcast(&open_screens, &modes) {
+        if let Err(e) = emit_to(app, screen.window_label(), event, payload.clone()) {
+            log::warn!(
+                target: crate::logging::LogCategory::Presentation.target(),
+                "failed to deliver {} to {}: {e}",
+                event.name(),
+                screen.window_label()
+            );
+        }
+    }
+}
+
 /// Opens (or, if already open, focuses) `screen`'s presentation display
 /// window - useful on its own for positioning it on a projector/second
 /// monitor before anything is ready to show. `display_presentation` calls
@@ -2728,13 +2765,16 @@ pub async fn open_presentation_display(
 }
 
 /// One screen's open/closed state, as reported to the operator UI -
-/// Phase 3.10.
+/// Phase 3.10. `route_mode` (Phase 3.10.3) is `"live"`/`"held"` regardless
+/// of `window_open` - a screen's route mode is independent of whether its
+/// window currently exists, matching `screen_route_modes`' own semantics.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresentationScreenState {
     pub screen: String,
     pub label: String,
     pub window_open: bool,
+    pub route_mode: String,
 }
 
 /// Which display screens currently exist, which item (if any) is
@@ -2790,12 +2830,23 @@ pub fn get_presentation_display_state(
             })
             .ok()
     });
+    let route_modes = state
+        .screen_route_modes
+        .lock()
+        .expect("screen_route_modes mutex poisoned")
+        .clone();
     let screens: Vec<PresentationScreenState> = presentation_display::DisplayScreen::ALL
         .into_iter()
         .map(|screen| PresentationScreenState {
             screen: screen.id().to_string(),
             label: screen.operator_label().to_string(),
             window_open: presentation_display::is_display_window_open(&app, screen),
+            route_mode: route_modes
+                .get(&screen)
+                .copied()
+                .unwrap_or(RouteMode::Live)
+                .as_str()
+                .to_string(),
         })
         .collect();
     log::info!(
@@ -2885,8 +2936,9 @@ pub async fn display_presentation(
         "[diagnostic] display_presentation: about to emit PresentationStarted for item {} (checkpoint 14 - lifecycle ordering: window opened -> activation committed -> event emitted now)",
         activated.id
     );
-    let _ = emit(
+    broadcast_to_live_screens(
         &app,
+        &state,
         AppEvent::PresentationStarted,
         PresentationDisplayPayload {
             item: activated.clone(),
@@ -2945,7 +2997,7 @@ pub(crate) fn clear_active_presentation(
     drop(db);
 
     if let Some(ref item) = stopped {
-        let _ = emit(app, AppEvent::PresentationStopped, item.clone());
+        broadcast_to_live_screens(app, &state, AppEvent::PresentationStopped, item.clone());
     }
     Ok(stopped)
 }
@@ -3070,6 +3122,66 @@ pub fn assign_display_role(
     log::info!(
         target: crate::logging::LogCategory::Presentation.target(),
         "assigned display role {role} to monitor {monitor_id}"
+    );
+    Ok(())
+}
+
+// --- presentation router (Phase 3.10.3) ------------------------------------
+//
+// Per-screen Live/Held routing - see `presentation_router.rs`'s module
+// docs. Independent of the Display Registry above: this controls whether
+// a screen currently receives the live broadcast, not where its window is
+// positioned.
+
+/// Sets `screen`'s route mode to `"live"` or `"held"` (Phase 3.10.3). A
+/// screen coming back to `Live` from `Held`, with its window currently
+/// open, is caught up immediately: `PresentationScreenSynced` is emitted
+/// to just that window so it re-pulls current state via the same
+/// hydration path it already uses on mount, rather than waiting for the
+/// next live change to reach it. Going to `Held`, or setting `Live` on an
+/// already-`Live`/closed screen, needs no catch-up and is a plain state
+/// update.
+#[tauri::command]
+pub fn set_screen_route_mode(
+    screen: String,
+    mode: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let screen = parse_display_screen(&screen).map_err(log_and_return)?;
+    let mode = RouteMode::parse(&mode)
+        .ok_or_else(|| AppError::InvalidInput(format!("unknown route mode: {mode}")))
+        .map_err(log_and_return)?;
+
+    let previous = {
+        let mut modes = state
+            .screen_route_modes
+            .lock()
+            .expect("screen_route_modes mutex poisoned");
+        modes.insert(screen, mode)
+    };
+
+    let became_live = mode == RouteMode::Live && previous != Some(RouteMode::Live);
+    if became_live && presentation_display::is_display_window_open(&app, screen) {
+        if let Err(e) = emit_to(
+            &app,
+            screen.window_label(),
+            AppEvent::PresentationScreenSynced,
+            (),
+        ) {
+            log::warn!(
+                target: crate::logging::LogCategory::Presentation.target(),
+                "failed to sync {} after switching it back to live: {e}",
+                screen.window_label()
+            );
+        }
+    }
+
+    log::info!(
+        target: crate::logging::LogCategory::Presentation.target(),
+        "set {} route mode to {}",
+        screen.window_label(),
+        mode.as_str()
     );
     Ok(())
 }

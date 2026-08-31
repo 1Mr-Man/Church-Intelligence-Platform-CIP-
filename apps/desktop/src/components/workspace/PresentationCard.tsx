@@ -24,12 +24,18 @@
  * Overflow), each open/closed on its own - multiple can be open at once,
  * all mirroring the same active item. See
  * `docs/phase-3-10-multi-screen-audit.md`.
+ *
+ * Phase 3.10.3: each screen row also gets a Live/Held toggle - `held`
+ * takes that one screen out of the live broadcast without affecting the
+ * others or the underlying single active item. See
+ * `docs/phase-3-10-3-presentation-router.md`.
  */
 import type {
   PresentationItem,
   PresentationPreview,
   PresentationScreen,
   PresentationScreenState,
+  RouteMode,
   Suggestion,
 } from "../../domain";
 
@@ -52,6 +58,7 @@ export interface PresentationCardProps {
   onPrepare: (suggestionId: string) => void;
   onOpenScreen: (screen: PresentationScreen) => void;
   onCloseScreen: (screen: PresentationScreen) => void;
+  onSetRouteMode: (screen: PresentationScreen, mode: RouteMode) => void;
   onDisplay: (itemId: string) => void;
   onCancel: (itemId: string) => void;
   onStopDisplay: () => void;
@@ -68,6 +75,7 @@ export function PresentationCard({
   onPrepare,
   onOpenScreen,
   onCloseScreen,
+  onSetRouteMode,
   onDisplay,
   onCancel,
   onStopDisplay,
@@ -188,6 +196,19 @@ export function PresentationCard({
                 Close
               </button>
             )}
+            <button
+              type="button"
+              className={s.routeMode === "held" ? "op-badge--neutral" : undefined}
+              disabled={isBusy(`route-${s.screen}`)}
+              title={
+                s.routeMode === "live"
+                  ? "Take this screen off the live broadcast - it freezes on whatever it currently shows"
+                  : "Put this screen back on the live broadcast - it catches up immediately"
+              }
+              onClick={() => onSetRouteMode(s.screen, s.routeMode === "live" ? "held" : "live")}
+            >
+              {s.routeMode === "live" ? "Live" : "Held"}
+            </button>
           </div>
         ))}
       </div>

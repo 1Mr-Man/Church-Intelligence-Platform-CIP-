@@ -33,6 +33,14 @@
  * blank/inactive state when nothing is active. See `docs/presentation.md`'s
  * "Local display architecture" section and
  * `docs/phase-3-10-multi-screen-audit.md`.
+ *
+ * Phase 3.10.3: a screen can be `held` (see `PresentationCard`'s per-screen
+ * route toggle), in which case its window simply stops receiving further
+ * `PRESENTATION_STARTED`/`PRESENTATION_STOPPED` events - nothing to
+ * change here, since the backend controls delivery, not this component.
+ * When switched back to `live`, this component receives a targeted
+ * `PRESENTATION_SCREEN_SYNCED` event and re-runs the exact same hydration
+ * pull it already does on mount - no second content-delivery path.
  */
 import { useEffect, useState } from "react";
 import type { PresentationDisplayPayload, PresentationScreen } from "../domain";
@@ -54,30 +62,34 @@ export function PresentationDisplay({ role }: PresentationDisplayProps) {
     logCheckpoint("mounted", "PresentationDisplay component mounted (checkpoint 3)");
     logCheckpoint("effect-ran", "useEffect body executing (checkpoint 4)");
 
-    logCheckpoint("hydration-call", "calling getPresentationDisplayState (checkpoint 5)");
-    commands
-      .getPresentationDisplayState()
-      .then((state) => {
-        const openScreens = state.screens.filter((s) => s.windowOpen).map((s) => s.screen);
-        logCheckpoint(
-          "hydration-result",
-          `openScreens=${openScreens.join(",")} activeItem=${state.activeItem !== null} activeSlide=${state.activeSlide !== null} (checkpoint 6)`,
-        );
-        if (cancelled) return;
-        const hydrated = resolveHydratedPayload(state);
-        if (hydrated) {
+    const hydrate = (reason: "mount" | "route-synced") => {
+      logCheckpoint("hydration-call", `calling getPresentationDisplayState (${reason}) (checkpoint 5)`);
+      commands
+        .getPresentationDisplayState()
+        .then((state) => {
+          const openScreens = state.screens.filter((s) => s.windowOpen).map((s) => s.screen);
           logCheckpoint(
-            "payload-applied",
-            `source=hydration heading=${hydrated.slide.heading} bodyLines=${hydrated.slide.bodyLines.length} footer=${hydrated.slide.footer ?? "null"} (checkpoints 9-12)`,
+            "hydration-result",
+            `openScreens=${openScreens.join(",")} activeItem=${state.activeItem !== null} activeSlide=${state.activeSlide !== null} (checkpoint 6)`,
           );
+          if (cancelled) return;
+          const hydrated = resolveHydratedPayload(state);
           setPayload(hydrated);
-        }
-      })
-      .catch((e) => {
-        // Best-effort hydration only - the event listeners below remain
-        // the primary, live source of truth once subscribed.
-        logCheckpoint("hydration-error", String(e));
-      });
+          if (hydrated) {
+            logCheckpoint(
+              "payload-applied",
+              `source=hydration heading=${hydrated.slide.heading} bodyLines=${hydrated.slide.bodyLines.length} footer=${hydrated.slide.footer ?? "null"} (checkpoints 9-12)`,
+            );
+          }
+        })
+        .catch((e) => {
+          // Best-effort hydration only - the event listeners below remain
+          // the primary, live source of truth once subscribed.
+          logCheckpoint("hydration-error", String(e));
+        });
+    };
+
+    hydrate("mount");
 
     const unlistenPromises = [
       liveEvents.onPresentationStarted((p) => {
@@ -93,6 +105,13 @@ export function PresentationDisplay({ role }: PresentationDisplayProps) {
       liveEvents.onPresentationStopped(() => {
         logCheckpoint("presentation-stopped-received", "PresentationStopped event received (checkpoint 8)");
         if (!cancelled) setPayload(null);
+      }),
+      // Phase 3.10.3: this screen was just switched back to `live` after
+      // being `held` - re-sync via the same hydration pull mount uses,
+      // rather than expecting this event to carry content itself.
+      liveEvents.onPresentationScreenSynced(() => {
+        logCheckpoint("route-synced-received", "PresentationScreenSynced event received");
+        if (!cancelled) hydrate("route-synced");
       }),
     ];
     return () => {

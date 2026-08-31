@@ -38,6 +38,7 @@ import type {
   PresentationPreview,
   PresentationScreen,
   ProcessedSegment,
+  RouteMode,
   ScriptureContext,
   Sermon,
   SermonFoundationSummary,
@@ -346,6 +347,16 @@ export function listDisplays(): Promise<Display[]> {
  * monitor - existing open windows are not moved retroactively. */
 export function assignDisplayRole(monitorId: string, role: DisplayRole): Promise<void> {
   return invokeCommand("assign_display_role", { monitorId, role });
+}
+
+// --- presentation router (Phase 3.10.3) -------------------------------------
+
+/** Sets `screen`'s route mode to `"live"` (receives the live presentation
+ * broadcast, the default) or `"held"` (frozen on whatever it currently
+ * shows, until switched back). Switching an open screen back to `live`
+ * catches it up immediately - no separate refresh needed. */
+export function setScreenRouteMode(screen: PresentationScreen, mode: RouteMode): Promise<void> {
+  return invokeCommand("set_screen_route_mode", { screen, mode });
 }
 
 // --- ambiguity resolution & context correction (Phase 1.3) ----------------

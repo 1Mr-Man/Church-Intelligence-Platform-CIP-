@@ -17,6 +17,7 @@ mod pilot_evidence;
 mod pipeline;
 mod presentation;
 mod presentation_display;
+mod presentation_router;
 mod segmentation;
 mod sermon;
 mod sermon_foundation;
@@ -415,6 +416,7 @@ pub fn run() {
             commands::log_display_diagnostic,
             commands::list_displays,
             commands::assign_display_role,
+            commands::set_screen_route_mode,
             commands::list_presentation_history,
             commands::search_bible,
             commands::list_bible_books,
