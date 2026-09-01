@@ -135,6 +135,31 @@ pub fn list_timeline(
     Ok(rows)
 }
 
+/// How many `audit_events` rows exist for `service_id`, grouped by
+/// `category` - the Phase 5.1 post-service report's timeline/error-count
+/// summary. A plain `GROUP BY` count, not a row dump: a long service's
+/// timeline can run into the hundreds or thousands of entries, and this
+/// report only ever needs totals per category (most importantly `"error"`,
+/// so an operator can see at a glance whether anything went wrong without
+/// reading the full timeline).
+pub fn count_events_by_category(
+    conn: &Connection,
+    service_id: Uuid,
+) -> Result<Vec<(String, u64)>, PersistError> {
+    let mut stmt = conn.prepare(
+        "SELECT category, COUNT(*) FROM audit_events
+         WHERE service_id = ?1 GROUP BY category ORDER BY category",
+    )?;
+    let rows = stmt
+        .query_map(params![service_id.to_string()], |row| {
+            let category: String = row.get(0)?;
+            let count: i64 = row.get(1)?;
+            Ok((category, count as u64))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

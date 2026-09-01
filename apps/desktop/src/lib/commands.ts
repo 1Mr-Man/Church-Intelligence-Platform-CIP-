@@ -46,6 +46,7 @@ import type {
   SermonSection,
   SermonSegment,
   ServiceIntelligenceSummary,
+  ServiceReport,
   ServiceSession,
   SermonStateSnapshot,
   SongRecognitionCandidate,
@@ -189,6 +190,13 @@ export function listServiceHistory(limit: number): Promise<ServiceSession[]> {
  * currently active - the service archive's detail view. */
 export function getService(serviceId: string): Promise<ServiceSession> {
   return invokeCommand("get_service", { serviceId });
+}
+
+/** The Phase 5.1 post-service observability report for a single service -
+ * see `ServiceReport`'s own doc comment for exactly what it does and does
+ * not represent. */
+export function getServiceReport(serviceId: string): Promise<ServiceReport> {
+  return invokeCommand("get_service_report", { serviceId });
 }
 
 export function approveSuggestion(suggestionId: string): Promise<Suggestion> {

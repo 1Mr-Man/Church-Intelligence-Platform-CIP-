@@ -23,6 +23,7 @@ mod segmentation;
 mod sermon;
 mod sermon_foundation;
 mod service;
+mod service_report;
 mod state;
 mod timeline;
 
@@ -524,6 +525,7 @@ pub fn run() {
             commands::list_timeline,
             commands::list_service_history,
             commands::get_service,
+            commands::get_service_report,
             commands::resolve_ambiguous_reference,
             commands::correct_scripture_context,
             commands::analyze_sermon_transcript,

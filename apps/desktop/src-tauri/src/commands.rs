@@ -2538,6 +2538,39 @@ pub fn get_service(
         .map_err(log_and_return)
 }
 
+/// The Phase 5.1 post-service observability report for a single service -
+/// a read-only aggregation of already-persisted data plus a labeled,
+/// process-lifetime diagnostics snapshot. See `service_report.rs` for why
+/// the diagnostics half is honestly scoped "since app launch," not
+/// service-specific.
+#[tauri::command]
+pub fn get_service_report(
+    service_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::service_report::ServiceReport, AppError> {
+    let id = parse_uuid(&service_id).map_err(log_and_return)?;
+    let db = state.db.lock().expect("db connection poisoned");
+    let speech_diagnostics = state
+        .speech_diagnostics
+        .lock()
+        .expect("speech_diagnostics mutex poisoned")
+        .clone();
+    let embedding_diagnostics = state
+        .embedding_diagnostics
+        .lock()
+        .expect("embedding diagnostics lock poisoned")
+        .clone();
+    crate::service_report::build_service_report(
+        &db,
+        id,
+        &speech_diagnostics,
+        &embedding_diagnostics,
+        state.embedding_ready,
+    )
+    .map_err(AppError::from)
+    .map_err(log_and_return)
+}
+
 #[tauri::command]
 pub fn approve_suggestion(
     suggestion_id: String,

@@ -305,6 +305,30 @@ pub fn persist_scripture_detection(
     Ok(true)
 }
 
+/// How many persisted `scripture_detections` rows exist for `service_id`,
+/// grouped by `detection_type` (the `ReferenceKind::label()` string, e.g.
+/// `"DIRECT_REFERENCE"`/`"SEMANTIC_REFERENCE"`) - the Phase 5.1 post-service
+/// report's detection-kind breakdown. A plain `GROUP BY` count, not a row
+/// dump: a service's detection count can run into the hundreds, and this
+/// report only ever needs totals per kind.
+pub fn scripture_detection_kind_counts(
+    conn: &Connection,
+    service_id: Uuid,
+) -> Result<Vec<(String, u64)>, PersistError> {
+    let mut stmt = conn.prepare(
+        "SELECT detection_type, COUNT(*) FROM scripture_detections
+         WHERE service_id = ?1 GROUP BY detection_type ORDER BY detection_type",
+    )?;
+    let rows = stmt
+        .query_map(params![service_id.to_string()], |row| {
+            let kind: Option<String> = row.get(0)?;
+            let count: i64 = row.get(1)?;
+            Ok((kind.unwrap_or_else(|| "UNKNOWN".to_string()), count as u64))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 // --- ai_suggestions -----------------------------------------------------
 
 fn suggestion_status_str(status: SuggestionStatus) -> &'static str {

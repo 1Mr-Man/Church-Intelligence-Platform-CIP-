@@ -15,7 +15,7 @@
  * live - the historical item this button reads from is never touched.
  */
 import { useEffect, useState } from "react";
-import type { ContentCandidate, PresentationItem, ServiceSession, Suggestion, TimelineEntry, TranscriptSegment } from "../../domain";
+import type { ContentCandidate, PresentationItem, ServiceReport, ServiceSession, Suggestion, TimelineEntry, TranscriptSegment } from "../../domain";
 import * as commands from "../../lib/commands";
 import { formatClockTime } from "../../lib/format";
 import { presentationHeading } from "../../lib/libraryHelpers";
@@ -29,6 +29,7 @@ export function HistoryView() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [presentations, setPresentations] = useState<PresentationItem[]>([]);
   const [savedContent, setSavedContent] = useState<ContentCandidate[]>([]);
+  const [report, setReport] = useState<ServiceReport | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -44,6 +45,7 @@ export function HistoryView() {
     setSelected(service);
     setError(null);
     setNotice(null);
+    setReport(null);
     Promise.all([
       commands.listTimeline(100, service.id),
       commands.listTranscript(200, service.id),
@@ -58,6 +60,13 @@ export function HistoryView() {
         setPresentations(p);
         setSavedContent(c);
       })
+      .catch((e) => setError(String(e)));
+    // Kept separate from the Promise.all above: a report failure (e.g. a
+    // pre-Phase-5.1 service with no report support) must never block the
+    // rest of the history view from loading.
+    commands
+      .getServiceReport(service.id)
+      .then(setReport)
       .catch((e) => setError(String(e)));
   };
 
@@ -122,6 +131,73 @@ export function HistoryView() {
         )
       ) : (
         <>
+          {report && (
+            <section className="library-panel">
+              <h2>Service Report</h2>
+              <p className="library-card__meta">
+                {report.durationMinutes !== null
+                  ? `Duration: ${report.durationMinutes.toFixed(1)} min`
+                  : "Duration: service still active"}
+              </p>
+              <ul className="library-card-list">
+                <li className="library-card library-card--bible">
+                  <div className="library-card__header">
+                    <strong>Suggestions</strong>
+                  </div>
+                  <p className="library-card__text">
+                    {report.suggestionStats.total} total &middot; {report.suggestionStats.approved} approved &middot;{" "}
+                    {report.suggestionStats.edited} edited &middot; {report.suggestionStats.rejected} rejected &middot;{" "}
+                    {report.suggestionStats.pending} pending
+                  </p>
+                </li>
+                {report.detectionKindCounts.length > 0 && (
+                  <li className="library-card library-card--bible">
+                    <div className="library-card__header">
+                      <strong>Detections by kind</strong>
+                    </div>
+                    <p className="library-card__text">
+                      {report.detectionKindCounts.map((d) => `${d.kind.replace(/_/g, " ")}: ${d.count}`).join(" · ")}
+                    </p>
+                  </li>
+                )}
+                {report.timelineCategoryCounts.length > 0 && (
+                  <li className="library-card library-card--bible">
+                    <div className="library-card__header">
+                      <strong>Timeline by category</strong>
+                    </div>
+                    <p className="library-card__text">
+                      {report.timelineCategoryCounts.map((c) => `${c.category}: ${c.count}`).join(" · ")}
+                    </p>
+                  </li>
+                )}
+              </ul>
+              <details>
+                <summary>Live pipeline diagnostics (since app launch, not this service alone)</summary>
+                <p className="live-brain__hint">
+                  These counters accumulate across every service run in this session of the app - they are not scoped
+                  to this service alone.
+                </p>
+                <ul className="library-card-list">
+                  <li className="library-card library-card--bible">
+                    <p className="library-card__text">
+                      Speech: {report.liveDiagnostics.speechModelLoaded ? "model loaded" : "model not loaded"} &middot;{" "}
+                      {report.liveDiagnostics.inferencesSucceeded}/{report.liveDiagnostics.inferencesAttempted} inferences
+                      succeeded
+                      {report.liveDiagnostics.avgInferenceDurationMs !== null &&
+                        ` · avg ${report.liveDiagnostics.avgInferenceDurationMs}ms`}
+                      {report.liveDiagnostics.overloadEvents > 0 && ` · ${report.liveDiagnostics.overloadEvents} overload events`}
+                    </p>
+                    <p className="library-card__text">
+                      Semantic search:{" "}
+                      {report.liveDiagnostics.embeddingReady ? "ready" : "not ready"}
+                      {!report.liveDiagnostics.embeddingFeatureCompiled && " (not compiled into this build)"}
+                    </p>
+                  </li>
+                </ul>
+              </details>
+            </section>
+          )}
+
           <section className="library-panel">
             <h2>Presentation History ({presentations.length})</h2>
             {presentations.length === 0 ? (

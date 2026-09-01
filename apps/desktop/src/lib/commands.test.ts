@@ -34,6 +34,7 @@ import {
   getIntelligenceCapabilities,
   getPresentationDisplayState,
   getServiceIntelligenceState,
+  getServiceReport,
   getSermon,
   getSermonFoundationState,
   getSermonState,
@@ -762,6 +763,25 @@ describe("commands.ts Tauri IPC guard", () => {
     expect(invokeMock).toHaveBeenCalledWith("list_sermon_sections", undefined);
     expect(invokeMock).toHaveBeenCalledWith("list_sermon_history", { limit: 10 });
     expect(invokeMock).toHaveBeenCalledWith("get_sermon", { sermonId: "sermon-1" });
+  });
+
+  // --- post-service observability report (Phase 5.1) ----------------------
+
+  it("getServiceReport calls get_service_report with the service id", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await getServiceReport("service-1");
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("get_service_report", { serviceId: "service-1" });
+  });
+
+  it("rejects getServiceReport outside the Tauri runtime, without calling invoke()", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    await expect(getServiceReport("service-1")).rejects.toBeInstanceOf(TauriUnavailableError);
+    expect(invokeMock).not.toHaveBeenCalled();
   });
 
   it("rejects every sermon foundation command outside the Tauri runtime, without calling invoke()", async () => {

@@ -107,3 +107,71 @@ export interface ServiceIntelligenceSummary {
   transitionCount: number;
   transcriptFreshness: TranscriptFreshness;
 }
+
+// --- Post-Service Observability Report (Phase 5.1) --------------------
+//
+// Mirrors `apps/desktop/src-tauri/src/service_report.rs` exactly. A
+// read-only aggregation of data already persisted for one service plus a
+// labeled snapshot of the live speech/embedding pipeline's own
+// process-lifetime diagnostics - see that module's doc comment for why
+// `LiveDiagnosticsSnapshot`'s fields are honestly scoped "since app
+// launch," not this-service-only.
+
+export interface SuggestionStats {
+  total: number;
+  pending: number;
+  approved: number;
+  edited: number;
+  rejected: number;
+}
+
+/** A `ReferenceKind` label (e.g. `"DIRECT_REFERENCE"`, `"SEMANTIC_REFERENCE"`)
+ * paired with how many `scripture_detections` rows of that kind this
+ * service produced. */
+export interface DetectionKindCount {
+  kind: string;
+  count: number;
+}
+
+/** An `audit_events.category` value paired with how many timeline entries
+ * of that category this service produced - `"error"` is the one an
+ * operator should check first. */
+export interface TimelineCategoryCount {
+  category: string;
+  count: number;
+}
+
+/** Every field here is a process-lifetime counter from `AppState`'s
+ * `SpeechDiagnostics`/`EmbeddingDiagnostics` - it reflects every service
+ * run since the app launched, not just this one. See
+ * `service_report.rs`'s module doc comment. */
+export interface LiveDiagnosticsSnapshot {
+  speechFeatureCompiled: boolean;
+  speechModelLoaded: boolean;
+  chunksReceived: number;
+  inferencesAttempted: number;
+  inferencesSucceeded: number;
+  lastInferenceDurationMs: number | null;
+  avgInferenceDurationMs: number | null;
+  maxInferenceDurationMs: number | null;
+  queueHighWaterMs: number;
+  overloadEvents: number;
+  audioMsDroppedOverload: number;
+  lastTranscriptPipelineDurationMs: number | null;
+  embeddingFeatureCompiled: boolean;
+  embeddingModelLoaded: boolean;
+  embeddingReady: boolean;
+}
+
+/** The complete post-service report for one service, as returned by
+ * `get_service_report`. */
+export interface ServiceReport {
+  service: ServiceSession;
+  /** `null` while the service is still active (no `endedAt` yet). */
+  durationMinutes: number | null;
+  suggestionStats: SuggestionStats;
+  detectionKindCounts: DetectionKindCount[];
+  timelineCategoryCounts: TimelineCategoryCount[];
+  liveDiagnostics: LiveDiagnosticsSnapshot;
+  generatedAt: string; // ISO-8601
+}
