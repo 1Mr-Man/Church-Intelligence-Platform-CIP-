@@ -252,7 +252,7 @@ granularity - also deliberately deferred pending real feedback.
 | Determined "silent preload" would not have helped (verse lookup was never the bottleneck) before building unnecessary machinery | DONE |
 | Implemented the fast Bible-only lane, decoupled from the 12-20s batch, with FK/dedup/context-state correctness verified by direct code reading | DONE |
 | Full regression green | DONE |
-| Windows artifact rebuild | Not yet performed this phase - pending confirmation this is the right direction before spending another full rebuild cycle |
+| Windows artifact rebuilt end to end, new function verified present in the compiled binary | DONE - see `pilot-evidence/4.3/` |
 | Real Windows re-test (Environment C) | **NOT YET PERFORMED** - pending the operator |
 
 **Phase 4.3: Environment A verification PASS. Real Windows re-test

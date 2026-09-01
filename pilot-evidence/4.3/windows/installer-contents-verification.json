@@ -1,0 +1,18 @@
+{
+  "phase": "4.3",
+  "summary": "Direct extraction and inspection of the rebuilt NSIS installer, confirming the fast Bible-detection lane is genuinely compiled into the shipped binary.",
+  "extractionMethod": "7z x \"Church Intelligence Platform_0.1.0_x64-setup.exe\"",
+  "installerChecksum": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "26e6199002345de922a229cf0fc148ca00e2845f9d7cad7136824d73a7149ab5",
+    "sizeBytes": 8645963,
+    "previousPhaseSha256": "17a5f18f3f3643527960d22b0b26bfc983c5073e728eede24cd8f8771175f48a",
+    "previousPhaseSizeBytes": 8639414,
+    "sizeChangeNote": "Slightly larger (+6549 bytes) - expected for the new orchestration function (finalize_bible_only) and trimmed finalize_and_route_segment; no new dependency."
+  },
+  "cipDesktopExeVerification": {
+    "simdFixDirectEvidence": "x86_64-w64-mingw32-nm still finds ggml_cpu_has_avx2/fma/f16c resolved as defined symbols - Phase 4.2's fix is unaffected by this phase.",
+    "fastLaneFunctionSymbolProof": "x86_64-w64-mingw32-strings finds the literal function name 'finalize_bible_only' in the shipped binary's string table (the compiled symbol itself is not present via nm - inlined/stripped in the release LTO build, expected for a small, single-call-site private function - but its name string, embedded via panic-location/debug metadata, confirms this exact source function was compiled in). The trimmed finalize_and_route_segment's mangled symbol (_ZN15cip_desktop_lib8commands26finalize_and_route_segment...) is also present and resolvable, confirming it was not accidentally removed."
+  },
+  "automatedVerification": "scripts/build-windows-whisper.sh's own final step (7z-extraction DLL-presence check) passed on this build - 'confirmed: libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll are all present in the installer'."
+}
