@@ -99,7 +99,7 @@ report closes that gap without inventing any new signal.
 whisper,semantic-search`. `cargo test --workspace` (single-threaded, to
 avoid a pre-existing, unrelated `config.rs` env-var test-parallelism
 flake - see "Known limitations"): every crate green under both feature
-configurations; `cip-desktop` alone gained 9 new tests, all passing (8 in
+configurations; `cip-desktop` alone gained 8 new tests, all passing (all in
 `service_report.rs`'s own `#[cfg(test)] mod tests`, exercising
 suggestion-status breakdown, detection-kind breakdown, active-vs-ended
 duration, the `avg_inference_duration_ms` derivation matching
@@ -115,7 +115,11 @@ No new native dependency was introduced - `service_report.rs` uses only
 `rusqlite`/`chrono`/`serde`, all already linked. `scripts/build-windows-whisper.sh`
 was re-run unchanged (`--features whisper,semantic-search`, same as
 Phase 4.4) to confirm the new command compiles and links into the cross-
-compiled artifact. See `pilot-evidence/5.1/windows/installer-contents-verification.json`
+compiled artifact. Installer: `Church Intelligence Platform_0.1.0_x64-setup.exe`,
+SHA-256 `356e69df388e80b1a3de2e86b6b8344f8ce18a68f7c5575ccfc63aca54038b8b`,
+13,738,055 bytes (essentially unchanged from the Phase 4.4 baseline of
+13,738,939 bytes - expected, since this phase adds no new dependency).
+See `pilot-evidence/5.1/windows/installer-contents-verification.json`
 for direct binary proof (new `get_service_report` symbol present, prior-
 phase symbols confirmed unaffected).
 
