@@ -57,6 +57,20 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Phase 4.4: also builds with the `semantic-search` Cargo feature (real
+# local embedding inference via `candle`/`cip-ai-embeddings`, for true
+# semantic Bible search) alongside `whisper`. Unlike whisper-rs-sys, candle
+# is pure Rust with no CMake/C++ build step of its own, so it needed none
+# of the lib-naming/threading-model fixes above - already verified to
+# cross-compile cleanly to x86_64-pc-windows-gnu via a disposable smoke
+# test during Phase 4.4's architecture audit. Every `cargo build`/
+# `tauri build` invocation below now requests both features together, so
+# the shipped installer has both live transcription and semantic Bible
+# search available (each still independently optional at runtime - a
+# missing model file for either falls back to its Null engine, never
+# fatal).
+FEATURES="whisper,semantic-search"
+
 # Phase 4.2: forces AVX2/AVX/FMA/F16C on for the vendored ggml (whisper.cpp)
 # CMake build - without this, the cross-compiled Windows build silently gets
 # no CPU vectorization beyond the unconditional SSE4.2 baseline, confirmed on
@@ -125,7 +139,7 @@ done
 echo "    architecture verified: all staged DLLs are x86-64"
 
 echo "==> First build attempt (expected to fail on the ggml lib-name defect if whisper-rs-sys has not been built with this toolchain variant before)"
-if cargo build --target x86_64-pc-windows-gnu -p cip-desktop --features whisper --release; then
+if cargo build --target x86_64-pc-windows-gnu -p cip-desktop --features "$FEATURES" --release; then
   echo "==> First attempt succeeded (whisper-rs-sys build was already cached with correctly-named libs)"
 else
   echo "==> First attempt failed as expected - applying the ggml lib-name fix"
@@ -142,11 +156,11 @@ else
   done
 
   echo "==> Retrying build with correctly-named libs in place"
-  cargo build --target x86_64-pc-windows-gnu -p cip-desktop --features whisper --release
+  cargo build --target x86_64-pc-windows-gnu -p cip-desktop --features "$FEATURES" --release
 fi
 
 echo "==> Rust build succeeded. Packaging the NSIS installer."
-(cd apps/desktop && npx tauri build --target x86_64-pc-windows-gnu --features whisper)
+(cd apps/desktop && npx tauri build --target x86_64-pc-windows-gnu --features "$FEATURES")
 
 echo "==> Verifying the packaged installer actually contains the runtime DLLs"
 installer="target/x86_64-pc-windows-gnu/release/bundle/nsis/Church Intelligence Platform_0.1.0_x64-setup.exe"

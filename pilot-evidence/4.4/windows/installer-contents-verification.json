@@ -1,0 +1,27 @@
+{
+  "phase": "4.4",
+  "summary": "Direct extraction and inspection of the rebuilt NSIS installer, confirming semantic (embedding-based) Bible search is genuinely compiled into the shipped binary, alongside every prior phase's still-unaffected symbols.",
+  "buildCommand": "scripts/build-windows-whisper.sh, extended this phase to pass --features whisper,semantic-search to every cargo build/tauri build invocation (previously whisper only).",
+  "extractionMethod": "7z x \"Church Intelligence Platform_0.1.0_x64-setup.exe\"",
+  "installerChecksum": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "46a78173c32990b161836f360e18c28ed92d00b2d5cdd859b68ba69b97d431bb",
+    "sizeBytes": 13738939,
+    "previousPhaseSha256": "26e6199002345de922a229cf0fc148ca00e2845f9d7cad7136824d73a7149ab5",
+    "previousPhaseSizeBytes": 8645963,
+    "sizeChangeNote": "+5,093,024 bytes (~59% larger) - expected: this is the first Windows build to also compile in candle-core/candle-nn/candle-transformers/tokenizers (the semantic-search feature), a genuine new dependency set, not a regression or accidental bloat."
+  },
+  "cipDesktopExeVerification": {
+    "sizeBytes": 58723639,
+    "newSymbolsDirectProof": "x86_64-w64-mingw32-strings against the extracted cip-desktop.exe confirms: the mangled trait-impl symbols for CandleEmbeddingEngine's is_ready/model_id/dimensions/embed (cip_ai_embeddings::candle_engine::CandleEmbeddingEngine as cip_core_ai::embedding_engine::EmbeddingEngine); CandleEmbeddingEngine::load itself; the SqliteVerseEmbeddingStore-as-VerseEmbeddingStore verse_embeddings impl and its drop-glue; cip_desktop_lib::embeddings::generate_verse_embeddings_for_translation; cip_desktop_lib::commands::generate_verse_embeddings; drop-glue for the new EmbeddingCapabilities and EmbeddingGenerationSummary structs; the literal model identifier string 'all-MiniLM-L6-v2'; and the embedded migration SQL text ('CREATE TABLE bible_verse_embeddings', 'CREATE INDEX idx_bible_verse_embeddings_model', the primary-key/model_id design comment) - direct proof this phase's code is genuinely compiled into this exact binary, not just present in source.",
+    "newCommandsRegisteredProof": "The four new Tauri command names ('get_embedding_capabilities', 'install_embedding_model_file', 'install_embedding_tokenizer_file', 'generate_verse_embeddings') are present, contiguous, in the invoke handler's registered command-name table (the same literal-string-concatenation pattern every prior phase's command registration proof has used).",
+    "priorPhaseSymbolsUnaffected": {
+      "finalizeBibleOnly": "1 occurrence of 'finalize_bible_only' (Phase 4.3's fast detection lane) - unchanged, still present.",
+      "whisperFullWithState": "96 occurrences of 'whisper_full_with_state' - identical count to the Phase 4.3 baseline, confirming the whisper feature/model pipeline is untouched by this phase's changes.",
+      "ggmlAvxSymbols": "x86_64-w64-mingw32-nm still finds ggml_cpu_has_avx2/fma/f16c resolved as defined symbols (Phase 4.2's SIMD fix) - both .text and .pdata entries present, confirming the toolchain-file-based AVX2/FMA/F16C force-enable (scripts/whisper-windows-simd.cmake) still applies correctly with the semantic-search feature also enabled."
+    }
+  },
+  "runtimeDllVerification": "scripts/build-windows-whisper.sh's own final step (7z-extraction DLL-presence check) passed unmodified on this build: 'confirmed: libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll are all present in the installer' - candle is pure Rust and introduces no new dynamic library dependency, so the runtime DLL set required is unchanged from every prior whisper-enabled build.",
+  "crossCompileVerification": "The Rust build (cargo build --target x86_64-pc-windows-gnu -p cip-desktop --features whisper,semantic-search --release) succeeded with zero new fixes required for the semantic-search feature - only the two pre-existing whisper-rs-sys fixes (ggml lib-naming, posix-threads alternative) were still needed, confirming this phase's architecture-audit smoke test (candle cross-compiles cleanly to x86_64-pc-windows-gnu with no CMake/C++ step of its own) held true for the real production build too.",
+  "automatedVerification": "Full pipeline (Rust cross-compile, frontend build via pnpm/vite, NSIS packaging via makensis, DLL-presence check) completed via a single run of scripts/build-windows-whisper.sh with no manual intervention beyond the standard root/update-alternatives permission the script already documents needing."
+}
