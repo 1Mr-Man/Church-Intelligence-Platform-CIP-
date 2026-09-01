@@ -1,0 +1,23 @@
+{
+  "phase": "4.3",
+  "summary": "Root-cause evidence for the second, larger latency source found this phase (12-20s batching before Bible detection ran at all), and the fast-lane fix's correctness against real constraints (foreign keys, dedup, context state).",
+  "competitorVideoAnalysis": {
+    "method": "ffmpeg -vf fps=1 frame extraction of both operator-supplied videos (no assumption made about their content before inspection).",
+    "finding": "Both videos show the competitor product 'Pewbeam', not CIP - one a live Scripture-reading demo, one a slide-editor feature promo. The demo reader states references explicitly and briefly (e.g. 'Genesis chapter two verse six.'), and a 'Recent detections' panel shows confidence-scored candidates with explicit 'Add to queue'/'Present' controls - a real operator review step, just fast. This rules out predictive/pre-completion recognition; the reference is fully spoken before it is acted on."
+  },
+  "rootCauseChain": {
+    "latencySourceOne": "Whisper's own ~3.0s buffering/inference window (ai/speech/src/whisper.rs) - Phase 4.2 fixed inference itself being far slower than real time within that window (missing AVX2/FMA/F16C).",
+    "latencySourceTwo": "Found this phase: Phase 3.8.7.5's TranscriptSegmenter (apps/desktop/src-tauri/src/segmentation.rs) concatenates raw ~3s Whisper segments into a bounded 12-20 second logical window BEFORE Bible detection ever runs on the text - confirmed by reading segmentation.rs's own module docs and commands.rs's handle_audio_chunk/finalize_and_route_segment together. This is independent of and larger than latency source one - even instant inference could not close this gap by itself."
+  },
+  "silentPreloadInvestigation": {
+    "question": "Would a silent background preload (the operator's chosen partial-result policy) close the gap?",
+    "finding": "No - verse lookup (core/bible against local SQLite) is already sub-millisecond. The bottleneck was never data-fetch speed; it was detection not running at all until the 12-20s window closed. Building preload machinery would not have addressed the actual latency source - confirmed before implementing anything, avoiding wasted work."
+  },
+  "fixCorrectnessEvidence": {
+    "foreignKeyConstraint": "scripture_detections.transcript_segment_id and ai_suggestions.transcript_segment_id are real, PRAGMA foreign_keys = ON-enforced references to transcript_segments(id) (database/migrations/0001_initial_schema.sql, 0003_service_operations.sql). The new finalize_bible_only persists its own transcript_segments row for the raw ~3s segment (via the unmodified handle_final_transcript) before any detection/suggestion insert - never violates the constraint.",
+    "sermonForeignKeyDependency": "database/migrations/0008_sermon_foundation.sql: sermon_segments.transcript_segment_id is NOT NULL REFERENCES transcript_segments(id) ON DELETE CASCADE - confirmed the 12-20s batch's own transcript_segments row cannot be removed; finalize_and_route_segment still persists it, just no longer runs Bible detection against it.",
+    "deduplicationReuse": "has_recent_detection_for_reference (apps/desktop/src-tauri/src/persistence.rs)'s existing 60s same-category dedup window, written in Phase 1.3/extended Phase 4.1, already handles 'the same reference detected again shortly after' - reused as-is, no new dedup logic needed since the 12-20s batch no longer re-detects at all.",
+    "contextManagerSafety": "DefaultScriptureContextManager is now updated exactly once per raw segment (previously it would have been updated twice per spoken reference if both fast and slow paths ran detection - avoided by removing detection from the slow path entirely, not by adding new synchronization)."
+  },
+  "regressionResult": "cargo fmt --check, cargo check -p cip-desktop, cargo clippy -p cip-desktop --all-targets -- -D warnings: all clean. cargo test -p cip-desktop: 280 passed, 0 failed, 0 ignored (pipeline.rs and segmentation.rs - the modules containing the actual detection/dedup/batching logic - are byte-for-byte unchanged this phase, so their existing coverage applies unmodified)."
+}

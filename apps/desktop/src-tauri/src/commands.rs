@@ -1729,9 +1729,19 @@ fn handle_audio_chunk(
             continue;
         }
 
+        // Phase 4.3: Bible detection runs immediately on this raw ~3s
+        // window - not on the bounded 12-20s logical segment below - so a
+        // spoken reference reaches the operator in seconds, not up to 15-
+        // 20s later. See `finalize_bible_only`'s own docs for why this is
+        // safe (still a real, already-final Whisper segment, never a
+        // partial/interim guess) and what it deliberately does not do.
+        finalize_bible_only(app, &state, service_id, segment.clone());
+
         // Phase 3.8.7.5 Part A: accumulate this raw ~3s Whisper window into
-        // a bounded 12-20s logical segment - only a completed window is
-        // ever persisted/routed/emitted. See `segmentation.rs`.
+        // a bounded 12-20s logical segment for the *other* live-connectable
+        // engines (Sermon/Service/Music - see `route_segment_to_live_intelligence_engines`),
+        // which do need full sentences - only a completed window is ever
+        // routed there. See `segmentation.rs`.
         let Some(mut accumulated) = segmenter.push(&segment) else {
             continue;
         };
@@ -1740,13 +1750,29 @@ fn handle_audio_chunk(
     }
 }
 
-/// Persists + Bible-detects one completed logical segment
-/// (`handle_final_transcript`), then - Phase 3.8.7.5 Part B - routes the
-/// same segment to every other live-connectable intelligence engine.
-/// Called both from `handle_audio_chunk`'s normal per-window flush and
-/// from `spawn_speech_worker`'s stop-mid-window flush, so both paths
-/// share identical persistence/routing/event behavior.
-fn finalize_and_route_segment(
+/// Phase 4.3: Bible reference detection on one raw, already-final ~3s
+/// Whisper window - deliberately *not* the bounded 12-20s logical segment
+/// `segmenter` produces (see `handle_audio_chunk`'s caller comment).
+/// Persists its own `transcript_segments` row (so `scripture_detections`/
+/// `ai_suggestions` have a real row to reference - both columns are a
+/// genuine, enforced foreign key, `PRAGMA foreign_keys = ON`), runs the
+/// exact same `handle_final_transcript` Bible Intelligence Core pipeline
+/// `finalize_and_route_segment` used to run only once per 12-20s batch,
+/// and emits `TranscriptUpdated` so the Live Transcript panel now updates
+/// roughly every ~3s instead of every ~15-20s.
+///
+/// Never a guess: this is still a real, already-final (`is_final: true`)
+/// Whisper segment - whisper.rs already never fabricates interim output
+/// (see its own module docs) - just processed at Whisper's own natural
+/// per-window cadence instead of waiting for several windows to
+/// accumulate. This function is now Bible detection's only live-audio
+/// entry point - the 12-20s batch (`finalize_and_route_segment`) no
+/// longer re-runs it at all, so a reference is never detected twice.
+/// Deliberately does **not** call
+/// `route_segment_to_live_intelligence_engines`: Sermon/Service/Music
+/// still need the fuller 12-20s window, unchanged, from
+/// `finalize_and_route_segment`.
+fn finalize_bible_only(
     app: &AppHandle,
     state: &tauri::State<'_, AppState>,
     service_id: Uuid,
@@ -1754,7 +1780,6 @@ fn finalize_and_route_segment(
 ) {
     let segment_for_event = segment.clone();
 
-    let pipeline_start = std::time::Instant::now();
     let processed = {
         let db = state.db.lock().expect("db connection poisoned");
         let mut context = state
@@ -1770,6 +1795,67 @@ fn finalize_and_route_segment(
             segment,
         )
     };
+
+    match processed {
+        Ok(processed) => {
+            *state
+                .last_transcript_at
+                .lock()
+                .expect("last_transcript_at mutex poisoned") = Some(chrono::Utc::now());
+            let _ = emit(app, AppEvent::TranscriptUpdated, segment_for_event);
+            let db = state.db.lock().expect("db connection poisoned");
+            emit_processed_segment_events(app, &db, service_id, &processed);
+        }
+        Err(e) => {
+            log::error!(target: LogCategory::Database.target(), "failed to persist raw transcript segment: {e}");
+            let db = state.db.lock().expect("db connection poisoned");
+            record_timeline(
+                &db,
+                Some(service_id),
+                AppEvent::ErrorOccurred,
+                LogCategory::Database,
+                serde_json::json!({ "context": "finalize_bible_only", "error": e.to_string() }),
+            );
+        }
+    }
+}
+
+/// Persists + Bible-detects one completed logical segment
+/// (`handle_final_transcript`), then - Phase 3.8.7.5 Part B - routes the
+/// same segment to every other live-connectable intelligence engine.
+/// Called both from `handle_audio_chunk`'s normal per-window flush and
+/// from `spawn_speech_worker`'s stop-mid-window flush, so both paths
+/// share identical persistence/routing/event behavior.
+///
+/// Phase 4.3: no longer runs Bible detection itself - `finalize_bible_only`
+/// already did that, per raw ~3s window, well before this bounded 12-20s
+/// window even closed. Running it again here on the same underlying
+/// speech (now concatenated with its neighbors) would only ever
+/// re-detect the same reference and get silently deduplicated by
+/// `handle_final_transcript`'s own 60s window - real but wasted work -
+/// and would double-update `context_manager`'s continuation state for a
+/// single spoken reference. This function still persists its own
+/// `transcript_segments` row (Sermon/Service/Music's own persistence has
+/// a hard, `NOT NULL` foreign key on exactly this row - see
+/// `database/migrations/0008_sermon_foundation.sql`) and still routes to
+/// them below, unchanged - only Bible detection and the operator-facing
+/// `TranscriptUpdated` event moved to the faster lane (re-emitting the
+/// same speech's text a second time, now regrouped into a bigger block,
+/// would just duplicate what the operator already saw a few seconds
+/// earlier).
+fn finalize_and_route_segment(
+    app: &AppHandle,
+    state: &tauri::State<'_, AppState>,
+    service_id: Uuid,
+    segment: TranscriptSegment,
+) {
+    let segment_for_event = segment.clone();
+
+    let pipeline_start = std::time::Instant::now();
+    let persisted = {
+        let db = state.db.lock().expect("db connection poisoned");
+        persistence::persist_transcript_segment(&db, service_id, &segment)
+    };
     let pipeline_duration_ms =
         u64::try_from(pipeline_start.elapsed().as_millis()).unwrap_or(u64::MAX);
     state
@@ -1778,8 +1864,8 @@ fn finalize_and_route_segment(
         .expect("speech_diagnostics mutex poisoned")
         .last_transcript_pipeline_duration_ms = Some(pipeline_duration_ms);
 
-    match processed {
-        Ok(processed) => {
+    match persisted {
+        Ok(()) => {
             // Phase 2.4: the one real signal `service::transcript_freshness`
             // reads - a genuine final segment from the live audio/
             // speech pipeline, never the manual/test-mode harnesses
@@ -1788,11 +1874,6 @@ fn finalize_and_route_segment(
                 .last_transcript_at
                 .lock()
                 .expect("last_transcript_at mutex poisoned") = Some(chrono::Utc::now());
-            let _ = emit(app, AppEvent::TranscriptUpdated, segment_for_event.clone());
-            {
-                let db = state.db.lock().expect("db connection poisoned");
-                emit_processed_segment_events(app, &db, service_id, &processed);
-            }
             route_segment_to_live_intelligence_engines(app, state, service_id, &segment_for_event);
         }
         Err(e) => {
