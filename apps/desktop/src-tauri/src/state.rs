@@ -16,7 +16,7 @@
 
 use crate::config::AppConfig;
 use chrono::{DateTime, Utc};
-use cip_core_ai::SpeechEngine;
+use cip_core_ai::{EmbeddingEngine, SpeechEngine};
 use cip_core_bible::{BibleProvider, DefaultScriptureContextManager};
 use cip_core_content::ContentRegistry;
 use cip_core_intelligence::{
@@ -138,6 +138,23 @@ pub struct SpeechDiagnostics {
     /// generation combined) - see `docs/phase-3-8-7-3-audit.md` Finding 6.
     /// `None` until the first final transcript is processed.
     pub last_transcript_pipeline_duration_ms: Option<u64>,
+}
+
+/// Phase 4.4 counterpart to [`SpeechDiagnostics`], much smaller: there is
+/// no live per-chunk pipeline to instrument, only a one-time startup model
+/// load - the rest of what an operator needs (verse-embedding coverage) is
+/// computed on demand from the database, not tracked incrementally here.
+#[derive(Debug, Default, Clone)]
+pub struct EmbeddingDiagnostics {
+    /// Whether this binary was compiled with the `semantic-search` Cargo
+    /// feature.
+    pub feature_compiled: bool,
+    /// Whether `create_embedding_engine` attempted
+    /// `CandleEmbeddingEngine::load` at startup (only happens when
+    /// `feature_compiled` is true).
+    pub model_load_attempted: bool,
+    pub model_loaded: bool,
+    pub model_load_error: Option<String>,
 }
 
 pub struct AppState {
@@ -303,6 +320,27 @@ pub struct AppState {
     /// stored here at all) - a route mode is a live-session operator
     /// choice, not a durable setting, and resets to Live on restart.
     pub screen_route_modes: Mutex<HashMap<DisplayScreen, RouteMode>>,
+    /// Phase 4.4: the local embedding engine this build is configured
+    /// with - `NullEmbeddingEngine` unless the `semantic-search` feature
+    /// is compiled in *and* a model/tokenizer pair is actually present at
+    /// the configured paths (see `lib.rs::create_embedding_engine`).
+    /// Mirrors `speech_engine`'s `Mutex<Box<dyn ...>>` shape exactly - "no
+    /// embedding model configured" is never fatal, the same way "no
+    /// speech model" is never fatal.
+    pub embedding_engine: Mutex<Box<dyn EmbeddingEngine>>,
+    /// `embedding_engine.lock().is_ready()`, cached once at construction -
+    /// mirrors `speech_ready`'s own rationale exactly (both existing
+    /// `EmbeddingEngine` implementations are provably constant-readiness
+    /// for their whole process lifetime).
+    pub embedding_ready: bool,
+    /// See [`EmbeddingDiagnostics`]'s own docs.
+    pub embedding_diagnostics: Mutex<EmbeddingDiagnostics>,
+    /// Phase 4.4's verse-embedding read/write path, on its own dedicated
+    /// connection - mirrors `music_provider`/`acoustic_music_engine`'s own
+    /// "every independent read path gets its own connection" precedent
+    /// (see `crate::embeddings::SqliteVerseEmbeddingStore`'s own docs for
+    /// why this can't simply reuse `db`'s connection).
+    pub verse_embedding_store: crate::embeddings::SqliteVerseEmbeddingStore,
 }
 
 impl AppState {
@@ -319,8 +357,12 @@ impl AppState {
         speech_diagnostics: SpeechDiagnostics,
         acoustic_music_engine: MusicIntelligenceEngine,
         acoustic_recognizer: Box<dyn AcousticMusicRecognizer>,
+        embedding_engine: Box<dyn EmbeddingEngine>,
+        embedding_diagnostics: EmbeddingDiagnostics,
+        verse_embedding_store: crate::embeddings::SqliteVerseEmbeddingStore,
     ) -> Self {
         let speech_ready = speech_engine.is_ready();
+        let embedding_ready = embedding_engine.is_ready();
         Self {
             config,
             db: Mutex::new(db),
@@ -352,6 +394,10 @@ impl AppState {
             active_sermon_section: Mutex::new(None),
             content_candidate_queue: Mutex::new(ContentCandidateQueue::new()),
             screen_route_modes: Mutex::new(HashMap::new()),
+            embedding_engine: Mutex::new(embedding_engine),
+            embedding_ready,
+            embedding_diagnostics: Mutex::new(embedding_diagnostics),
+            verse_embedding_store,
         }
     }
 }

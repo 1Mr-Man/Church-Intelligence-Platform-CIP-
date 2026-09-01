@@ -6,6 +6,7 @@ mod content;
 mod content_intelligence;
 mod cross_domain;
 mod display_registry;
+mod embeddings;
 mod errors;
 pub mod events;
 mod harvest;
@@ -25,7 +26,7 @@ mod service;
 mod state;
 mod timeline;
 
-use cip_core_ai::SpeechEngine;
+use cip_core_ai::{EmbeddingEngine, SpeechEngine};
 use cip_core_music::AcousticMusicRecognizer;
 use config::AppConfig;
 use logging::LogCategory;
@@ -92,6 +93,73 @@ fn create_speech_engine(config: &AppConfig) -> (Box<dyn SpeechEngine>, state::Sp
         (
             Box::new(cip_ai_speech::NullSpeechEngine),
             state::SpeechDiagnostics {
+                feature_compiled,
+                ..Default::default()
+            },
+        )
+    };
+    result
+}
+
+/// Choose an `EmbeddingEngine` (Phase 4.4): `CandleEmbeddingEngine` if the
+/// `semantic-search` feature is compiled in *and* both the model weights
+/// and tokenizer files are actually present at their configured paths,
+/// `NullEmbeddingEngine` otherwise - mirrors `create_speech_engine` exactly,
+/// including "missing/invalid model is never fatal." See
+/// `docs/phase-4-4-semantic-bible-search.md`.
+#[cfg_attr(not(feature = "semantic-search"), allow(unused_variables))]
+fn create_embedding_engine(
+    config: &AppConfig,
+) -> (Box<dyn EmbeddingEngine>, state::EmbeddingDiagnostics) {
+    let feature_compiled = cfg!(feature = "semantic-search");
+    #[cfg(feature = "semantic-search")]
+    let result: (Box<dyn EmbeddingEngine>, state::EmbeddingDiagnostics) = {
+        let model_path = &config.embedding_model_path;
+        let tokenizer_path = &config.embedding_tokenizer_path;
+        match cip_ai_embeddings::CandleEmbeddingEngine::load(model_path, tokenizer_path) {
+            Ok(engine) => {
+                log::info!(
+                    target: LogCategory::Bible.target(),
+                    "loaded local embedding model from {} / {}",
+                    model_path.display(),
+                    tokenizer_path.display()
+                );
+                (
+                    Box::new(engine),
+                    state::EmbeddingDiagnostics {
+                        feature_compiled,
+                        model_load_attempted: true,
+                        model_loaded: true,
+                        model_load_error: None,
+                    },
+                )
+            }
+            Err(e) => {
+                log::warn!(
+                    target: LogCategory::Bible.target(),
+                    "local embedding model not available ({e}); semantic Bible search is unavailable until one is configured"
+                );
+                (
+                    Box::new(cip_ai_embeddings::NullEmbeddingEngine),
+                    state::EmbeddingDiagnostics {
+                        feature_compiled,
+                        model_load_attempted: true,
+                        model_loaded: false,
+                        model_load_error: Some(e.to_string()),
+                    },
+                )
+            }
+        }
+    };
+    #[cfg(not(feature = "semantic-search"))]
+    let result: (Box<dyn EmbeddingEngine>, state::EmbeddingDiagnostics) = {
+        log::info!(
+            target: LogCategory::Bible.target(),
+            "built without the `semantic-search` feature; semantic Bible search is unavailable (lexical detection/paraphrase still work)"
+        );
+        (
+            Box::new(cip_ai_embeddings::NullEmbeddingEngine),
+            state::EmbeddingDiagnostics {
                 feature_compiled,
                 ..Default::default()
             },
@@ -365,6 +433,14 @@ pub fn run() {
                 )),
             );
             let acoustic_recognizer = create_acoustic_recognizer(&config);
+            let (embedding_engine, embedding_diagnostics) = create_embedding_engine(&config);
+
+            // Phase 4.4: verse embeddings get their own dedicated
+            // connection, mirroring `acoustic_music_conn` above - see
+            // `embeddings::SqliteVerseEmbeddingStore`'s own docs for why.
+            let verse_embedding_conn = cip_database::open(&config.database_path)?;
+            let verse_embedding_store =
+                embeddings::SqliteVerseEmbeddingStore::new(verse_embedding_conn);
 
             app.manage(AppState::new(
                 config,
@@ -378,6 +454,9 @@ pub fn run() {
                 speech_diagnostics,
                 acoustic_music_engine,
                 acoustic_recognizer,
+                embedding_engine,
+                embedding_diagnostics,
+                verse_embedding_store,
             ));
             Ok(())
         })
@@ -386,6 +465,10 @@ pub fn run() {
             commands::app_health_check,
             commands::get_pilot_diagnostics,
             commands::install_whisper_model,
+            commands::get_embedding_capabilities,
+            commands::install_embedding_model_file,
+            commands::install_embedding_tokenizer_file,
+            commands::generate_verse_embeddings,
             commands::backup_database,
             commands::list_bible_translations,
             commands::start_service,

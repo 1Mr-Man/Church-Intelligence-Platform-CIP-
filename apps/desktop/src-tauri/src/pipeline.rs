@@ -17,7 +17,10 @@
 
 use cip_core_ai::SuggestionKind;
 use cip_core_bible::{BibleProvider, DefaultScriptureContextManager, ReferenceKind};
-use cip_core_service::{process_transcript_segment, ProcessedSegment};
+use cip_core_service::{
+    process_transcript_segment, process_transcript_segment_with_semantic_search, ProcessedSegment,
+    SemanticSearch,
+};
 use rusqlite::Connection;
 use std::time::Instant;
 use uuid::Uuid;
@@ -70,6 +73,56 @@ pub fn handle_final_transcript(
     translation_id: &str,
     segment: cip_core_ai::TranscriptSegment,
 ) -> Result<ProcessedSegment, PersistError> {
+    handle_final_transcript_inner(
+        conn,
+        provider,
+        context,
+        service_id,
+        translation_id,
+        segment,
+        None,
+    )
+}
+
+/// Identical to [`handle_final_transcript`], except that when no citation
+/// and no lexical paraphrase resolves the segment, Phase 4.4's semantic
+/// (embedding) fallback is also attempted via `semantic` before giving up -
+/// see `cip_core_service::process_transcript_segment_with_semantic_search`'s
+/// own docs. The live audio pipeline (`commands::finalize_bible_only`) uses
+/// this instead of `handle_final_transcript` whenever an embedding model is
+/// actually loaded (`AppState.embedding_ready`); every other caller (tests,
+/// `process_test_transcript`) keeps using the plain entry point, so nothing
+/// about this crate's existing behavior changes unless semantic search is
+/// genuinely configured.
+pub fn handle_final_transcript_with_semantic_search(
+    conn: &Connection,
+    provider: &dyn BibleProvider,
+    context: &mut DefaultScriptureContextManager,
+    service_id: Uuid,
+    translation_id: &str,
+    segment: cip_core_ai::TranscriptSegment,
+    semantic: &SemanticSearch,
+) -> Result<ProcessedSegment, PersistError> {
+    handle_final_transcript_inner(
+        conn,
+        provider,
+        context,
+        service_id,
+        translation_id,
+        segment,
+        Some(semantic),
+    )
+}
+
+fn handle_final_transcript_inner(
+    conn: &Connection,
+    provider: &dyn BibleProvider,
+    context: &mut DefaultScriptureContextManager,
+    service_id: Uuid,
+    translation_id: &str,
+    segment: cip_core_ai::TranscriptSegment,
+    semantic: Option<&SemanticSearch>,
+) -> Result<ProcessedSegment, PersistError> {
     let persist_transcript_start = Instant::now();
     persist_transcript_segment(conn, service_id, &segment)?;
     log::debug!(
@@ -79,8 +132,19 @@ pub fn handle_final_transcript(
     );
 
     let detect_start = Instant::now();
-    let mut processed =
-        process_transcript_segment(service_id, &segment.text, translation_id, provider, context);
+    let mut processed = match semantic {
+        Some(semantic) => process_transcript_segment_with_semantic_search(
+            service_id,
+            &segment.text,
+            translation_id,
+            provider,
+            context,
+            semantic,
+        ),
+        None => {
+            process_transcript_segment(service_id, &segment.text, translation_id, provider, context)
+        }
+    };
     log::debug!(
         target: "cip::performance",
         "process_transcript_segment took {:?} ({} detection(s))",

@@ -41,11 +41,12 @@
 //! state - that requires a separate, human-triggered action elsewhere in
 //! the system, by design.
 
-use cip_core_ai::{Suggestion, SuggestionKind};
+use cip_core_ai::{EmbeddingEngine, Suggestion, SuggestionKind};
 use cip_core_bible::{
-    detect_candidates, normalize::normalize_text, paraphrase, AmbiguousCandidate, BibleProvider,
-    ContextResolution, DefaultScriptureContextManager, DetectedCandidate, ReferenceKind,
-    ScriptureContext, ScriptureContextManager, ScriptureReference,
+    best_semantic_match, detect_candidates, normalize::normalize_text, paraphrase,
+    AmbiguousCandidate, BibleProvider, ContextResolution, DefaultScriptureContextManager,
+    DetectedCandidate, ReferenceKind, ScriptureContext, ScriptureContextManager,
+    ScriptureReference, VerseEmbeddingStore,
 };
 use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
 use serde::{Deserialize, Serialize};
@@ -68,6 +69,24 @@ const MIN_PARAPHRASE_SCORE: f32 = 0.75;
 /// segment - bounds the cost of a pass that runs only when nothing else in
 /// the segment already produced a suggestion.
 const MAX_PARAPHRASE_CANDIDATES: usize = 25;
+
+/// Same rationale as [`MIN_PARAPHRASE_SIGNIFICANT_WORDS`], applied to the
+/// semantic fallback: a two- or three-word utterance can score a spuriously
+/// high cosine similarity against some verse purely by chance, since
+/// there's so little of it to be wrong about.
+const MIN_SEMANTIC_SIGNIFICANT_WORDS: usize = 4;
+
+/// The cosine-similarity floor a candidate verse must clear before
+/// `try_semantic` trusts it enough to surface as a `Pending` suggestion.
+/// Documented rather than empirically calibrated: no real model inference
+/// was available to tune this against a labeled dataset in this
+/// environment (see `docs/phase-4-4-semantic-bible-search.md`) - chosen
+/// conservatively (published `all-MiniLM-L6-v2` benchmarks put closely
+/// related sentence pairs in the `0.6`-`0.9` range and unrelated pairs
+/// below `0.3`) so a mismatch is far more likely to be silently dropped
+/// than to reach an operator as a false suggestion. Revisit once real
+/// operator feedback on live services is available.
+const MIN_SEMANTIC_SIMILARITY: f32 = 0.55;
 
 /// One reference candidate after context resolution and Bible validation -
 /// the pipeline's per-candidate output.
@@ -119,6 +138,18 @@ pub struct ProcessedSegment {
     pub suggestions: Vec<Suggestion>,
 }
 
+/// Bundles the two capabilities `try_semantic`'s fallback needs, since one
+/// without the other is useless (a model with nothing to compare against,
+/// or stored vectors with nothing to embed the segment's own text into).
+/// Deliberately not part of [`process_transcript_segment`]'s signature -
+/// see [`process_transcript_segment_with_semantic_search`]'s doc comment
+/// for why semantic search is opt-in via a second entry point rather than
+/// two more parameters every existing caller would have to thread through.
+pub struct SemanticSearch<'a> {
+    pub engine: &'a dyn EmbeddingEngine,
+    pub store: &'a dyn VerseEmbeddingStore,
+}
+
 /// Run one transcript segment through the full pipeline: normalize,
 /// detect, resolve against `context`, validate against `provider`, score
 /// confidence, and produce suggestions for whatever validated.
@@ -127,12 +158,62 @@ pub struct ProcessedSegment {
 /// will eventually feed: call it once per transcript segment, in order, as
 /// they arrive - it has no other state than what `context` carries between
 /// calls.
+///
+/// Never attempts the semantic (embedding) fallback - see
+/// [`process_transcript_segment_with_semantic_search`] for the entry point
+/// that does. Every existing caller keeps working unchanged: semantic
+/// search requires an operator-provisioned model (see
+/// `docs/phase-4-4-semantic-bible-search.md`), which is not always
+/// available, so this remains the safe, always-available default.
 pub fn process_transcript_segment(
     service_id: Uuid,
     segment_text: &str,
     translation_id: &str,
     provider: &dyn BibleProvider,
     context: &mut DefaultScriptureContextManager,
+) -> ProcessedSegment {
+    process_transcript_segment_inner(
+        service_id,
+        segment_text,
+        translation_id,
+        provider,
+        context,
+        None,
+    )
+}
+
+/// Identical to [`process_transcript_segment`], except that when no
+/// citation and no lexical paraphrase resolves the segment, a further
+/// meaning-based (embedding) fallback is attempted against `semantic`'s
+/// verse embeddings before giving up - see `crate::bible_intelligence`'s
+/// module docs and `cip_core_bible::semantic`'s module docs for what this
+/// catches that lexical overlap cannot (a conceptual paraphrase sharing
+/// almost no vocabulary with the verse it echoes).
+pub fn process_transcript_segment_with_semantic_search(
+    service_id: Uuid,
+    segment_text: &str,
+    translation_id: &str,
+    provider: &dyn BibleProvider,
+    context: &mut DefaultScriptureContextManager,
+    semantic: &SemanticSearch,
+) -> ProcessedSegment {
+    process_transcript_segment_inner(
+        service_id,
+        segment_text,
+        translation_id,
+        provider,
+        context,
+        Some(semantic),
+    )
+}
+
+fn process_transcript_segment_inner(
+    service_id: Uuid,
+    segment_text: &str,
+    translation_id: &str,
+    provider: &dyn BibleProvider,
+    context: &mut DefaultScriptureContextManager,
+    semantic: Option<&SemanticSearch>,
 ) -> ProcessedSegment {
     let normalized = normalize_text(segment_text);
     let candidates = detect_candidates(&normalized);
@@ -149,7 +230,8 @@ pub fn process_transcript_segment(
             ReferenceKind::Sequential
             | ReferenceKind::Ambiguous
             | ReferenceKind::Unresolved
-            | ReferenceKind::Paraphrase => ScriptureDetection::unresolved(
+            | ReferenceKind::Paraphrase
+            | ReferenceKind::Semantic => ScriptureDetection::unresolved(
                 candidate.raw_text.clone(),
                 "unexpected candidate kind",
             ),
@@ -176,6 +258,30 @@ pub fn process_transcript_segment(
                 suggestions.push(suggestion);
             }
             detections.push(detection);
+        }
+    }
+
+    // Further fallback: even the lexical paraphrase heuristic found
+    // nothing. Only attempted when semantic search is actually configured
+    // (an operator has provisioned an embedding model) and, like the
+    // paraphrase fallback, only when nothing else produced a suggestion at
+    // all - a real citation or a confident lexical match is never
+    // second-guessed by this.
+    if suggestions.is_empty() {
+        if let Some(semantic) = semantic {
+            if let Some(detection) = try_semantic(
+                translation_id,
+                provider,
+                semantic,
+                &normalized,
+                segment_text,
+                context,
+            ) {
+                if let Some(suggestion) = suggestion_for(service_id, &detection) {
+                    suggestions.push(suggestion);
+                }
+                detections.push(detection);
+            }
         }
     }
 
@@ -242,6 +348,65 @@ fn try_paraphrase(
     })
 }
 
+/// Further fallback for a segment `try_paraphrase` also couldn't resolve:
+/// embeds the segment's own wording and compares it against every stored
+/// verse embedding for `translation_id` under `semantic.engine`'s model,
+/// catching a conceptual paraphrase that shares too little vocabulary for
+/// lexical overlap to find (see `cip_core_bible::semantic`'s module docs).
+/// Exactly like `try_paraphrase`: never mutates `context` (not a
+/// citation), and re-validates the winning reference against `provider`
+/// before trusting it - "do not trust the parser alone" applies just as
+/// much to a vector index as it does to text detection, since a stale or
+/// mismatched-model embedding must never become a suggestion for a
+/// reference the current dataset doesn't actually have.
+fn try_semantic(
+    translation_id: &str,
+    provider: &dyn BibleProvider,
+    semantic: &SemanticSearch,
+    normalized_text: &str,
+    raw_text: &str,
+    context: &DefaultScriptureContextManager,
+) -> Option<ScriptureDetection> {
+    if !semantic.engine.is_ready() {
+        return None;
+    }
+    if paraphrase::significant_word_count(normalized_text) < MIN_SEMANTIC_SIGNIFICANT_WORDS {
+        return None;
+    }
+
+    let query_vector = semantic.engine.embed(normalized_text).ok()?;
+    let (reference, score) = best_semantic_match(
+        semantic.store,
+        translation_id,
+        semantic.engine.model_id(),
+        &query_vector,
+        MIN_SEMANTIC_SIMILARITY,
+    )
+    .ok()??;
+
+    match provider.get_verse(&reference) {
+        Ok(Some(_)) => {}
+        _ => return None,
+    }
+
+    let reference_display = reference.to_string();
+    Some(ScriptureDetection {
+        kind: ReferenceKind::Semantic,
+        reference: Some(reference),
+        context: context.active_context(),
+        candidates: Vec::new(),
+        confidence: ConfidenceResult::new(
+            score,
+            ConfidenceSource::Heuristic,
+            Some(format!(
+                "semantic similarity with {reference_display} ({:.0}% cosine similarity, not a citation)",
+                score * 100.0
+            )),
+        ),
+        raw_text: raw_text.to_string(),
+    })
+}
+
 /// A `Suggestion` is only ever created for a detection that resolved to a
 /// concrete, validated verse (`Direct`/`Verse`/`Sequential`) - never for a
 /// bare chapter (nothing to suggest yet) or an ambiguous/unresolved one
@@ -271,6 +436,10 @@ fn confidence_for_kind(kind: ReferenceKind) -> ConfidenceResult {
         // from the real overlap score rather than calling this function -
         // a fixed score here would misrepresent it.
         ReferenceKind::Paraphrase => (0.1, "unexpected: paraphrase scored elsewhere"),
+        // Never reached: try_semantic builds its own ConfidenceResult from
+        // the real cosine-similarity score rather than calling this
+        // function - a fixed score here would misrepresent it.
+        ReferenceKind::Semantic => (0.1, "unexpected: semantic match scored elsewhere"),
     };
     ConfidenceResult::new(score, ConfidenceSource::Heuristic, Some(reason.to_string()))
 }
@@ -1063,5 +1232,261 @@ mod tests {
                 "{text:?} must not trigger a paraphrase suggestion"
             );
         }
+    }
+
+    // --- Phase 4.4: semantic (embedding-based) fallback ---
+
+    use cip_core_ai::EmbeddingEngineError;
+    use cip_core_bible::{VerseEmbedding, VerseEmbeddingError};
+
+    /// A test-only `EmbeddingEngine` keyed by exact input text - real
+    /// models are not available in this environment (see
+    /// `docs/phase-4-4-semantic-bible-search.md`), so tests supply the
+    /// vector a given segment "means" directly rather than through real
+    /// inference, exactly like `FakeBibleProvider` supplies verse text
+    /// directly rather than through a real dataset.
+    struct FakeEmbeddingEngine {
+        model_id: String,
+        dimensions: usize,
+        vectors: HashMap<String, Vec<f32>>,
+    }
+
+    impl FakeEmbeddingEngine {
+        fn new(model_id: &str, dimensions: usize, vectors: &[(&str, Vec<f32>)]) -> Self {
+            Self {
+                model_id: model_id.to_string(),
+                dimensions,
+                vectors: vectors
+                    .iter()
+                    .map(|(text, vector)| (text.to_string(), vector.clone()))
+                    .collect(),
+            }
+        }
+    }
+
+    impl EmbeddingEngine for FakeEmbeddingEngine {
+        fn is_ready(&self) -> bool {
+            true
+        }
+        fn model_id(&self) -> &str {
+            &self.model_id
+        }
+        fn dimensions(&self) -> usize {
+            self.dimensions
+        }
+        fn embed(&self, text: &str) -> Result<Vec<f32>, EmbeddingEngineError> {
+            self.vectors.get(text).cloned().ok_or_else(|| {
+                EmbeddingEngineError::EmbeddingFailed(format!("no fake vector for {text:?}"))
+            })
+        }
+    }
+
+    struct FakeVerseEmbeddingStore {
+        entries: Vec<(String, VerseEmbedding)>,
+    }
+
+    impl FakeVerseEmbeddingStore {
+        fn new(entries: Vec<(&str, VerseEmbedding)>) -> Self {
+            Self {
+                entries: entries
+                    .into_iter()
+                    .map(|(model_id, embedding)| (model_id.to_string(), embedding))
+                    .collect(),
+            }
+        }
+    }
+
+    impl VerseEmbeddingStore for FakeVerseEmbeddingStore {
+        fn verse_embeddings(
+            &self,
+            translation_id: &str,
+            model_id: &str,
+        ) -> Result<Vec<VerseEmbedding>, VerseEmbeddingError> {
+            Ok(self
+                .entries
+                .iter()
+                .filter(|(m, e)| m == model_id && e.reference.translation_id == translation_id)
+                .map(|(_, e)| e.clone())
+                .collect())
+        }
+    }
+
+    fn matthew_provider() -> FakeBibleProvider {
+        FakeBibleProvider::new(&[(
+            "MAT",
+            5,
+            44,
+            "But I say unto you, Love your enemies, bless them that curse you...",
+        )])
+    }
+
+    // 25. A segment with no citation shape and too little vocabulary
+    // overlap for the lexical paraphrase heuristic to find still produces
+    // a Pending suggestion when it scores highly against a stored verse
+    // embedding.
+    #[test]
+    fn a_conceptual_paraphrase_with_no_lexical_overlap_produces_a_semantic_suggestion() {
+        let provider = matthew_provider();
+        let segment_text = "Jesus told us we should be kind even to those who hate us.";
+        let engine = FakeEmbeddingEngine::new("test-model", 2, &[(segment_text, vec![1.0, 0.0])]);
+        let store = FakeVerseEmbeddingStore::new(vec![(
+            "test-model",
+            VerseEmbedding {
+                reference: ScriptureReference::single("KJV", "MAT", 5, 44),
+                vector: vec![1.0, 0.0],
+            },
+        )]);
+        let semantic = SemanticSearch {
+            engine: &engine,
+            store: &store,
+        };
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        let result = process_transcript_segment_with_semantic_search(
+            Uuid::new_v4(),
+            segment_text,
+            "KJV",
+            &provider,
+            &mut context,
+            &semantic,
+        );
+
+        assert_eq!(result.detections.len(), 1);
+        let detection = &result.detections[0];
+        assert_eq!(detection.kind, ReferenceKind::Semantic);
+        assert_eq!(
+            detection.reference.as_ref().unwrap().to_string(),
+            "MAT 5:44"
+        );
+        assert_eq!(result.suggestions.len(), 1);
+        assert_eq!(result.suggestions[0].status, SuggestionStatus::Pending);
+    }
+
+    // 26. Without semantic search configured at all, the exact same
+    // segment/data must never produce a suggestion - the plain entry point
+    // stays the safe, always-available default.
+    #[test]
+    fn the_plain_entry_point_never_attempts_the_semantic_fallback() {
+        let provider = matthew_provider();
+        let segment_text = "Jesus told us we should be kind even to those who hate us.";
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        let result = process(&provider, &mut context, segment_text);
+
+        assert!(result.suggestions.is_empty());
+        assert!(result
+            .detections
+            .iter()
+            .all(|d| d.kind != ReferenceKind::Semantic));
+    }
+
+    // 27. An explicit citation is never second-guessed by the semantic
+    // fallback, exactly like the paraphrase fallback.
+    #[test]
+    fn an_explicit_citation_is_never_second_guessed_by_the_semantic_fallback() {
+        let provider = FakeBibleProvider::kjv_fixture();
+        let engine = FakeEmbeddingEngine::new("test-model", 2, &[]);
+        let store = FakeVerseEmbeddingStore::new(vec![]);
+        let semantic = SemanticSearch {
+            engine: &engine,
+            store: &store,
+        };
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        let result = process_transcript_segment_with_semantic_search(
+            Uuid::new_v4(),
+            "John 3:16",
+            "KJV",
+            &provider,
+            &mut context,
+            &semantic,
+        );
+
+        assert_eq!(result.detections.len(), 1, "no extra semantic detection");
+        assert_eq!(result.detections[0].kind, ReferenceKind::Direct);
+    }
+
+    // 28. Semantic detection never mutates the active Scripture context -
+    // it is not a citation.
+    #[test]
+    fn semantic_detection_never_mutates_the_active_context() {
+        let provider = matthew_provider();
+        let segment_text = "Jesus told us we should be kind even to those who hate us.";
+        let engine = FakeEmbeddingEngine::new("test-model", 2, &[(segment_text, vec![1.0, 0.0])]);
+        let store = FakeVerseEmbeddingStore::new(vec![(
+            "test-model",
+            VerseEmbedding {
+                reference: ScriptureReference::single("KJV", "MAT", 5, 44),
+                vector: vec![1.0, 0.0],
+            },
+        )]);
+        let semantic = SemanticSearch {
+            engine: &engine,
+            store: &store,
+        };
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        // Establish an unrelated active context first (Romans 8 doesn't
+        // exist in `matthew_provider`, so use a chapter that does).
+        process_transcript_segment_with_semantic_search(
+            Uuid::new_v4(),
+            "Matthew 5",
+            "KJV",
+            &provider,
+            &mut context,
+            &semantic,
+        );
+        process_transcript_segment_with_semantic_search(
+            Uuid::new_v4(),
+            segment_text,
+            "KJV",
+            &provider,
+            &mut context,
+            &semantic,
+        );
+
+        assert_eq!(
+            context.active_context().unwrap().chapter,
+            5,
+            "context must survive a semantic detection unchanged"
+        );
+        assert_eq!(
+            context.active_context().unwrap().last_verse,
+            None,
+            "a semantic match must never be recorded as a resolved verse in context"
+        );
+    }
+
+    // 29. A stored embedding pointing at a reference the provider doesn't
+    // actually have must never become a suggestion - "do not trust the
+    // parser alone" applies to the vector index too.
+    #[test]
+    fn a_semantic_match_for_a_reference_absent_from_the_provider_is_never_suggested() {
+        let provider = matthew_provider();
+        let segment_text = "Jesus told us we should be kind even to those who hate us.";
+        let engine = FakeEmbeddingEngine::new("test-model", 2, &[(segment_text, vec![1.0, 0.0])]);
+        let store = FakeVerseEmbeddingStore::new(vec![(
+            "test-model",
+            VerseEmbedding {
+                // MAT 5:999 does not exist in `matthew_provider`.
+                reference: ScriptureReference::single("KJV", "MAT", 5, 999),
+                vector: vec![1.0, 0.0],
+            },
+        )]);
+        let semantic = SemanticSearch {
+            engine: &engine,
+            store: &store,
+        };
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        let result = process_transcript_segment_with_semantic_search(
+            Uuid::new_v4(),
+            segment_text,
+            "KJV",
+            &provider,
+            &mut context,
+            &semantic,
+        );
+
+        assert!(result.suggestions.is_empty());
+        assert!(result
+            .detections
+            .iter()
+            .all(|d| d.kind != ReferenceKind::Semantic));
     }
 }

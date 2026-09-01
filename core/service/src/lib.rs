@@ -10,5 +10,8 @@ mod service_session;
 pub use audio_engine::{
     AudioChunk, AudioChunkSink, AudioDevice, AudioEngine, AudioEngineError, AudioEngineStatus,
 };
-pub use bible_intelligence::{process_transcript_segment, ProcessedSegment, ScriptureDetection};
+pub use bible_intelligence::{
+    process_transcript_segment, process_transcript_segment_with_semantic_search, ProcessedSegment,
+    ScriptureDetection, SemanticSearch,
+};
 pub use service_session::{ServiceSession, ServiceStatus};

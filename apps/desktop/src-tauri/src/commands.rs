@@ -350,6 +350,185 @@ pub fn install_whisper_model(_source_path: String) -> Result<WhisperModelDiagnos
     )
 }
 
+// --- Phase 4.4: semantic (embedding-based) Bible search --------------------
+//
+// Mirrors the Whisper model-provisioning pattern immediately above exactly:
+// an operator-supplied file, installed by copying (never downloaded), with
+// an honest per-file diagnostic. Two files are required together (model
+// weights + tokenizer - see `cip_ai_embeddings::CandleEmbeddingEngine`'s own
+// docs), so `EmbeddingCapabilities` reports both independently rather than
+// collapsing them into one status.
+
+/// Reuses `WhisperModelDiagnostic`'s exact shape/semantics for a single
+/// embedding-related file (model weights or tokenizer) - see that type's
+/// own doc comment for what each variant does and does not prove.
+pub type EmbeddingFileDiagnostic = WhisperModelDiagnostic;
+
+/// Everything an operator needs to know about Phase 4.4's semantic search
+/// readiness in one call - mirrors `PilotDiagnostics.speech`'s role for
+/// Whisper. `verse_embedding_coverage` is `None` whenever the engine isn't
+/// ready (nothing to count against - "already embedded, ready to search"
+/// requires a real model_id to key by, not the shape of an
+/// engine-independent count).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddingCapabilities {
+    pub feature_compiled: bool,
+    pub model_load_attempted: bool,
+    pub model_loaded: bool,
+    pub model_load_error: Option<String>,
+    pub engine_ready: bool,
+    pub model_id: String,
+    pub dimensions: usize,
+    pub model_file: EmbeddingFileDiagnostic,
+    pub tokenizer_file: EmbeddingFileDiagnostic,
+    /// `(embedded, total)` verse counts for `DEFAULT_TRANSLATION_ID` under
+    /// the engine's current `model_id` - `None` when the engine isn't
+    /// ready (see this struct's own doc comment).
+    pub verse_embedding_coverage: Option<(u64, u64)>,
+}
+
+#[tauri::command]
+pub fn get_embedding_capabilities(
+    state: State<'_, AppState>,
+) -> Result<EmbeddingCapabilities, String> {
+    let diagnostics = state
+        .embedding_diagnostics
+        .lock()
+        .expect("embedding diagnostics lock poisoned")
+        .clone();
+    let engine = state
+        .embedding_engine
+        .lock()
+        .expect("embedding engine lock poisoned");
+
+    let verse_embedding_coverage = if state.embedding_ready {
+        let conn = state
+            .verse_embedding_store
+            .connection()
+            .lock()
+            .expect("verse embedding store connection poisoned");
+        crate::embeddings::embedding_coverage(&conn, DEFAULT_TRANSLATION_ID, engine.model_id()).ok()
+    } else {
+        None
+    };
+
+    Ok(EmbeddingCapabilities {
+        feature_compiled: diagnostics.feature_compiled,
+        model_load_attempted: diagnostics.model_load_attempted,
+        model_loaded: diagnostics.model_loaded,
+        model_load_error: diagnostics.model_load_error,
+        engine_ready: state.embedding_ready,
+        model_id: engine.model_id().to_string(),
+        dimensions: engine.dimensions(),
+        model_file: diagnose_whisper_model(&state.config.embedding_model_path),
+        tokenizer_file: diagnose_whisper_model(&state.config.embedding_tokenizer_path),
+        verse_embedding_coverage,
+    })
+}
+
+/// Copies `source_path` to `dest`, atomically (temp file in the
+/// destination directory, then renamed over the real path) - mirrors
+/// `install_whisper_model`'s own copy step exactly, factored out since
+/// Phase 4.4 needs it twice (model weights, tokenizer) instead of once.
+fn install_file_at(source_path: &str, dest: &std::path::Path) -> Result<(), String> {
+    let source = std::path::PathBuf::from(source_path);
+    let metadata =
+        std::fs::metadata(&source).map_err(|e| format!("cannot read \"{source_path}\": {e}"))?;
+    if !metadata.is_file() {
+        return Err(format!("\"{source_path}\" is not a regular file"));
+    }
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
+    }
+    let tmp_dest = dest.with_extension(format!(
+        "{}.installing",
+        dest.extension().and_then(|e| e.to_str()).unwrap_or("tmp")
+    ));
+    std::fs::copy(&source, &tmp_dest).map_err(|e| format!("could not copy file: {e}"))?;
+    std::fs::rename(&tmp_dest, dest).map_err(|e| format!("could not finalize install: {e}"))?;
+    Ok(())
+}
+
+/// Installs an operator-supplied embedding model weights file
+/// (`model.safetensors`) at the configured path. Unlike
+/// `install_whisper_model`, this cannot validate the file by itself - a
+/// `CandleEmbeddingEngine` needs *both* the model and tokenizer together
+/// (see that type's own docs) - so it only copies the file into place;
+/// callers refresh via `get_embedding_capabilities` afterward to see
+/// whether the pair is now loadable. Like `install_whisper_model`, this
+/// takes effect on CIP's **next launch**, never a hot-swap of the running
+/// engine.
+#[tauri::command]
+pub fn install_embedding_model_file(
+    state: State<'_, AppState>,
+    source_path: String,
+) -> Result<EmbeddingFileDiagnostic, String> {
+    install_file_at(&source_path, &state.config.embedding_model_path)?;
+    log::info!(
+        target: LogCategory::Bible.target(),
+        "installed embedding model weights from {source_path} - restart CIP for it to take effect"
+    );
+    Ok(diagnose_whisper_model(&state.config.embedding_model_path))
+}
+
+/// Installs an operator-supplied tokenizer file (`tokenizer.json`) at the
+/// configured path - the counterpart to `install_embedding_model_file`,
+/// see its docs for the same caveats.
+#[tauri::command]
+pub fn install_embedding_tokenizer_file(
+    state: State<'_, AppState>,
+    source_path: String,
+) -> Result<EmbeddingFileDiagnostic, String> {
+    install_file_at(&source_path, &state.config.embedding_tokenizer_path)?;
+    log::info!(
+        target: LogCategory::Bible.target(),
+        "installed embedding tokenizer from {source_path} - restart CIP for it to take effect"
+    );
+    Ok(diagnose_whisper_model(
+        &state.config.embedding_tokenizer_path,
+    ))
+}
+
+/// Embeds every not-yet-embedded verse of `DEFAULT_TRANSLATION_ID` using
+/// the currently loaded embedding engine - the explicit, operator-triggered
+/// action that populates `bible_verse_embeddings` (nothing does this
+/// automatically; see `docs/phase-4-4-semantic-bible-search.md`).
+/// Idempotent/resumable: re-running only ever embeds verses still missing
+/// under the engine's current `model_id` (see
+/// `embeddings::generate_verse_embeddings_for_translation`'s own docs).
+///
+/// A known, documented limitation: this runs synchronously on the calling
+/// command thread and reports no incremental progress while it runs - for
+/// a full-Bible translation on CPU this can take minutes. Tauri dispatches
+/// command handlers off its main UI thread, so the application does not
+/// freeze while this runs, but the frontend has no progress signal until
+/// it completes; a future phase could add progress events if this proves
+/// too opaque in practice.
+#[tauri::command]
+pub fn generate_verse_embeddings(
+    state: State<'_, AppState>,
+) -> Result<crate::embeddings::EmbeddingGenerationSummary, String> {
+    if !state.embedding_ready {
+        return Err(
+            "no embedding model is loaded - install a model weights + tokenizer file pair and \
+             restart CIP before generating verse embeddings"
+                .to_string(),
+        );
+    }
+    let engine = state
+        .embedding_engine
+        .lock()
+        .expect("embedding engine lock poisoned");
+    crate::embeddings::generate_verse_embeddings_for_translation(
+        state.verse_embedding_store.connection(),
+        engine.as_ref(),
+        DEFAULT_TRANSLATION_ID,
+    )
+    .map_err(|e| e.to_string())
+}
+
 /// One physical (or virtual, e.g. Xvfb) display this process can detect -
 /// via Tauri's own `AppHandle::available_monitors`, not a new dependency.
 /// Software display-window logic and physical display *readability* are
@@ -1786,14 +1965,34 @@ fn finalize_bible_only(
             .context_manager
             .lock()
             .expect("context_manager mutex poisoned");
-        handle_final_transcript(
-            &db,
-            state.bible_provider.as_ref(),
-            &mut context,
-            service_id,
-            &resolve_default_translation_id(state),
-            segment,
-        )
+        if state.embedding_ready {
+            let engine = state
+                .embedding_engine
+                .lock()
+                .expect("embedding engine lock poisoned");
+            let semantic = cip_core_service::SemanticSearch {
+                engine: engine.as_ref(),
+                store: &state.verse_embedding_store,
+            };
+            crate::pipeline::handle_final_transcript_with_semantic_search(
+                &db,
+                state.bible_provider.as_ref(),
+                &mut context,
+                service_id,
+                &resolve_default_translation_id(state),
+                segment,
+                &semantic,
+            )
+        } else {
+            handle_final_transcript(
+                &db,
+                state.bible_provider.as_ref(),
+                &mut context,
+                service_id,
+                &resolve_default_translation_id(state),
+                segment,
+            )
+        }
     };
 
     match processed {
@@ -2196,16 +2395,38 @@ pub fn process_test_transcript(
             .context_manager
             .lock()
             .expect("context_manager mutex poisoned");
-        handle_final_transcript(
-            &db,
-            state.bible_provider.as_ref(),
-            &mut context,
-            service_id,
-            &resolve_default_translation_id(&state),
-            segment,
-        )
-        .map_err(AppError::from)
-        .map_err(log_and_return)?
+        if state.embedding_ready {
+            let engine = state
+                .embedding_engine
+                .lock()
+                .expect("embedding engine lock poisoned");
+            let semantic = cip_core_service::SemanticSearch {
+                engine: engine.as_ref(),
+                store: &state.verse_embedding_store,
+            };
+            crate::pipeline::handle_final_transcript_with_semantic_search(
+                &db,
+                state.bible_provider.as_ref(),
+                &mut context,
+                service_id,
+                &resolve_default_translation_id(&state),
+                segment,
+                &semantic,
+            )
+            .map_err(AppError::from)
+            .map_err(log_and_return)?
+        } else {
+            handle_final_transcript(
+                &db,
+                state.bible_provider.as_ref(),
+                &mut context,
+                service_id,
+                &resolve_default_translation_id(&state),
+                segment,
+            )
+            .map_err(AppError::from)
+            .map_err(log_and_return)?
+        }
     };
 
     {

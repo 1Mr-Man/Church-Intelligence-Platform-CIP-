@@ -29,6 +29,21 @@ pub const WHISPER_MODEL_FILENAME: &str = "ggml-tiny.en.bin";
 /// this build - no inference backend is implemented yet.
 pub const ACOUSTIC_MODEL_DIR_NAME: &str = "acoustic";
 
+/// Expected filename of the local embedding model weights under
+/// `AppConfig::model_dir`, for Phase 4.4's semantic (meaning-based) Bible
+/// search - the `cip-ai-embeddings` counterpart to `WHISPER_MODEL_FILENAME`.
+/// Not bundled with CIP and never downloaded automatically - see
+/// `docs/phase-4-4-semantic-bible-search.md` for where to get it, its
+/// license, and why this environment could not verify one end to end.
+pub const EMBEDDING_MODEL_FILENAME: &str = "model.safetensors";
+
+/// Expected filename of the embedding model's tokenizer under
+/// `AppConfig::model_dir`, alongside `EMBEDDING_MODEL_FILENAME`. Both files
+/// come from the same Hugging Face model page and must be installed
+/// together - a model file without its matching tokenizer (or vice versa)
+/// cannot produce meaningful embeddings.
+pub const EMBEDDING_TOKENIZER_FILENAME: &str = "tokenizer.json";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AppEnvironment {
@@ -145,6 +160,14 @@ pub struct AppConfig {
     /// (via `get_app_config`) so a "speech unavailable" notice can name the
     /// exact path it looked for, never a vague "not configured."
     pub whisper_model_path: PathBuf,
+    /// Phase 4.4: the exact file `create_embedding_engine` will try to load
+    /// local embedding model weights from - mirrors `whisper_model_path`
+    /// exactly, including its `CIP_EMBEDDING_MODEL_PATH` override.
+    pub embedding_model_path: PathBuf,
+    /// Phase 4.4: the exact file `create_embedding_engine` will try to load
+    /// the embedding model's tokenizer from - `CIP_EMBEDDING_TOKENIZER_PATH`
+    /// overridable, mirroring `embedding_model_path`.
+    pub embedding_tokenizer_path: PathBuf,
     pub log_dir: PathBuf,
     pub acoustic: AcousticConfig,
 }
@@ -170,11 +193,19 @@ impl AppConfig {
         let whisper_model_path = std::env::var("CIP_WHISPER_MODEL_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|_| model_dir.join(WHISPER_MODEL_FILENAME));
+        let embedding_model_path = std::env::var("CIP_EMBEDDING_MODEL_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| model_dir.join(EMBEDDING_MODEL_FILENAME));
+        let embedding_tokenizer_path = std::env::var("CIP_EMBEDDING_TOKENIZER_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| model_dir.join(EMBEDDING_TOKENIZER_FILENAME));
         Self {
             environment: AppEnvironment::resolve(),
             database_path: data_dir.join("cip.sqlite3"),
             model_dir,
             whisper_model_path,
+            embedding_model_path,
+            embedding_tokenizer_path,
             log_dir: data_dir.join("logs"),
             acoustic,
             data_dir,
@@ -251,6 +282,53 @@ mod tests {
             config.whisper_model_path,
             PathBuf::from("/opt/models/my-whisper.bin"),
             "an operator-supplied path must be used verbatim, never merged with model_dir"
+        );
+    }
+
+    /// Phase 4.4: mirrors `whisper_model_path_defaults_under_model_dir_when_unset`
+    /// for the embedding model/tokenizer pair.
+    #[test]
+    fn embedding_paths_default_under_model_dir_when_unset() {
+        // SAFETY: no other test in this crate reads or writes these two
+        // vars, so removing them here cannot race.
+        unsafe {
+            std::env::remove_var("CIP_EMBEDDING_MODEL_PATH");
+            std::env::remove_var("CIP_EMBEDDING_TOKENIZER_PATH");
+        }
+        let config = AppConfig::from_data_dir(PathBuf::from("/tmp/cip-test-default-embedding"));
+        assert_eq!(
+            config.embedding_model_path,
+            PathBuf::from("/tmp/cip-test-default-embedding/models/model.safetensors")
+        );
+        assert_eq!(
+            config.embedding_tokenizer_path,
+            PathBuf::from("/tmp/cip-test-default-embedding/models/tokenizer.json")
+        );
+    }
+
+    #[test]
+    fn embedding_paths_honor_env_overrides() {
+        // SAFETY: this test sets then immediately removes both vars within
+        // its own body, and no other test in this crate touches them.
+        unsafe {
+            std::env::set_var(
+                "CIP_EMBEDDING_MODEL_PATH",
+                "/opt/models/my-embed.safetensors",
+            );
+            std::env::set_var("CIP_EMBEDDING_TOKENIZER_PATH", "/opt/models/my-tok.json");
+        }
+        let config = AppConfig::from_data_dir(PathBuf::from("/tmp/cip-test-override-embedding"));
+        unsafe {
+            std::env::remove_var("CIP_EMBEDDING_MODEL_PATH");
+            std::env::remove_var("CIP_EMBEDDING_TOKENIZER_PATH");
+        }
+        assert_eq!(
+            config.embedding_model_path,
+            PathBuf::from("/opt/models/my-embed.safetensors")
+        );
+        assert_eq!(
+            config.embedding_tokenizer_path,
+            PathBuf::from("/opt/models/my-tok.json")
         );
     }
 

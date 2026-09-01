@@ -18,6 +18,7 @@ mod provider;
 pub mod range;
 mod reference;
 pub mod search;
+pub mod semantic;
 
 pub use book_alias::{canonicalize_book, CanonicalBook};
 pub use context::{
@@ -33,3 +34,7 @@ pub use provider::{
 pub use range::{get_verse_range, VerseRangeError};
 pub use reference::{PartialScriptureReference, ScriptureReference};
 pub use search::{search_bible, BibleSearchError, BibleSearchResult};
+pub use semantic::{
+    best_semantic_match, cosine_similarity, is_valid_embedding, VerseEmbedding,
+    VerseEmbeddingError, VerseEmbeddingStore,
+};

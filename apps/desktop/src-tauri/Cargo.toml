@@ -45,6 +45,7 @@ cip-core-music.workspace = true
 cip-integrations-music.workspace = true
 cip-integrations-music-acoustic.workspace = true
 cip-ai-speech.workspace = true
+cip-ai-embeddings.workspace = true
 
 [features]
 # Off by default - see ai/speech's Cargo.toml and docs/live-speech.md for
@@ -52,6 +53,12 @@ cip-ai-speech.workspace = true
 # dependency. Enable with `cargo tauri build --features whisper` once a
 # local model is actually configured.
 whisper = ["cip-ai-speech/whisper"]
+# Off by default - mirrors `whisper` exactly, see ai/embeddings's Cargo.toml
+# and docs/phase-4-4-semantic-bible-search.md for why the real candle
+# backend is opt-in rather than a default build dependency. Enable with
+# `cargo tauri build --features semantic-search` once a local embedding
+# model is actually configured.
+semantic-search = ["cip-ai-embeddings/semantic-search"]
 
 [dev-dependencies]
 tempfile = "3"

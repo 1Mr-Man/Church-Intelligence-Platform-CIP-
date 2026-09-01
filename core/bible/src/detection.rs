@@ -71,6 +71,17 @@ pub enum ReferenceKind {
     /// cannot detect. Always `Pending` and always requires operator
     /// approval, like every other suggestion - never auto-projected.
     Paraphrase,
+    /// No book/chapter/verse was cited, and `Paraphrase`'s lexical-overlap
+    /// heuristic also found nothing above its threshold, but a local
+    /// embedding model judged the segment's *meaning* close enough to a
+    /// specific verse (e.g. "Jesus said we should love our enemies" ->
+    /// Matthew 5:44, sharing almost no vocabulary at all) - see
+    /// `core/bible::semantic`'s module docs. Only ever produced when Phase
+    /// 4.4's `semantic-search` feature is enabled and a real embedding
+    /// model is configured; the fallback chain silently skips this tier
+    /// otherwise, exactly as it always has. Always `Pending` and always
+    /// requires operator approval - never auto-projected.
+    Semantic,
 }
 
 impl ReferenceKind {
@@ -86,6 +97,7 @@ impl ReferenceKind {
             ReferenceKind::Ambiguous => "AMBIGUOUS_REFERENCE",
             ReferenceKind::Unresolved => "UNRESOLVED_REFERENCE",
             ReferenceKind::Paraphrase => "PARAPHRASE_REFERENCE",
+            ReferenceKind::Semantic => "SEMANTIC_REFERENCE",
         }
     }
 }

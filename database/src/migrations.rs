@@ -71,6 +71,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0012_display_role_assignments",
         sql: include_str!("../migrations/0012_display_role_assignments.sql"),
     },
+    Migration {
+        version: 13,
+        name: "0013_bible_verse_embeddings",
+        sql: include_str!("../migrations/0013_bible_verse_embeddings.sql"),
+    },
 ];
 
 /// A migration that was applied during this call to [`run_migrations`].
@@ -442,6 +447,54 @@ mod tests {
             [],
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn phase_4_4_bible_verse_embeddings_table_and_index_exist_after_migration() {
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+
+        let exists: bool = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'bible_verse_embeddings'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count == 1)
+            .unwrap();
+        assert!(exists, "expected table `bible_verse_embeddings` to exist");
+
+        let index_exists: bool = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_bible_verse_embeddings_model'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count == 1)
+            .unwrap();
+        assert!(index_exists, "missing idx_bible_verse_embeddings_model");
+    }
+
+    #[test]
+    fn bible_verse_embeddings_rejects_a_duplicate_verse_and_model_pair() {
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO bible_verse_embeddings (verse_id, model_id, dimensions, embedding, created_at)
+             VALUES (1, 'all-MiniLM-L6-v2', 384, x'00', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let result = conn.execute(
+            "INSERT INTO bible_verse_embeddings (verse_id, model_id, dimensions, embedding, created_at)
+             VALUES (1, 'all-MiniLM-L6-v2', 384, x'00', '2026-01-01T00:00:01Z')",
+            [],
+        );
+        assert!(
+            result.is_err(),
+            "re-embedding the same verse with the same model must be an update, not a second row"
+        );
     }
 
     #[test]

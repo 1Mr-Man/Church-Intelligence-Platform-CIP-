@@ -1,6 +1,6 @@
 [package]
 name = "cip-ai-embeddings"
-description = "Text/vector embedding generation - placeholder. Reserved for semantic search over sermon/scripture content."
+description = "EmbeddingEngine implementations: NullEmbeddingEngine (safe default) and CandleEmbeddingEngine (real local backend, behind the `semantic-search` feature)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,3 +8,18 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+cip-core-ai.workspace = true
+
+# candle (HuggingFace's pure-Rust ML framework) - real, offline-buildable
+# (no network beyond crates.io; cross-compiles cleanly to
+# x86_64-pc-windows-gnu, unlike whisper-rs-sys's C++ build - verified by a
+# direct smoke-compile test, see docs/phase-4-4-semantic-bible-search.md).
+# A genuine build-time cost this crate doesn't pay by default, matching
+# cip-ai-speech's `whisper` feature precedent exactly.
+candle-core = { version = "0.11", default-features = false, optional = true }
+candle-nn = { version = "0.11", default-features = false, optional = true }
+candle-transformers = { version = "0.11", default-features = false, optional = true }
+tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"], optional = true }
+
+[features]
+semantic-search = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers"]
