@@ -33,7 +33,7 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use cip_core_music::{
     AcousticMusicRecognizer, AcousticRecognitionCandidate, AcousticRecognitionError,
@@ -61,21 +61,80 @@ pub const MODEL_MANIFEST_FILENAME: &str = "acoustic-model.json";
 pub const MIN_VOTES: usize = 8;
 
 /// One entry in the manifest: which reference audio file to enroll, and
-/// which song/dataset it belongs to.
-#[derive(Debug, Clone, Deserialize)]
+/// which song/dataset it belongs to. `pub` (Phase 7.2) so a Tauri command
+/// can read/write the manifest directly via [`read_manifest_entries`]/
+/// [`write_manifest_entries`] rather than this crate needing to expose a
+/// second, parallel type for the same shape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ManifestSong {
-    song_id: String,
-    content_id: String,
+pub struct ManifestSong {
+    pub song_id: String,
+    pub content_id: String,
     /// Relative (to the manifest's own directory) or absolute path to a
     /// WAV file of this song, used only at enrollment time - never read
     /// again per-`recognize()` call.
-    audio_path: String,
+    pub audio_path: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Manifest {
     songs: Vec<ManifestSong>,
+}
+
+/// Read a model directory's current manifest entries, if any. An absent
+/// or empty manifest file returns an empty list (not an error) - the
+/// same "nothing configured yet is not a failure" discipline
+/// [`resolve`] itself follows; only genuinely malformed JSON is an
+/// `Err`. Used by [`enroll_acoustic_reference`]'s Tauri-command
+/// counterpart (Phase 7.2) to list and upsert enrollments without
+/// duplicating this crate's own manifest schema.
+pub fn read_manifest_entries(model_dir: &Path) -> Result<Vec<ManifestSong>, String> {
+    let manifest_path = model_dir.join(MODEL_MANIFEST_FILENAME);
+    match std::fs::read(&manifest_path) {
+        Err(_) => Ok(Vec::new()),
+        Ok(bytes) if bytes.is_empty() => Ok(Vec::new()),
+        Ok(bytes) => {
+            let manifest: Manifest = serde_json::from_slice(&bytes).map_err(|e| {
+                format!(
+                    "existing manifest at {} is malformed JSON: {e}",
+                    manifest_path.display()
+                )
+            })?;
+            Ok(manifest.songs)
+        }
+    }
+}
+
+/// Write a full replacement set of manifest entries to `model_dir`,
+/// creating the directory if needed. Always overwrites the whole file -
+/// callers that want to add/update one entry read the current list via
+/// [`read_manifest_entries`], modify it, and write the result back
+/// (an upsert-by-`song_id` is the caller's job, not this function's,
+/// since "replace an existing entry" vs. "always append" is a policy
+/// choice this crate has no opinion on).
+pub fn write_manifest_entries(model_dir: &Path, entries: &[ManifestSong]) -> Result<(), String> {
+    std::fs::create_dir_all(model_dir)
+        .map_err(|e| format!("could not create {}: {e}", model_dir.display()))?;
+    let manifest = Manifest {
+        songs: entries.to_vec(),
+    };
+    let json = serde_json::to_vec_pretty(&manifest)
+        .map_err(|e| format!("could not serialize manifest: {e}"))?;
+    let manifest_path = model_dir.join(MODEL_MANIFEST_FILENAME);
+    std::fs::write(&manifest_path, json)
+        .map_err(|e| format!("could not write {}: {e}", manifest_path.display()))?;
+    Ok(())
+}
+
+/// Validate that `path` is a usable reference recording - the exact same
+/// check [`enroll_one`] performs before enrolling a manifest entry,
+/// exposed standalone (Phase 7.2) so a Tauri command can reject a bad
+/// file at the moment an operator picks it, before it is ever copied
+/// into the model directory or written into the manifest. Never partial:
+/// a file that passes this check is guaranteed to decode identically at
+/// enrollment time, since both call the same [`decode_reference_wav`].
+pub fn validate_reference_wav(path: &Path) -> Result<(), String> {
+    decode_reference_wav(path).map(|_| ())
 }
 
 #[derive(Debug, Clone)]
@@ -261,38 +320,33 @@ fn resolve(config: &LocalAcousticConfig) -> ResolveOutcome {
     )
 }
 
-/// Read and decode one manifest entry's WAV file, downmix to mono if
-/// necessary (averaging channels - the same normalization
-/// `cip_core_service::AudioChunk` already guarantees for live capture, so
-/// enrolled reference audio and live query audio are on equal footing),
-/// and enroll it into `index`. Never panics on a malformed file - any
-/// failure is reported as `Err` and skipped, honoring "one bad reference
-/// file must not take down every other song's recognition."
-fn enroll_one(
-    manifest_dir: &Path,
-    entry: &ManifestSong,
-    index: &mut FingerprintIndex,
-) -> Result<(), String> {
-    let audio_path = resolve_audio_path(manifest_dir, &entry.audio_path);
-    let mut reader = hound::WavReader::open(&audio_path)
-        .map_err(|e| format!("could not open {}: {e}", audio_path.display()))?;
+/// Decode a WAV file into mono `i16` PCM samples, downmixing if necessary
+/// (averaging channels - the same normalization `cip_core_service::AudioChunk`
+/// already guarantees for live capture, so enrolled reference audio and
+/// live query audio are on equal footing). The one real decode path both
+/// [`enroll_one`] and [`validate_reference_wav`] use, so a file that
+/// passes validation is guaranteed to enroll identically, not merely
+/// similarly.
+fn decode_reference_wav(path: &Path) -> Result<Vec<i16>, String> {
+    let mut reader = hound::WavReader::open(path)
+        .map_err(|e| format!("could not open {}: {e}", path.display()))?;
     let spec = reader.spec();
     if spec.sample_format != hound::SampleFormat::Int || spec.bits_per_sample != 16 {
         return Err(format!(
             "{} is not 16-bit PCM WAV ({:?}, {} bits)",
-            audio_path.display(),
+            path.display(),
             spec.sample_format,
             spec.bits_per_sample
         ));
     }
     let channels = spec.channels as usize;
     if channels == 0 {
-        return Err(format!("{} declares zero channels", audio_path.display()));
+        return Err(format!("{} declares zero channels", path.display()));
     }
     let samples: Vec<i16> = reader
         .samples::<i16>()
         .collect::<Result<Vec<i16>, _>>()
-        .map_err(|e| format!("could not decode {}: {e}", audio_path.display()))?;
+        .map_err(|e| format!("could not decode {}: {e}", path.display()))?;
     let mono: Vec<i16> = if channels == 1 {
         samples
     } else {
@@ -305,11 +359,22 @@ fn enroll_one(
             .collect()
     };
     if mono.is_empty() {
-        return Err(format!(
-            "{} contains no audio samples",
-            audio_path.display()
-        ));
+        return Err(format!("{} contains no audio samples", path.display()));
     }
+    Ok(mono)
+}
+
+/// Resolve, decode, and enroll one manifest entry's WAV file into
+/// `index`. Never panics on a malformed file - any failure is reported
+/// as `Err` and skipped, honoring "one bad reference file must not take
+/// down every other song's recognition."
+fn enroll_one(
+    manifest_dir: &Path,
+    entry: &ManifestSong,
+    index: &mut FingerprintIndex,
+) -> Result<(), String> {
+    let audio_path = resolve_audio_path(manifest_dir, &entry.audio_path);
+    let mono = decode_reference_wav(&audio_path)?;
     index.enroll(&entry.song_id, &mono);
     Ok(())
 }
@@ -680,5 +745,170 @@ mod tests {
             let mut recognizer = LocalAcousticMusicRecognizer::configure(config);
             let _ = recognizer.recognize(&segment(), &["music:dev".to_string()]);
         }
+    }
+
+    // --- Phase 7.2: enrollment-support helpers ---------------------------
+
+    #[test]
+    fn read_manifest_entries_on_a_directory_with_no_manifest_is_an_empty_list_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let entries = read_manifest_entries(dir.path()).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn read_manifest_entries_on_a_nonexistent_directory_is_an_empty_list_not_an_error() {
+        let entries =
+            read_manifest_entries(std::path::Path::new("/nonexistent/cip-acoustic-dir")).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn read_manifest_entries_rejects_malformed_json() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(MODEL_MANIFEST_FILENAME), b"not json").unwrap();
+        let result = read_manifest_entries(dir.path());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("malformed JSON"));
+    }
+
+    #[test]
+    fn write_then_read_manifest_entries_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let entries = vec![
+            ManifestSong {
+                song_id: "hymn-1".to_string(),
+                content_id: "music:dev-hymnbook".to_string(),
+                audio_path: "hymn-1.wav".to_string(),
+            },
+            ManifestSong {
+                song_id: "hymn-2".to_string(),
+                content_id: "music:dev-hymnbook".to_string(),
+                audio_path: "hymn-2.wav".to_string(),
+            },
+        ];
+        write_manifest_entries(dir.path(), &entries).unwrap();
+        let read_back = read_manifest_entries(dir.path()).unwrap();
+        assert_eq!(read_back, entries);
+    }
+
+    #[test]
+    fn write_manifest_entries_creates_the_model_directory_if_missing() {
+        let parent = tempfile::tempdir().unwrap();
+        let nested = parent.path().join("acoustic");
+        assert!(!nested.exists());
+        write_manifest_entries(&nested, &[]).unwrap();
+        assert!(nested.join(MODEL_MANIFEST_FILENAME).exists());
+    }
+
+    #[test]
+    fn write_manifest_entries_fully_replaces_the_previous_contents() {
+        let dir = tempfile::tempdir().unwrap();
+        write_manifest_entries(
+            dir.path(),
+            &[ManifestSong {
+                song_id: "old".to_string(),
+                content_id: "music:dev".to_string(),
+                audio_path: "old.wav".to_string(),
+            }],
+        )
+        .unwrap();
+        write_manifest_entries(
+            dir.path(),
+            &[ManifestSong {
+                song_id: "new".to_string(),
+                content_id: "music:dev".to_string(),
+                audio_path: "new.wav".to_string(),
+            }],
+        )
+        .unwrap();
+        let entries = read_manifest_entries(dir.path()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].song_id, "new");
+    }
+
+    #[test]
+    fn validate_reference_wav_accepts_a_real_wav_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("song.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+        for i in 0..16_000 {
+            writer.write_sample((i % 100) as i16).unwrap();
+        }
+        writer.finalize().unwrap();
+        assert!(validate_reference_wav(&path).is_ok());
+    }
+
+    #[test]
+    fn validate_reference_wav_rejects_a_missing_file() {
+        let result = validate_reference_wav(std::path::Path::new("/nonexistent/song.wav"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_reference_wav_rejects_a_non_wav_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("not-audio.txt");
+        std::fs::write(&path, b"this is plain text, not a WAV file").unwrap();
+        assert!(validate_reference_wav(&path).is_err());
+    }
+
+    #[test]
+    fn validate_reference_wav_rejects_an_empty_wav_with_zero_samples() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let writer = hound::WavWriter::create(&path, spec).unwrap();
+        writer.finalize().unwrap();
+        assert!(validate_reference_wav(&path).is_err());
+    }
+
+    #[test]
+    fn a_file_that_passes_validation_also_enrolls_successfully() {
+        // Proves validate_reference_wav and enroll_one share one decode
+        // path (decode_reference_wav) - a file is never accepted by one
+        // and rejected by the other.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("song.wav");
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 16_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+        for i in 0..32_000 {
+            writer.write_sample((i % 100) as i16).unwrap();
+        }
+        writer.finalize().unwrap();
+
+        assert!(validate_reference_wav(&path).is_ok());
+
+        let manifest = serde_json::json!({
+            "songs": [
+                {"songId": "s1", "contentId": "music:dev", "audioPath": "song.wav"}
+            ]
+        });
+        std::fs::write(
+            dir.path().join(MODEL_MANIFEST_FILENAME),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        let recognizer = LocalAcousticMusicRecognizer::configure(LocalAcousticConfig {
+            model_dir: Some(dir.path().to_path_buf()),
+            enabled: true,
+        });
+        assert_eq!(recognizer.status(), AcousticRecognitionStatus::Available);
     }
 }

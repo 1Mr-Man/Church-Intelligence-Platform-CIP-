@@ -30,6 +30,7 @@ import {
   displayPresentation,
   dismissCrossDomainCorrelation,
   endSermon,
+  enrollAcousticReference,
   getAppConfig,
   getIntelligenceCapabilities,
   getPresentationDisplayState,
@@ -41,6 +42,7 @@ import {
   importBibleDataset,
   importMusicDataset,
   linkTranscriptSegmentToSermon,
+  listAcousticEnrollments,
   listContentCandidates,
   listContentRegistry,
   listCrossDomainCorrelations,
@@ -329,6 +331,28 @@ describe("commands.ts Tauri IPC guard", () => {
     });
   });
 
+  it("listAcousticEnrollments takes no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await listAcousticEnrollments();
+
+    expect(invokeMock).toHaveBeenCalledWith("list_acoustic_enrollments", undefined);
+  });
+
+  it("enrollAcousticReference forwards songId, contentId, and sourcePath as-is", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await enrollAcousticReference("hymn-1", "music:dev-hymnbook", "/home/operator/hymn-1.wav");
+
+    expect(invokeMock).toHaveBeenCalledWith("enroll_acoustic_reference", {
+      songId: "hymn-1",
+      contentId: "music:dev-hymnbook",
+      sourcePath: "/home/operator/hymn-1.wav",
+    });
+  });
+
   it("importMusicDataset never reads the filesystem itself - it only forwards already-read JSON text", async () => {
     isTauriMock.mockReturnValue(true);
     invokeMock.mockResolvedValue({});
@@ -412,6 +436,16 @@ describe("commands.ts Tauri IPC guard", () => {
 
     await expect(analyzeMusicAudio([], 16000)).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(clearCurrentSong()).rejects.toBeInstanceOf(TauriUnavailableError);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects listAcousticEnrollments/enrollAcousticReference outside the Tauri runtime, without calling invoke()", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    await expect(listAcousticEnrollments()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(enrollAcousticReference("s1", "music:dev", "/tmp/s1.wav")).rejects.toBeInstanceOf(
+      TauriUnavailableError,
+    );
     expect(invokeMock).not.toHaveBeenCalled();
   });
 

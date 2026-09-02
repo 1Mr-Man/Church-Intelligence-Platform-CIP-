@@ -16,6 +16,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { AppConfig, AppEnvironment, BackupReport, PilotDiagnostics, WhisperModelDiagnostic } from "../config/appConfig";
 import type { ContentCandidate } from "../domain/contentIntelligence";
 import type {
+  AcousticEnrollment,
   AudioDevice,
   BibleBook,
   BibleSearchResult,
@@ -521,6 +522,26 @@ export function listMusicFindings(): Promise<IntelligenceFinding[]> {
 
 export function acceptMusicFinding(findingId: string): Promise<IntelligenceFinding> {
   return invokeCommand("accept_music_finding", { findingId });
+}
+
+/** Every song currently named in the acoustic manifest - reads the
+ * on-disk manifest itself, not the currently-active recognizer's status
+ * (see `AcousticEnrollment`'s own docs for why those two things can
+ * differ). */
+export function listAcousticEnrollments(): Promise<AcousticEnrollment[]> {
+  return invokeCommand("list_acoustic_enrollments");
+}
+
+/** Enrolls one reference recording for real audio fingerprinting -
+ * validates and copies `sourcePath`, then upserts the manifest entry for
+ * `songId`. Mirrors `installWhisperModel`: never takes effect until CIP
+ * restarts. */
+export function enrollAcousticReference(
+  songId: string,
+  contentId: string,
+  sourcePath: string,
+): Promise<AcousticEnrollment> {
+  return invokeCommand("enroll_acoustic_reference", { songId, contentId, sourcePath });
 }
 
 export function rejectMusicFinding(findingId: string): Promise<IntelligenceFinding> {

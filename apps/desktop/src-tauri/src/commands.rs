@@ -491,6 +491,128 @@ pub fn install_embedding_tokenizer_file(
     ))
 }
 
+// --- Phase 7.2: real audio fingerprinting enrollment -----------------------
+//
+// Mirrors the Whisper/embedding model-provisioning pattern immediately
+// above exactly: an operator-supplied file, installed by copying (never
+// downloaded/recorded), never taking effect until CIP restarts (see
+// `create_acoustic_recognizer` in `lib.rs` - `AppState.acoustic_recognizer`
+// is built once at startup, exactly like the speech/embedding engines).
+// The one real difference from a single fixed-path model file is that the
+// acoustic manifest holds N entries (one per enrolled song), so these
+// commands read-modify-write `cip_integrations_music_acoustic`'s manifest
+// rather than overwriting one path.
+
+/// One entry in the acoustic manifest, as the frontend sees it - mirrors
+/// `cip_integrations_music_acoustic::ManifestSong` field-for-field (a
+/// thin re-declaration, not a re-export, so this crate's public API
+/// surface stays in `commands.rs` alongside every other command type).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcousticEnrollment {
+    pub song_id: String,
+    pub content_id: String,
+    pub audio_path: String,
+}
+
+impl From<cip_integrations_music_acoustic::ManifestSong> for AcousticEnrollment {
+    fn from(entry: cip_integrations_music_acoustic::ManifestSong) -> Self {
+        Self {
+            song_id: entry.song_id,
+            content_id: entry.content_id,
+            audio_path: entry.audio_path,
+        }
+    }
+}
+
+/// Every song currently named in the acoustic manifest - a read of the
+/// manifest file itself, not of `AppState.acoustic_recognizer`'s live
+/// status: an operator can enroll several songs across multiple calls to
+/// `enroll_acoustic_reference` before ever restarting, and this command
+/// lets the UI show that in-progress list even though none of it is
+/// active yet (see `AcousticEngineStatus`/`get_live_status` for what
+/// *is* currently active).
+#[tauri::command]
+pub fn list_acoustic_enrollments(
+    state: State<'_, AppState>,
+) -> Result<Vec<AcousticEnrollment>, AppError> {
+    let entries =
+        cip_integrations_music_acoustic::read_manifest_entries(&state.config.acoustic.model_dir)
+            .map_err(AppError::InvalidInput)
+            .map_err(log_and_return)?;
+    Ok(entries.into_iter().map(AcousticEnrollment::from).collect())
+}
+
+/// Enrolls one reference recording for real audio fingerprinting:
+/// validates `source_path` is a usable WAV file (the exact same check
+/// the recognizer itself performs at startup - see
+/// `cip_integrations_music_acoustic::validate_reference_wav`'s docs),
+/// copies it into the acoustic model directory, and upserts the manifest
+/// entry for `song_id` (replacing any prior enrollment of the same song,
+/// never leaving two stale entries for one song behind). Like every
+/// other model-provisioning command in this file, this never takes
+/// effect until CIP restarts.
+#[tauri::command]
+pub fn enroll_acoustic_reference(
+    song_id: String,
+    content_id: String,
+    source_path: String,
+    state: State<'_, AppState>,
+) -> Result<AcousticEnrollment, AppError> {
+    let song_id = require_non_empty(&song_id, "songId")
+        .map_err(log_and_return)?
+        .to_string();
+    let content_id = require_non_empty(&content_id, "contentId")
+        .map_err(log_and_return)?
+        .to_string();
+
+    let source = std::path::PathBuf::from(&source_path);
+    cip_integrations_music_acoustic::validate_reference_wav(&source)
+        .map_err(|e| {
+            AppError::InvalidInput(format!(
+                "\"{source_path}\" is not a usable reference recording: {e}"
+            ))
+        })
+        .map_err(log_and_return)?;
+
+    let model_dir = &state.config.acoustic.model_dir;
+    std::fs::create_dir_all(model_dir)
+        .map_err(|e| {
+            AppError::InvalidInput(format!("could not create {}: {e}", model_dir.display()))
+        })
+        .map_err(log_and_return)?;
+    let audio_filename = format!("{song_id}.wav");
+    let dest = model_dir.join(&audio_filename);
+    let tmp_dest = model_dir.join(format!("{song_id}.wav.installing"));
+    std::fs::copy(&source, &tmp_dest)
+        .map_err(|e| AppError::InvalidInput(format!("could not copy reference recording: {e}")))
+        .map_err(log_and_return)?;
+    std::fs::rename(&tmp_dest, &dest)
+        .map_err(|e| AppError::InvalidInput(format!("could not finalize enrollment: {e}")))
+        .map_err(log_and_return)?;
+
+    let mut entries = cip_integrations_music_acoustic::read_manifest_entries(model_dir)
+        .map_err(AppError::InvalidInput)
+        .map_err(log_and_return)?;
+    entries.retain(|e| e.song_id != song_id);
+    let entry = cip_integrations_music_acoustic::ManifestSong {
+        song_id: song_id.clone(),
+        content_id: content_id.clone(),
+        audio_path: audio_filename.clone(),
+    };
+    entries.push(entry.clone());
+    cip_integrations_music_acoustic::write_manifest_entries(model_dir, &entries)
+        .map_err(AppError::InvalidInput)
+        .map_err(log_and_return)?;
+
+    log::info!(
+        target: LogCategory::Music.target(),
+        "enrolled acoustic reference recording for song {song_id} ({content_id}) from {source_path} - restart CIP for it to take effect"
+    );
+
+    Ok(AcousticEnrollment::from(entry))
+}
+
 /// Embeds every not-yet-embedded verse of `DEFAULT_TRANSLATION_ID` using
 /// the currently loaded embedding engine - the explicit, operator-triggered
 /// action that populates `bible_verse_embeddings` (nothing does this

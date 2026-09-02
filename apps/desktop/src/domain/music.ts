@@ -167,3 +167,18 @@ export interface CurrentSong {
   songId: string;
   confidence: ConfidenceResult;
 }
+
+// --- real audio fingerprinting enrollment (Phase 7.2) ----------------------
+//
+// Mirrors `apps/desktop/src-tauri/src/commands.rs`'s `AcousticEnrollment`
+// (Rust). Enrolling a reference recording never takes effect until CIP
+// restarts - `listAcousticEnrollments` reads the on-disk manifest, not
+// `AcousticEngineStatus` (which reflects whichever recognizer was built at
+// the *last* startup). See `docs/phase-7-2-audit.md`.
+
+/** One reference recording named in the acoustic manifest. */
+export interface AcousticEnrollment {
+  songId: string;
+  contentId: string;
+  audioPath: string;
+}

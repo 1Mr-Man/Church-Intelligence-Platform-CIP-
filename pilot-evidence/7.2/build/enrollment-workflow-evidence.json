@@ -1,0 +1,50 @@
+{
+  "phase": "7.2",
+  "summary": "Environment A evidence for the in-app enrollment workflow that lets an operator populate Phase 7.1's real audio fingerprinting manifest without hand-editing JSON or manually placing files.",
+  "auditFinding": "No enrollment path existed - an operator would need to hand-write JSON matching local.rs's then-private manifest schema and manually place a WAV file at a path they referenced correctly. See docs/phase-7-2-audit.md and docs/phase-7-2-real-audio-fingerprinting-enrollment.md.",
+  "designChoice": "No genuine architectural fork - this project had already solved the identical problem twice (Whisper model provisioning, Phase 3.8.7.1; embedding model/tokenizer provisioning, Phase 4.4), both via a native file picker + an install_* command that validates, copies, and logs 'restart to take effect'. This phase extends that exact pattern to a manifest with N entries instead of one fixed path.",
+  "newCode": {
+    "localRs": "integrations/music-acoustic/src/local.rs: Manifest/ManifestSong made pub with Serialize added; enroll_one's WAV validation extracted into shared decode_reference_wav; new pub validate_reference_wav/read_manifest_entries/write_manifest_entries.",
+    "commandsRs": "apps/desktop/src-tauri/src/commands.rs: list_acoustic_enrollments and enroll_acoustic_reference(song_id, content_id, source_path), mirroring install_whisper_model/install_embedding_model_file exactly - validate, copy, upsert manifest by song_id, log restart-required.",
+    "frontend": "domain/music.ts's AcousticEnrollment; commands.ts's listAcousticEnrollments/enrollAcousticReference; LiveChurchBrain.tsx's new 'Reference recordings for real audio fingerprinting' section (song search via existing searchMusic + native WAV file picker via @tauri-apps/plugin-dialog)."
+  },
+  "newTests": {
+    "rustCrateTestCount": 11,
+    "rustCrateTests": [
+      "read_manifest_entries on a directory with no manifest is an empty list, not an error",
+      "read_manifest_entries on a nonexistent directory is an empty list, not an error",
+      "read_manifest_entries rejects malformed JSON",
+      "write then read manifest entries round-trips",
+      "write_manifest_entries creates the model directory if missing",
+      "write_manifest_entries fully replaces the previous contents (upsert semantics proven at the write layer)",
+      "validate_reference_wav accepts a real WAV file",
+      "validate_reference_wav rejects a missing file",
+      "validate_reference_wav rejects a non-WAV file",
+      "validate_reference_wav rejects an empty WAV with zero samples",
+      "a file that passes validation also enrolls successfully - proves validate_reference_wav and enroll_one share one decode path"
+    ],
+    "frontendTestCountBeforePhase": 258,
+    "frontendTestCountAfterPhase": 261,
+    "frontendNewTests": [
+      "listAcousticEnrollments takes no arguments",
+      "enrollAcousticReference forwards songId, contentId, and sourcePath as-is",
+      "rejects listAcousticEnrollments/enrollAcousticReference outside the Tauri runtime, without calling invoke()"
+    ],
+    "command": "cargo test -p cip-integrations-music-acoustic && npm run test -- --run",
+    "result": "48 passed (Rust crate, 11 new), 261 passed (frontend, 3 new)"
+  },
+  "fullRegression": {
+    "fmt": "cargo fmt --all -- --check: clean (after one cargo fmt --all pass)",
+    "clippy": "cargo clippy --workspace --all-targets -- -D warnings: clean, both feature configs",
+    "check": "cargo check --workspace: clean, both feature configs",
+    "test": "cargo test --workspace: all crates passing, both feature configs, zero regressions",
+    "frontend": "npm run typecheck/lint/test/build: all clean - same 5 pre-existing lint warnings as before this phase, no new ones"
+  },
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands beyond list_acoustic_enrollments/enroll_acoustic_reference, zero new events, zero new database schema.",
+    "core/music (the domain contract crate) is untouched.",
+    "NullAcousticMusicRecognizer/ScriptedAcousticMusicRecognizer and every existing acoustic-recognition code path are byte-identical to before this phase.",
+    "enroll_acoustic_reference never mutates AppState.acoustic_recognizer - the currently-active recognizer is unaffected until the next restart, exactly matching Whisper/embedding model install precedent."
+  ],
+  "honestLimitation": "Removing an enrollment is not supported (only add/replace via re-enrolling the same song_id); no live re-recording from within the app (import an existing file only, matching every other model-provisioning flow in this codebase); still no real recorded audio anywhere in this repository or container to actually enroll for a genuine end-to-end test."
+}

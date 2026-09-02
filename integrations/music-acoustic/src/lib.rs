@@ -16,12 +16,22 @@
 //! All three satisfy the same `cip_core_music::AcousticMusicRecognizer`
 //! trait - callers never know which one they're holding, mirroring
 //! `cip_ai_speech`'s three `SpeechEngine` implementations exactly.
+//!
+//! Phase 7.2 adds an in-app enrollment path on top of Phase 7.1's engine:
+//! [`ManifestSong`], [`read_manifest_entries`], [`write_manifest_entries`],
+//! and [`validate_reference_wav`] let a Tauri command list/upsert the
+//! manifest and validate a candidate WAV file before ever copying it into
+//! the model directory - see `apps/desktop/src-tauri/src/commands.rs`'s
+//! `enroll_acoustic_reference`/`list_acoustic_enrollments`.
 
 pub mod fingerprint;
 mod local;
 mod null;
 mod scripted;
 
-pub use local::{LocalAcousticConfig, LocalAcousticMusicRecognizer, MODEL_MANIFEST_FILENAME};
+pub use local::{
+    read_manifest_entries, validate_reference_wav, write_manifest_entries, LocalAcousticConfig,
+    LocalAcousticMusicRecognizer, ManifestSong, MODEL_MANIFEST_FILENAME,
+};
 pub use null::NullAcousticMusicRecognizer;
 pub use scripted::{ScriptedAcousticMusicRecognizer, ScriptedAcousticStep};

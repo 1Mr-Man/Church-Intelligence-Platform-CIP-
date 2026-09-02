@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import type {
+  AcousticEnrollment,
   AudioDevice,
   BibleSearchResult,
   BibleTranslation,
@@ -193,6 +195,19 @@ export function LiveChurchBrain() {
   const [musicSearchQuery, setMusicSearchQuery] = useState("");
   const [musicSearchType, setMusicSearchType] = useState<MusicQueryType>("title");
   const [musicSearchResults, setMusicSearchResults] = useState<SongRecognitionCandidate[] | null>(null);
+  // Real audio fingerprinting enrollment (Phase 7.2) - a config-time
+  // workflow, not service-scoped: loads once on mount, like
+  // `intelligenceCapabilities` above. A separate song-search state from
+  // `musicSearchQuery`/`musicSearchResults` above (the pre-existing manual
+  // Bible-style song search), since the two searches serve different UI
+  // sections and must not clobber each other's results.
+  const [acousticEnrollments, setAcousticEnrollments] = useState<AcousticEnrollment[]>([]);
+  const [acousticSongQuery, setAcousticSongQuery] = useState("");
+  const [acousticSongResults, setAcousticSongResults] = useState<SongRecognitionCandidate[] | null>(null);
+  const [acousticSelectedSong, setAcousticSelectedSong] = useState<{ songId: string; contentId: string; title: string } | null>(
+    null,
+  );
+  const [acousticEnrollMessage, setAcousticEnrollMessage] = useState<string | null>(null);
   // Sermon Intelligence (Phase 2.3) - findings await operator review the
   // same way Music findings do, never auto-projected. `sermonState` is
   // the read-only theme/state/structure snapshot, independent of finding
@@ -300,6 +315,14 @@ export function LiveChurchBrain() {
   useEffect(() => {
     commands.getAppConfig().then(setAppConfig).catch(() => {});
   }, []);
+
+  const refreshAcousticEnrollments = useCallback(() => {
+    commands.listAcousticEnrollments().then(setAcousticEnrollments).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshAcousticEnrollments();
+  }, [refreshAcousticEnrollments]);
 
   const activeServiceId = status?.service?.id;
   useEffect(() => {
@@ -1461,6 +1484,121 @@ export function LiveChurchBrain() {
             {status.acousticStatus.reason && <> &mdash; {status.acousticStatus.reason}</>}
           </p>
         )}
+
+        <details className="live-brain__manual-entry">
+          <summary>Reference recordings for real audio fingerprinting</summary>
+          <p className="live-brain__hint">
+            Enroll a WAV recording of a song already in a Music dataset so the fingerprinting recognizer can
+            identify it live. Enrolling never takes effect until CIP restarts - see the status line above for
+            what is currently active.
+          </p>
+
+          {acousticEnrollments.length === 0 ? (
+            <p className="live-brain__hint">No reference recordings enrolled yet.</p>
+          ) : (
+            <ul className="live-brain__suggestions">
+              {acousticEnrollments.map((entry) => (
+                <li key={entry.songId} className="live-brain__suggestion-card">
+                  <strong>{entry.songId}</strong> ({entry.contentId}) &mdash; {entry.audioPath}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="live-brain__row">
+            <input
+              value={acousticSongQuery}
+              onChange={(e) => setAcousticSongQuery(e.target.value)}
+              placeholder="Search a song by title to enroll"
+              aria-label="Search a song to enroll a reference recording"
+            />
+            <button
+              type="button"
+              disabled={!acousticSongQuery.trim() || isBusy("acoustic-song-search")}
+              onClick={() =>
+                withBusy("acoustic-song-search", async () => {
+                  const results = await commands.searchMusic(acousticSongQuery.trim(), "title");
+                  setAcousticSongResults(results);
+                })
+              }
+            >
+              Search
+            </button>
+          </div>
+
+          {acousticSongResults &&
+            (acousticSongResults.length === 0 ? (
+              <p className="live-brain__hint">No songs matched.</p>
+            ) : (
+              <ul className="live-brain__suggestions">
+                {acousticSongResults.map((result) => (
+                  <li key={`${result.source}:${result.songId}`} className="live-brain__suggestion-card">
+                    <div className="live-brain__suggestion-header">
+                      <strong>{result.matchedText}</strong>
+                      <span className="live-brain__hint">{result.source}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAcousticSelectedSong({
+                          songId: result.songId,
+                          contentId: result.source,
+                          title: result.matchedText,
+                        })
+                      }
+                    >
+                      Select
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ))}
+
+          {acousticSelectedSong && (
+            <div className="live-brain__row">
+              <p className="live-brain__hint">
+                Selected: <strong>{acousticSelectedSong.title}</strong> ({acousticSelectedSong.songId},{" "}
+                {acousticSelectedSong.contentId})
+              </p>
+              <button
+                type="button"
+                disabled={isBusy("acoustic-enroll")}
+                onClick={() => {
+                  const selectedSong = acousticSelectedSong;
+                  setAcousticEnrollMessage(null);
+                  open({
+                    title: "Select a reference WAV recording",
+                    filters: [{ name: "WAV audio", extensions: ["wav"] }],
+                    multiple: false,
+                    directory: false,
+                  })
+                    .then((selected) => {
+                      if (!selected || Array.isArray(selected)) {
+                        return;
+                      }
+                      return withBusy("acoustic-enroll", async () => {
+                        await commands.enrollAcousticReference(
+                          selectedSong.songId,
+                          selectedSong.contentId,
+                          selected,
+                        );
+                        setAcousticEnrollMessage("Enrolled. Restart CIP for it to take effect.");
+                        setAcousticSelectedSong(null);
+                        setAcousticSongResults(null);
+                        setAcousticSongQuery("");
+                        refreshAcousticEnrollments();
+                      });
+                    })
+                    .catch((e) => setAcousticEnrollMessage(`Could not open file picker: ${String(e)}`));
+                }}
+              >
+                Select audio file &amp; enroll
+              </button>
+            </div>
+          )}
+
+          {acousticEnrollMessage && <p className="live-brain__hint">{acousticEnrollMessage}</p>}
+        </details>
 
         <div className="live-brain__suggestion-card">
           {status?.currentSong ? (
