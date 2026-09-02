@@ -1,0 +1,53 @@
+{
+  "phase": "6.3",
+  "summary": "Environment A direct binary verification for the Phase 6.3 Windows rebuild (Operator Ergonomics: feed search). Frontend-only change - this file documents what direct binary inspection could and could not confirm, honestly, following the discipline established in Phase 6.1/6.2's own evidence files.",
+  "installer": {
+    "path": "target/x86_64-pc-windows-gnu/release/bundle/nsis/Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "e76d5e566bfe6e853b21b065cd3ca59756a64ff339c039fc30776f00d72c457e",
+    "fileSizeBytes": 13749287,
+    "previousInstallerSha256": "f9a64c54e65234e8ca5fc83bb018f29fa62ede756507e929538d7fad06d15f43",
+    "previousInstallerFileSizeBytes": 13740350,
+    "note": "The SHA-256 and file size both changed from the Phase 6.2 baseline, confirming a genuinely new artifact was packaged - not a stale/copied installer."
+  },
+  "extractedApplicationBinary": {
+    "path": "cip-desktop.exe (extracted from the installer via 7z)",
+    "fileSizeBytes": 58758354
+  },
+  "dllPresenceCheck": {
+    "method": "Extracted the installer with 7z and confirmed all three bundled runtime DLLs are present at the installer root.",
+    "result": {
+      "libstdc++-6.dll": "present",
+      "libgcc_s_seh-1.dll": "present",
+      "libwinpthread-1.dll": "present"
+    }
+  },
+  "rustSymbolRegressionCheck": {
+    "method": "x86_64-w64-mingw32-strings/nm against the extracted cip-desktop.exe, re-checking every prior-phase Rust-side symbol/string this project's manifest already tracks, to confirm zero Rust regression (this phase touched zero Rust files - confirmed via git status/diff before the rebuild).",
+    "result": {
+      "rejection_echo_count": "5 occurrences (unchanged from Phase 6.2 baseline)",
+      "find_rejected_suggestion_for_reference": "1 occurrence (unchanged)",
+      "record_rejection_echo": "1 occurrence (unchanged)",
+      "silentWindowsSkipped": "1 occurrence (unchanged)",
+      "get_service_report": "2 occurrences (unchanged)",
+      "whisper_full_with_state": "93 occurrences via nm - identical to the Phase 6.2 baseline, including the same breakdown by symbol type (1 global 'T' exported function, 42 't', 31 'r'/.xdata, 19 'p' compiler-generated auxiliary symbols). Unlike the Phase 6.1->6.2 rebuild, this count did not drift at all this time, consistent with Phase 6.2's own explanation that the auxiliary-symbol count is a known, small, build-to-build C++ codegen non-determinism rather than something tied to any particular phase's changes."
+    },
+    "conclusion": "Every previously-tracked Rust-side symbol/string count is unchanged from the Phase 6.2 baseline - confirms zero Rust-side regression, consistent with this phase changing only TypeScript/TSX files."
+  },
+  "frontendTextSearchLimitation": {
+    "attempted": "Searched the extracted cip-desktop.exe for this phase's new frontend text: 'Search the feed' (the new search input's placeholder).",
+    "result": "0 matches via x86_64-w64-mingw32-strings.",
+    "controlExperiment": "Also searched for two frontend-only strings known to be present in the source and UNCHANGED by this phase: 'Needs Attention' and 'Intelligence Feed' (the panel's own heading). Both ALSO returned 0 matches, exactly reproducing the Phase 6.1 and 6.2 findings.",
+    "conclusion": "Confirms, again, that Tauri's compressed embedded frontend bundle is opaque to plain strings(1)/nm(1) scanning - the same real, already-documented tooling limitation, not a build defect specific to this phase.",
+    "correctnessEvidenceUsedInstead": [
+      "Fresh Vite build produced a new asset bundle hash for this rebuild (dist/assets/index-*.js), distinct from the Phase 6.2 build's bundle - proving a genuinely new frontend bundle was embedded.",
+      "Full frontend test suite: 242/242 passing (236 pre-existing + 6 new, covering searchIntelligenceFeed's substring matching, null-safety, whitespace trimming, and empty-query/no-match edge cases) - see pilot-evidence/6.3/build/feed-search-evidence.json.",
+      "Installer SHA-256 and file size both changed from the Phase 6.2 baseline (see installer block above), confirming the newly-built bundle was genuinely packaged into this installer.",
+      "npm run build (tsc -b && vite build) completed with zero errors as part of the same build pipeline that produced this exact installer."
+    ]
+  },
+  "architectureVerification": {
+    "outerInstallerStub": "PE32 executable (GUI) Intel 80386, Nullsoft Installer self-extracting archive - standard NSIS bootstrapper, unchanged from every prior phase.",
+    "installedApplicationBinary": "cip-desktop.exe: PE32+ executable (GUI) x86-64, confirmed genuinely x64."
+  },
+  "conclusion": "This phase's Rust-side surface is unchanged (confirmed via unchanged symbol/string counts, including whisper_full_with_state's auxiliary-symbol count now matching the Phase 6.2 baseline exactly - the drift seen in the Phase 6.1->6.2 rebuild was not repeated here, further supporting that it was toolchain non-determinism rather than anything phase-specific) and this phase's frontend-side surface is a genuinely new, fully-tested bundle (confirmed via a fresh build hash, a changed installer SHA-256, and a full 242/242 test pass) - but direct strings-based verification of the new frontend text itself is not possible against Tauri's compressed embedded bundle, the same real tooling limitation documented in Phase 6.1/6.2, reproduced here rather than worked around with a fabricated match."
+}
