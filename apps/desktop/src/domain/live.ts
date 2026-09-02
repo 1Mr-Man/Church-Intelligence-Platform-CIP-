@@ -37,7 +37,16 @@ export interface LiveStatus {
   serviceStatus: LiveServiceStatus;
   audio: AudioEngineStatus;
   audioStatus: AudioStatusKind;
+  /** Phase 6.4 (Operator Ergonomics: buried audio/speech error
+   * visibility): the real error text behind `audioStatus === "error"` -
+   * `audio.streamError` (a mid-capture failure) preferred over the
+   * command-call failure that set `audioStatus` to `"error"` in the
+   * first place. Always `null` when `audioStatus !== "error"`. */
+  audioErrorText: string | null;
   speechStatus: SpeechStatusKind;
+  /** Phase 6.4: the real error text behind `speechStatus === "error"`.
+   * Always `null` when `speechStatus !== "error"`. */
+  speechErrorText: string | null;
   networkStatus: NetworkStatusKind;
   aiStatus: AiStatusKind;
   databaseStatus: DatabaseStatusKind;

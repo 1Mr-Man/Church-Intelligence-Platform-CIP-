@@ -1,0 +1,43 @@
+{
+  "phase": "6.4",
+  "summary": "Environment A evidence for surfacing real audio/speech error text - previously computed but discarded (audio) or Diagnostics-Mode-only and incomplete (speech) - into Operator Mode's existing error notices and into Diagnostics Mode's audio panel. The fourth Phase 6 (Operator Ergonomics) slice, and the first to touch Rust.",
+  "auditFinding": "get_live_status's AudioStatusKind/SpeechStatusKind enums already OR together the real error sources to decide Error, but discard the actual string. Operator Mode showed two hardcoded generic notices regardless of what actually failed. Diagnostics Mode rendered real text for speech only; diagnostics.audio.streamError was already in every poll but never rendered. See docs/phase-6-4-audit.md.",
+  "designChoice": "No genuine architectural fork this phase - the real text already existed, was already computed by the exact condition already deciding the Error enum, and was already operator-readable plain text. Proceeded directly to implementation.",
+  "newCode": {
+    "commandsRs": "LiveStatus gains audio_error_text/speech_error_text (Option<String>), computed with the same source-of-truth already driving audio_status/speech_status. New pure helper error_text_if(is_error, text) - never surfaces text unless the status actually resolved to Error.",
+    "domainLiveTs": "LiveStatus TS mirror gains audioErrorText/speechErrorText: string | null.",
+    "liveChurchBrainTsx": "Operator Mode's AUDIO ERROR/SPEECH ERROR notices interpolate the real text, falling back to the original generic phrasing if absent.",
+    "pilotDiagnosticsPanelTsx": "New 'Last error: ...' line for audio (diagnostics.audio.streamError) mirroring speech's own existing line - pure rendering addition, data was already in every poll."
+  },
+  "newTests": {
+    "commandsRsTests": [
+      "error_text_if_returns_none_when_not_an_error_even_with_stale_text",
+      "error_text_if_returns_the_text_when_it_is_an_error",
+      "error_text_if_returns_none_for_an_error_with_no_text_rather_than_fabricating_one",
+      "live_status_serializes_camel_case (extended with audioErrorText/speechErrorText assertions)"
+    ],
+    "cipDesktopTestCountBeforePhase": 313,
+    "cipDesktopTestCountAfterPhase": 316,
+    "frontendTestCountBeforePhase": 242,
+    "frontendTestCountAfterPhase": 242,
+    "note": "Frontend test count unchanged - this phase's frontend work is rendering/interpolation of already-typed data, not new pure logic requiring its own test."
+  },
+  "fullRegression": {
+    "backendFmt": "cargo fmt --check: clean",
+    "backendClippyDefault": "cargo clippy --workspace --all-targets -- -D warnings: clean",
+    "backendClippyWhisperSemantic": "cargo clippy --workspace --all-targets --features whisper,semantic-search -- -D warnings: clean",
+    "backendTestDefault": "cargo test --workspace -- --test-threads=1: fully green, zero failures",
+    "backendTestWhisperSemantic": "cargo test --workspace --features whisper,semantic-search -- --test-threads=1: fully green, zero failures",
+    "frontendTypecheck": "npm run typecheck: clean",
+    "frontendLint": "npm run lint: same pre-existing warnings as before this phase - no new ones",
+    "frontendTest": "npm run test -- --run: 242 passed",
+    "frontendBuild": "npm run build: succeeds"
+  },
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands, zero new events, zero new database columns/tables.",
+    "LiveStatus gains only two additive, read-only fields derived entirely from state that already existed.",
+    "error_text_if's contract (None unless the status is actually Error) prevents a stale error string from ever appearing next to a status that says everything is fine.",
+    "Operator Mode's generic phrasing remains as a fallback - notices never disappear or break if text is absent, they only gain detail when present.",
+    "Diagnostics Mode's new line renders data that was already transmitted on every poll - no new field on the wire, no new IPC surface."
+  ]
+}

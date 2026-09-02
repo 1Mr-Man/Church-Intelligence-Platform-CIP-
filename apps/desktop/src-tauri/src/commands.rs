@@ -6220,7 +6220,20 @@ pub struct LiveStatus {
     pub service_status: LiveServiceStatus,
     pub audio: AudioEngineStatus,
     pub audio_status: AudioStatusKind,
+    /// Phase 6.4 (Operator Ergonomics: buried audio/speech error
+    /// visibility): the real error text behind `audio_status ==
+    /// AudioStatusKind::Error`, computed with the exact same
+    /// `audio.stream_error.or(state.audio_error)` precedence that
+    /// decision already uses - so this can never say `Error` with no
+    /// text, or show text for a status that isn't `Error`. `None`
+    /// whenever `audio_status != Error`.
+    pub audio_error_text: Option<String>,
     pub speech_status: SpeechStatusKind,
+    /// Phase 6.4: the real error text behind `speech_status ==
+    /// SpeechStatusKind::Error`, read from the exact same
+    /// `state.speech_error` that decision already checks. `None`
+    /// whenever `speech_status != Error`.
+    pub speech_error_text: Option<String>,
     pub network_status: NetworkStatusKind,
     pub ai_status: AiStatusKind,
     pub database_status: DatabaseStatusKind,
@@ -6242,6 +6255,22 @@ pub struct LiveStatus {
     /// models the same way (`Unavailable`/`Error`), now extended to
     /// Bible/BSB, which `LiveStatus` never surfaced before this phase.
     pub bible: Option<ContentMetadata>,
+}
+
+/// Phase 6.4 (Operator Ergonomics: buried audio/speech error visibility) -
+/// the one rule both `audio_error_text` and `speech_error_text` share:
+/// only ever surface text when the status it belongs to actually
+/// resolved to `Error`, even if a stale, not-yet-cleared error string is
+/// still sitting in state (e.g. a past failure that hasn't been
+/// overwritten by a subsequent success). Pure and directly testable
+/// without a running engine or a locked mutex - the mutex-reading glue
+/// around it is exercised via `get_live_status` itself.
+fn error_text_if(is_error: bool, text: Option<String>) -> Option<String> {
+    if is_error {
+        text
+    } else {
+        None
+    }
 }
 
 fn check_network_online() -> bool {
@@ -6275,15 +6304,22 @@ pub fn get_live_status(state: State<'_, AppState>) -> LiveStatus {
         .lock()
         .expect("audio_engine mutex poisoned")
         .status();
-    let audio_status = if audio.is_capturing {
-        AudioStatusKind::Listening
-    } else if audio.stream_error.is_some()
-        || state
+    // Phase 6.4: the same precedence the `Error` branch below already
+    // used to decide *whether* something is wrong now also captures
+    // *what* - `audio.stream_error` (a real mid-capture hardware failure)
+    // preferred over `state.audio_error` (a synchronous start_listening
+    // failure), since a mid-capture failure is the more specific/recent
+    // signal when both happen to be set.
+    let audio_error_text = audio.stream_error.clone().or_else(|| {
+        state
             .audio_error
             .lock()
             .expect("audio_error mutex poisoned")
-            .is_some()
-    {
+            .clone()
+    });
+    let audio_status = if audio.is_capturing {
+        AudioStatusKind::Listening
+    } else if audio_error_text.is_some() {
         // Phase 3.2: `audio.stream_error` is a real mid-capture hardware
         // failure (e.g. a microphone physically unplugged while
         // listening), reported by the backend's own stream-error
@@ -6305,24 +6341,36 @@ pub fn get_live_status(state: State<'_, AppState>) -> LiveStatus {
             _ => AudioStatusKind::Unavailable,
         }
     };
+    // Phase 6.4: `audio_error_text` can be `Some` (a not-yet-cleared past
+    // error) even while `audio_status` resolved to `Listening` above (a
+    // fresh successful start doesn't retroactively clear
+    // `stream_error`/`audio_error` here - only the next real error or
+    // success does, per those fields' own docs) - only surface the text
+    // when the status actually says `Error`, matching `LiveStatus`'s own
+    // documented contract for this field.
+    let audio_error_text = error_text_if(audio_status == AudioStatusKind::Error, audio_error_text);
 
     // Phase 3.8.7.3: reads the cached `state.speech_ready` field rather
     // than locking `speech_engine` - see that field's own docs (Finding 3).
     // This is the exact poll (frontend cadence 3000ms) that previously
     // blocked behind an in-progress Whisper inference holding that mutex.
     let speech_ready = state.speech_ready;
-    let speech_status = if state
+    // Phase 6.4: read once, reused for both the status decision and the
+    // real text `LiveStatus.speech_error_text` exposes.
+    let speech_error_text = state
         .speech_error
         .lock()
         .expect("speech_error mutex poisoned")
-        .is_some()
-    {
+        .clone();
+    let speech_status = if speech_error_text.is_some() {
         SpeechStatusKind::Error
     } else if speech_ready {
         SpeechStatusKind::Ready
     } else {
         SpeechStatusKind::Unavailable
     };
+    let speech_error_text =
+        error_text_if(speech_status == SpeechStatusKind::Error, speech_error_text);
 
     let network_status = if check_network_online() {
         NetworkStatusKind::Online
@@ -6373,7 +6421,9 @@ pub fn get_live_status(state: State<'_, AppState>) -> LiveStatus {
         service_status,
         audio,
         audio_status,
+        audio_error_text,
         speech_status,
+        speech_error_text,
         network_status,
         ai_status,
         database_status,
@@ -6904,7 +6954,9 @@ mod tests {
                 channels: None,
             },
             audio_status: AudioStatusKind::Unavailable,
+            audio_error_text: None,
             speech_status: SpeechStatusKind::Unavailable,
+            speech_error_text: None,
             network_status: NetworkStatusKind::Offline,
             ai_status: AiStatusKind::Degraded,
             database_status: DatabaseStatusKind::Connected,
@@ -6919,7 +6971,9 @@ mod tests {
         let value = serde_json::to_value(&status).unwrap();
         assert!(value.get("serviceStatus").is_some());
         assert!(value.get("audioStatus").is_some());
+        assert!(value.get("audioErrorText").is_some());
         assert!(value.get("speechStatus").is_some());
+        assert!(value.get("speechErrorText").is_some());
         assert!(value.get("networkStatus").is_some());
         assert!(value.get("aiStatus").is_some());
         assert!(value.get("databaseStatus").is_some());
@@ -6928,6 +6982,29 @@ mod tests {
         assert_eq!(value["serviceStatus"], "planned");
         assert_eq!(value["audio"]["isCapturing"], false);
         assert_eq!(value["acousticStatus"]["status"], "unavailable");
+    }
+
+    // --- Phase 6.4 buried audio/speech error visibility ---------------
+
+    #[test]
+    fn error_text_if_returns_none_when_not_an_error_even_with_stale_text() {
+        assert_eq!(
+            error_text_if(false, Some("stale, not yet cleared".to_string())),
+            None
+        );
+    }
+
+    #[test]
+    fn error_text_if_returns_the_text_when_it_is_an_error() {
+        assert_eq!(
+            error_text_if(true, Some("no audio device available".to_string())),
+            Some("no audio device available".to_string())
+        );
+    }
+
+    #[test]
+    fn error_text_if_returns_none_for_an_error_with_no_text_rather_than_fabricating_one() {
+        assert_eq!(error_text_if(true, None), None);
     }
 
     // --- Phase 3.2 pilot hardware diagnostics -------------------------

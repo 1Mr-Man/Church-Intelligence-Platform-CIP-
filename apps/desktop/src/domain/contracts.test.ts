@@ -224,7 +224,9 @@ describe("domain contracts", () => {
         channels: 1,
       },
       audioStatus: "listening",
+      audioErrorText: null,
       speechStatus: "ready",
+      speechErrorText: null,
       networkStatus: "offline",
       aiStatus: "available",
       databaseStatus: "connected",
@@ -233,6 +235,8 @@ describe("domain contracts", () => {
       bible: null,
     };
     expect(status.serviceStatus).toBe("live");
+    expect(status.audioErrorText).toBeNull();
+    expect(status.speechErrorText).toBeNull();
     expect(status.networkStatus).toBe("offline");
     expect(status.aiStatus).toBe("available");
     expect(status.databaseStatus).toBe("connected");

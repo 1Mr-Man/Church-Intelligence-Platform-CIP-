@@ -876,10 +876,16 @@ export function LiveChurchBrain() {
           </p>
         )}
         {status?.audioStatus === "error" && (
-          <p className="live-brain__notice">AUDIO ERROR &mdash; retry below. The service remains live.</p>
+          <p className="live-brain__notice">
+            AUDIO ERROR{status.audioErrorText ? `: ${status.audioErrorText}` : ""} &mdash; retry below. The service
+            remains live.
+          </p>
         )}
         {status?.speechStatus === "error" && (
-          <p className="live-brain__notice">SPEECH ERROR &mdash; recorded, will clear on the next successful chunk.</p>
+          <p className="live-brain__notice">
+            SPEECH ERROR{status.speechErrorText ? `: ${status.speechErrorText}` : ""} &mdash; recorded, will clear on
+            the next successful chunk.
+          </p>
         )}
         {devices.length === 0 && <p className="live-brain__notice">NO_AUDIO_DEVICE &mdash; connect or select an audio input device.</p>}
         <div className="live-brain__row">

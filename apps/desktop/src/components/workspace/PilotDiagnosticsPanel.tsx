@@ -126,6 +126,11 @@ export function PilotDiagnosticsPanel() {
               {diagnostics.audioDevices.length} device(s) detected
               {diagnostics.audio.selectedDevice ? ` — selected: ${diagnostics.audio.selectedDevice}` : ""}
               {diagnostics.audioDevices.length === 0 ? " (manual transcript entry still works)" : ""}
+              {/* Phase 6.4: was already present in every diagnostics poll
+                  (AudioEngineStatus::streamError) but never rendered here -
+                  the one place in this panel real speech error text had no
+                  audio equivalent. */}
+              {diagnostics.audio.streamError && <div>Last error: {diagnostics.audio.streamError}</div>}
             </dd>
           </div>
           <div>
