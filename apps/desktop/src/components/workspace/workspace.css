@@ -165,6 +165,20 @@
   background: transparent;
 }
 
+/* Phase 6.3 (Operator Ergonomics: feed search) - a plain text input,
+   deliberately styled like any other form control here rather than a
+   search-specific widget, matching the Bible Library's own search box. */
+.workspace-feed__search {
+  display: block;
+  width: 100%;
+  max-width: 24rem;
+  padding: 0.4rem 0.7rem;
+  margin-bottom: 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+
 .workspace-feed__filter--active {
   border-color: currentColor;
   font-weight: 600;

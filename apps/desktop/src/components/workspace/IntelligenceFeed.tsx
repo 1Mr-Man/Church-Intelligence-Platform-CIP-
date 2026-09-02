@@ -4,9 +4,16 @@
  * list, filterable by domain. Read-only: operator actions live in the
  * Attention Queue and the existing per-domain panels below, not here -
  * this region's job is visibility, not a second action surface.
+ *
+ * Phase 6.3 (Operator Ergonomics: feed search): also filterable by a free
+ * text query (`searchIntelligenceFeed`, `lib/intelligenceFeed.ts`),
+ * composed with the domain filter below (both narrow the same
+ * already-fetched `items` array - no new fetch, no change to the
+ * upstream 50-item cap).
  */
 import { useMemo, useState } from "react";
 import { IntelligenceCard } from "./IntelligenceCard";
+import { searchIntelligenceFeed } from "../../lib/intelligenceFeed";
 import type { UnifiedIntelligenceDomain, UnifiedIntelligenceItem } from "../../lib/unifiedFeed";
 
 const FILTERS: Array<{ value: UnifiedIntelligenceDomain | "all"; label: string }> = [
@@ -25,10 +32,12 @@ export interface IntelligenceFeedProps {
 
 export function IntelligenceFeed({ items }: IntelligenceFeedProps) {
   const [filter, setFilter] = useState<UnifiedIntelligenceDomain | "all">("all");
-  const visible = useMemo(
-    () => (filter === "all" ? items : items.filter((item) => item.domain === filter)),
-    [items, filter],
-  );
+  const [query, setQuery] = useState("");
+  const visible = useMemo(() => {
+    const byDomain = filter === "all" ? items : items.filter((item) => item.domain === filter);
+    return searchIntelligenceFeed(byDomain, query);
+  }, [items, filter, query]);
+  const isFiltered = filter !== "all" || query.trim() !== "";
 
   return (
     <section className="live-brain__panel workspace-feed">
@@ -46,8 +55,16 @@ export function IntelligenceFeed({ items }: IntelligenceFeedProps) {
           </button>
         ))}
       </div>
+      <input
+        type="search"
+        className="workspace-feed__search"
+        placeholder="Search the feed..."
+        aria-label="Search the intelligence feed"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
       {visible.length === 0 ? (
-        <p className="live-brain__hint">Nothing detected yet{filter !== "all" ? " for this domain" : ""}.</p>
+        <p className="live-brain__hint">Nothing detected yet{isFiltered ? " matching this filter" : ""}.</p>
       ) : (
         <ul className="workspace-card-list">
           {visible.map((item) => (

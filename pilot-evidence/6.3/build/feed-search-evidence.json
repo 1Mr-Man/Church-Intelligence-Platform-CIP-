@@ -1,0 +1,36 @@
+{
+  "phase": "6.3",
+  "summary": "Environment A evidence for adding a text search box to the Intelligence Feed, composing with its existing domain filter chips - the third Phase 6 (Operator Ergonomics) slice.",
+  "auditFinding": "IntelligenceFeed.tsx renders the full cross-domain, 50-item-capped feed with domain filter chips already present, but had no text search at all. The 'S' keyboard shortcut's searchInputRef is a completely unrelated pre-existing feature (Manual Bible Search), not reusable here. See docs/phase-6-3-audit.md.",
+  "designChoice": "No genuine architectural fork this phase (unlike 6.2's confirm/undo split) - one clear shape, so implementation proceeded directly without an operator design question: a new pure filter function following the established filterBooksByPrefix precedent, composed with the existing domain filter.",
+  "newCode": {
+    "intelligenceFeedTs": "apps/desktop/src/lib/intelligenceFeed.ts: searchIntelligenceFeed(items, query) - case-insensitive substring match against summary/detailLine, null-safe, empty query returns items unchanged.",
+    "intelligenceFeedTsx": "apps/desktop/src/components/workspace/IntelligenceFeed.tsx: new text input composed with the existing domain filter chips over the same already-fetched items array; empty-state message generalized to cover either filter being active."
+  },
+  "newTests": {
+    "intelligenceFeedTestTs": [
+      "matches a mid-string word in the summary, case-insensitively",
+      "matches against detailLine when summary doesn't match",
+      "never throws on an item with a null detailLine",
+      "trims whitespace from the query before matching",
+      "returns every item unchanged for an empty or whitespace-only query",
+      "returns an empty list when nothing matches, never guessing a fallback"
+    ],
+    "frontendTestCountBeforePhase": 236,
+    "frontendTestCountAfterPhase": 242,
+    "command": "npm run test -- --run",
+    "result": "242 passed"
+  },
+  "fullRegression": {
+    "typecheck": "npm run typecheck: clean",
+    "lint": "npm run lint: same pre-existing warnings as before this phase - no new ones",
+    "build": "npm run build: succeeds",
+    "rustChanges": "None - zero Rust files touched this phase, confirmed via git status/diff, so no Rust regression re-run was needed."
+  },
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands, zero new events, zero new database schema changes.",
+    "Pure client-side filter over data already fetched for the existing feed - no new fetch, no change to the 50-item cap (MAX_VISIBLE_INTELLIGENCE_ITEMS in lib/unifiedFeed.ts).",
+    "The panel remains read-only, per its own existing doc comment - search never becomes a second action surface.",
+    "Composes with (does not replace) the existing domain filter chips."
+  ]
+}
