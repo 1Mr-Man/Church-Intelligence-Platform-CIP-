@@ -37,6 +37,7 @@ import { describeTimelineEntry } from "../lib/timelineFormat";
 import { resolveUnifiedShortcutAction, shouldHandleShortcut } from "../lib/keyboardShortcuts";
 import { buildAttentionQueue } from "../lib/attentionQueue";
 import { CONFIRM_WINDOW_MS, decideConfirmClick, type PendingConfirm } from "../lib/confirmGuard";
+import { humanizeBusyKey } from "../lib/errorContext";
 import { buildUnifiedFeed, type UnifiedIntelligenceItem } from "../lib/unifiedFeed";
 import { WorkspaceHeader } from "./workspace/WorkspaceHeader";
 import { PilotDiagnosticsPanel } from "./workspace/PilotDiagnosticsPanel";
@@ -257,7 +258,7 @@ export function LiveChurchBrain() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const refreshStatus = useCallback(() => {
-    commands.getLiveStatus().then(setStatus).catch((e) => setError(String(e)));
+    commands.getLiveStatus().then(setStatus).catch((e) => setError(`Status update failed: ${String(e)}`));
     // Service Intelligence's `transcriptFreshness` is wall-clock-dependent
     // (spec section 41) - it needs to be re-fetched on the same poll
     // cadence as status, not just re-derived from a stored event payload.
@@ -505,7 +506,10 @@ export function LiveChurchBrain() {
     try {
       await action();
     } catch (e) {
-      setError(String(e));
+      // Phase 6.5: `key` already exists for busy-state tracking - reused
+      // here (never a second source of what the action was) so the
+      // banner says which action failed, not just that one did.
+      setError(`${humanizeBusyKey(key)} failed: ${String(e)}`);
     } finally {
       setBusy(null);
     }
@@ -518,7 +522,10 @@ export function LiveChurchBrain() {
   const openHistory = () => {
     setHistoryOpen((open) => !open);
     if (!historyOpen && history.length === 0) {
-      commands.listServiceHistory(20).then(setHistory).catch((e) => setError(String(e)));
+      commands
+        .listServiceHistory(20)
+        .then(setHistory)
+        .catch((e) => setError(`Load history failed: ${String(e)}`));
     }
   };
 
@@ -529,7 +536,7 @@ export function LiveChurchBrain() {
     commands
       .listTimeline(TIMELINE_LIMIT, service.id)
       .then((entries) => setHistoryDetail({ service, timeline: entries }))
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(`Load service detail failed: ${String(e)}`));
   };
 
   // Unified Operator Workspace (Phase 2.9, per the authoritative Phase 2
@@ -729,7 +736,14 @@ export function LiveChurchBrain() {
       </header>
       {error && (
         <p className="live-brain__error" role="alert">
-          {error}
+          <span>{error}</span>
+          {/* Phase 6.5: the only way to clear this banner used to be
+              triggering some other tracked action - a manual dismiss was
+              missing entirely. Calls the exact same setError(null) that
+              already clears it on the next action, just on demand. */}
+          <button type="button" className="live-brain__error-dismiss" aria-label="Dismiss error" onClick={() => setError(null)}>
+            &times;
+          </button>
         </p>
       )}
       {displayUndo && activeDisplayItem?.id === displayUndo.presentationItemId && (

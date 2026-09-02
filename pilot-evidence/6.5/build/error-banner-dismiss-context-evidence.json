@@ -1,0 +1,36 @@
+{
+  "phase": "6.5",
+  "summary": "Environment A evidence for adding a manual dismiss button and per-action context to the generic error banner - the fifth Phase 6 (Operator Ergonomics) slice.",
+  "auditFinding": "The live-brain__error banner had no dismiss affordance and cleared only at the start of the next withBusy action regardless of outcome. Every setError call site discarded context about which action failed, even though withBusy's catch block already had a descriptive busy key in scope. No generic dismiss/toast pattern existed to reuse. See docs/phase-6-5-audit.md.",
+  "designChoice": "No genuine architectural fork this phase - both the dismiss control and the context label have one clear shape, so implementation proceeded directly without an operator design question.",
+  "newCode": {
+    "errorContextTs": "apps/desktop/src/lib/errorContext.ts: humanizeBusyKey(key) - strips a trailing UUID, turns hyphens into spaces, capitalizes; a mechanical transform covering all ~40+ withBusy call sites without a lookup table.",
+    "liveChurchBrainTsx": "withBusy's catch block prepends humanizeBusyKey(key) to the error message (one call site); 3 other setError sites without a busy key get an equivalent static label each; the banner gained a dismiss button calling the pre-existing setError(null)."
+  },
+  "newTests": {
+    "errorContextTestTs": [
+      "strips a trailing UUID and capitalizes the action",
+      "turns hyphens into spaces for a multi-word key with a trailing UUID",
+      "capitalizes a plain hyphenated key with no id suffix",
+      "capitalizes a single-word key unchanged otherwise",
+      "leaves a non-UUID suffix (e.g. a Bible reference) untouched",
+      "returns an empty string unchanged rather than throwing"
+    ],
+    "frontendTestCountBeforePhase": 242,
+    "frontendTestCountAfterPhase": 248,
+    "command": "npm run test -- --run",
+    "result": "248 passed"
+  },
+  "fullRegression": {
+    "typecheck": "npm run typecheck: clean",
+    "lint": "npm run lint: same pre-existing warnings as before this phase - no new ones",
+    "build": "npm run build: succeeds",
+    "rustChanges": "None - zero Rust files touched this phase, confirmed via git status/diff, so no Rust regression re-run was needed."
+  },
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands, zero new events, zero new database schema changes.",
+    "The dismiss button calls the exact same setError(null) already used elsewhere - no new clearing mechanism.",
+    "humanizeBusyKey never changes what fires - it only relabels the same key already computed for setBusy/isBusy, purely for display.",
+    "Every existing setError call site still sets the same underlying error state; only the string content changed."
+  ]
+}
