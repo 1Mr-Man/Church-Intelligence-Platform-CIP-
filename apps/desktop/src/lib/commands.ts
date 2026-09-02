@@ -34,11 +34,14 @@ import type {
   LiveStatus,
   MusicImportReport,
   MusicQueryType,
+  ObsTargetConfig,
   PresentationDisplayState,
   PresentationItem,
   PresentationPreview,
   PresentationScreen,
   ProcessedSegment,
+  ProductionIntegrationConfigInput,
+  ProductionIntegrationStatus,
   RouteMode,
   ScriptureContext,
   Sermon,
@@ -55,6 +58,7 @@ import type {
   SuggestionStatus,
   TimelineEntry,
   TranscriptSegment,
+  VmixTargetConfig,
 } from "../domain";
 import { isTauriRuntime } from "./runtime";
 
@@ -553,6 +557,29 @@ export function removeAcousticReference(songId: string): Promise<void> {
 
 export function rejectMusicFinding(findingId: string): Promise<IntelligenceFinding> {
   return invokeCommand("reject_music_finding", { findingId });
+}
+
+/** Phase 8: replaces the operator's current OBS/vMix push targets outright -
+ * `obs`/`vmix` each `null` disables that integration. Live-editable, no
+ * restart required. */
+export function setProductionIntegrationConfig(
+  config: ProductionIntegrationConfigInput,
+): Promise<void> {
+  return invokeCommand("set_production_integration_config", { config });
+}
+
+export function getProductionIntegrationStatus(): Promise<ProductionIntegrationStatus> {
+  return invokeCommand("get_production_integration_status", undefined);
+}
+
+/** Synchronous connection test - pushes a real, visible test string so the
+ * operator can confirm the right source updated. Does not save the config. */
+export function testObsConnection(target: ObsTargetConfig): Promise<void> {
+  return invokeCommand("test_obs_connection", { target });
+}
+
+export function testVmixConnection(target: VmixTargetConfig): Promise<void> {
+  return invokeCommand("test_vmix_connection", { target });
 }
 
 // --- acoustic music recognition (Phase 2.2) ------------------------------------

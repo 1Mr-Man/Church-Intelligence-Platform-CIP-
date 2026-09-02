@@ -351,6 +351,16 @@ pub struct AppState {
     /// (see `crate::embeddings::SqliteVerseEmbeddingStore`'s own docs for
     /// why this can't simply reuse `db`'s connection).
     pub verse_embedding_store: crate::embeddings::SqliteVerseEmbeddingStore,
+    /// Phase 8: the operator's current OBS/vMix push targets, if any -
+    /// `None` for a target means that integration is disabled. In-memory/
+    /// session-scoped by design (see
+    /// `crate::production::ProductionIntegrationConfig`'s own docs) and
+    /// live-editable via `set_production_integration_config` without a
+    /// restart.
+    pub production_integration_config: Mutex<crate::production::ProductionIntegrationConfig>,
+    /// The most recent push outcome per target, surfaced to the operator
+    /// via `get_production_integration_status`.
+    pub production_integration_status: Mutex<crate::production::ProductionIntegrationStatus>,
 }
 
 impl AppState {
@@ -408,6 +418,12 @@ impl AppState {
             embedding_ready,
             embedding_diagnostics: Mutex::new(embedding_diagnostics),
             verse_embedding_store,
+            production_integration_config: Mutex::new(
+                crate::production::ProductionIntegrationConfig::default(),
+            ),
+            production_integration_status: Mutex::new(
+                crate::production::ProductionIntegrationStatus::default(),
+            ),
         }
     }
 }

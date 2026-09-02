@@ -34,6 +34,7 @@ import {
   getAppConfig,
   getIntelligenceCapabilities,
   getPresentationDisplayState,
+  getProductionIntegrationStatus,
   getServiceIntelligenceState,
   getServiceReport,
   getSermon,
@@ -68,9 +69,12 @@ import {
   searchBible,
   searchMusic,
   setContentEnabled,
+  setProductionIntegrationConfig,
   setSermonTitle,
   startSermon,
   TauriUnavailableError,
+  testObsConnection,
+  testVmixConnection,
 } from "./commands";
 
 const invokeMock = vi.fn();
@@ -458,6 +462,59 @@ describe("commands.ts Tauri IPC guard", () => {
       TauriUnavailableError,
     );
     await expect(removeAcousticReference("s1")).rejects.toBeInstanceOf(TauriUnavailableError);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  // --- Phase 8: Production Integration (OBS/vMix) ---------------------------
+
+  it("setProductionIntegrationConfig forwards the config object as-is", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue(undefined);
+
+    const config = {
+      obs: { host: "127.0.0.1", port: 4455, password: null, sourceName: "verse-text" },
+      vmix: null,
+    };
+    await setProductionIntegrationConfig(config);
+
+    expect(invokeMock).toHaveBeenCalledWith("set_production_integration_config", { config });
+  });
+
+  it("getProductionIntegrationStatus takes no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({ obsLastPush: null, vmixLastPush: null });
+
+    await getProductionIntegrationStatus();
+
+    expect(invokeMock).toHaveBeenCalledWith("get_production_integration_status", undefined);
+  });
+
+  it("testObsConnection/testVmixConnection forward their target objects as-is", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue(undefined);
+
+    const obsTarget = { host: "127.0.0.1", port: 4455, password: null, sourceName: "verse-text" };
+    await testObsConnection(obsTarget);
+    expect(invokeMock).toHaveBeenCalledWith("test_obs_connection", { target: obsTarget });
+
+    const vmixTarget = { host: "127.0.0.1", port: 8088, input: "LowerThird", selectedName: null };
+    await testVmixConnection(vmixTarget);
+    expect(invokeMock).toHaveBeenCalledWith("test_vmix_connection", { target: vmixTarget });
+  });
+
+  it("rejects setProductionIntegrationConfig/getProductionIntegrationStatus/testObsConnection/testVmixConnection outside the Tauri runtime, without calling invoke()", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    await expect(setProductionIntegrationConfig({ obs: null, vmix: null })).rejects.toBeInstanceOf(
+      TauriUnavailableError,
+    );
+    await expect(getProductionIntegrationStatus()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(
+      testObsConnection({ host: "h", port: 1, password: null, sourceName: "s" }),
+    ).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(
+      testVmixConnection({ host: "h", port: 1, input: "i", selectedName: null }),
+    ).rejects.toBeInstanceOf(TauriUnavailableError);
     expect(invokeMock).not.toHaveBeenCalled();
   });
 

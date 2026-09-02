@@ -19,6 +19,7 @@ mod pipeline;
 mod presentation;
 mod presentation_display;
 mod presentation_router;
+mod production;
 mod segmentation;
 mod sermon;
 mod sermon_foundation;
@@ -472,6 +473,10 @@ pub fn run() {
             commands::list_acoustic_enrollments,
             commands::enroll_acoustic_reference,
             commands::remove_acoustic_reference,
+            commands::set_production_integration_config,
+            commands::get_production_integration_status,
+            commands::test_obs_connection,
+            commands::test_vmix_connection,
             commands::generate_verse_embeddings,
             commands::backup_database,
             commands::list_bible_translations,

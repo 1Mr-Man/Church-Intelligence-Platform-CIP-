@@ -1,6 +1,6 @@
 [package]
 name = "cip-integrations-obs"
-description = "OBS Studio integration - placeholder. Explicitly out of scope for Phase 1."
+description = "OBS Studio integration - a real obs-websocket v5 client that pushes the current presentation text into an operator-configured text source."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,3 +8,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tungstenite = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }

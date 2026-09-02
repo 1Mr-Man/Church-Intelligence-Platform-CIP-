@@ -18,6 +18,7 @@ use crate::pipeline::handle_final_transcript;
 use crate::presentation;
 use crate::presentation_display;
 use crate::presentation_router::{self, RouteMode};
+use crate::production;
 use crate::segmentation::TranscriptSegmenter;
 use crate::sermon_foundation;
 use crate::state::{AppState, DEFAULT_TRANSLATION_ID};
@@ -51,7 +52,7 @@ use cip_integrations_bible::{BibleDatasetInput, ImportReport};
 use cip_integrations_music::{ImportReport as MusicImportReport, MusicDatasetInput};
 use cip_presentation_renderer::{render_content, RenderedSlide, SCRIPTURE_DEFAULT_TEMPLATE};
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 use tauri::{AppHandle, Manager, State};
@@ -663,6 +664,148 @@ pub fn remove_acoustic_reference(
     );
 
     Ok(())
+}
+
+// --- Phase 8: Production Integration (OBS/vMix) ----------------------------
+
+/// Wire-format mirror of [`cip_integrations_obs::ObsTarget`] - the crate
+/// type itself carries no `serde` dependency (it has no reason to know
+/// about JSON), so this DTO is the one place that boundary is crossed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObsTargetConfig {
+    pub host: String,
+    pub port: u16,
+    pub password: Option<String>,
+    pub source_name: String,
+}
+
+impl From<ObsTargetConfig> for cip_integrations_obs::ObsTarget {
+    fn from(c: ObsTargetConfig) -> Self {
+        cip_integrations_obs::ObsTarget {
+            host: c.host,
+            port: c.port,
+            password: c.password,
+            source_name: c.source_name,
+        }
+    }
+}
+
+/// Wire-format mirror of [`cip_integrations_vmix::VmixTarget`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VmixTargetConfig {
+    pub host: String,
+    pub port: u16,
+    pub input: String,
+    pub selected_name: Option<String>,
+}
+
+impl From<VmixTargetConfig> for cip_integrations_vmix::VmixTarget {
+    fn from(c: VmixTargetConfig) -> Self {
+        cip_integrations_vmix::VmixTarget {
+            host: c.host,
+            port: c.port,
+            input: c.input,
+            selected_name: c.selected_name,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductionIntegrationConfigInput {
+    pub obs: Option<ObsTargetConfig>,
+    pub vmix: Option<VmixTargetConfig>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushOutcomeDto {
+    pub success: bool,
+    pub error_text: Option<String>,
+    pub at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<production::PushOutcome> for PushOutcomeDto {
+    fn from(o: production::PushOutcome) -> Self {
+        PushOutcomeDto {
+            success: o.success,
+            error_text: o.error_text,
+            at: o.at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductionIntegrationStatusDto {
+    pub obs_last_push: Option<PushOutcomeDto>,
+    pub vmix_last_push: Option<PushOutcomeDto>,
+}
+
+/// Replaces the operator's current OBS/vMix push targets outright -
+/// `obs`/`vmix` each `None` disables that integration. Live-editable, no
+/// restart required (see `production.rs`'s own docs for why this differs
+/// from every restart-required model-provisioning command in this
+/// codebase).
+#[tauri::command]
+pub fn set_production_integration_config(
+    config: ProductionIntegrationConfigInput,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let obs_configured = config.obs.is_some();
+    let vmix_configured = config.vmix.is_some();
+    let new_config = production::ProductionIntegrationConfig {
+        obs: config.obs.map(Into::into),
+        vmix: config.vmix.map(Into::into),
+    };
+    *state
+        .production_integration_config
+        .lock()
+        .expect("production_integration_config mutex poisoned") = new_config;
+    log::info!(
+        target: LogCategory::Network.target(),
+        "production integration config updated: obs={obs_configured} vmix={vmix_configured}"
+    );
+    Ok(())
+}
+
+/// The most recent OBS/vMix push outcome, if any push has been attempted
+/// this session - lets the operator see a failure without waiting for
+/// the next live/replayed verse.
+#[tauri::command]
+pub fn get_production_integration_status(
+    state: State<'_, AppState>,
+) -> ProductionIntegrationStatusDto {
+    let status = state
+        .production_integration_status
+        .lock()
+        .expect("production_integration_status mutex poisoned")
+        .clone();
+    ProductionIntegrationStatusDto {
+        obs_last_push: status.obs_last_push.map(Into::into),
+        vmix_last_push: status.vmix_last_push.map(Into::into),
+    }
+}
+
+/// Synchronous connection test, called directly from an operator's "Test
+/// Connection" button press - pushes a real, visible test string so the
+/// operator can confirm the right source updated, not just that a socket
+/// opened. Does not touch `production_integration_config`; the operator
+/// must still save the config for it to be used by live pushes.
+#[tauri::command]
+pub fn test_obs_connection(target: ObsTargetConfig) -> Result<(), AppError> {
+    production::test_obs_connection(&target.into())
+        .map_err(AppError::InvalidInput)
+        .map_err(log_and_return)
+}
+
+#[tauri::command]
+pub fn test_vmix_connection(target: VmixTargetConfig) -> Result<(), AppError> {
+    production::test_vmix_connection(&target.into())
+        .map_err(AppError::InvalidInput)
+        .map_err(log_and_return)
 }
 
 /// Embeds every not-yet-embedded verse of `DEFAULT_TRANSLATION_ID` using
@@ -3465,6 +3608,10 @@ pub async fn display_presentation(
         "[diagnostic] display_presentation: about to emit PresentationStarted for item {} (checkpoint 14 - lifecycle ordering: window opened -> activation committed -> event emitted now)",
         activated.id
     );
+    // Phase 8: best-effort push to any configured OBS/vMix target, on its
+    // own worker thread - never blocks or delays the broadcast below, and
+    // a push failure never affects CIP's own local display.
+    production::push_to_configured_targets(&app, production::slide_push_text(&slide));
     broadcast_to_live_screens(
         &app,
         &state,
@@ -3526,6 +3673,9 @@ pub(crate) fn clear_active_presentation(
     drop(db);
 
     if let Some(ref item) = stopped {
+        // Phase 8: blank any configured OBS/vMix target too - best-effort,
+        // same discipline as the push in `display_presentation`.
+        production::push_to_configured_targets(app, String::new());
         broadcast_to_live_screens(app, &state, AppEvent::PresentationStopped, item.clone());
     }
     Ok(stopped)

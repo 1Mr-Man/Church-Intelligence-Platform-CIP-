@@ -44,6 +44,8 @@ cip-integrations-audio.workspace = true
 cip-core-music.workspace = true
 cip-integrations-music.workspace = true
 cip-integrations-music-acoustic.workspace = true
+cip-integrations-obs.workspace = true
+cip-integrations-vmix.workspace = true
 cip-ai-speech.workspace = true
 cip-ai-embeddings.workspace = true
 

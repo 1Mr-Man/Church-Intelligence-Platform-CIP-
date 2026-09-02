@@ -55,6 +55,10 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 log = "0.4"
 regex = "1"
 cpal = "0.15"
+tungstenite = "0.24"
+ureq = { version = "2", default-features = false }
+sha2 = "0.10"
+base64 = "0.22"
 
 cip-core-bible = { path = "core/bible" }
 cip-core-content = { path = "core/content" }

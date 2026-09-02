@@ -7,6 +7,7 @@ export * from "./intelligence";
 export * from "./live";
 export * from "./music";
 export * from "./presentation";
+export * from "./production";
 export * from "./search";
 export * from "./sermon";
 export * from "./service";

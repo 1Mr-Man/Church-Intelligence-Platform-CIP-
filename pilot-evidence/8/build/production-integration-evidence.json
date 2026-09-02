@@ -1,0 +1,64 @@
+{
+  "phase": "8",
+  "summary": "Environment A evidence for Production Integration (OBS/vMix) - a real obs-websocket v5 client and a real vMix HTTP API client, each pushing CIP's currently-displayed presentation text into an operator-configured text source/title, wired as a best-effort sink alongside the existing local display broadcast.",
+  "auditFinding": "docs/phase-4-master-plan-gap-audit.md and docs/phase-7-audit.md both graded OBS/vMix/livestream integration NOT STARTED - integrations/obs and integrations/vmix were 6-line placeholder crates. See docs/phase-8-audit.md.",
+  "designChoice": "Three real decisions, all resolved in the audit: (1) scope is text/title push only, never scene switching or recording/streaming control; (2) a fresh connection per push, not a persistent session, which also makes config live-editable without a restart; (3) best-effort on a dedicated worker thread, never fatal to CIP's own local display.",
+  "protocolChoice": "obs-websocket v5 (real Hello/Identify/Identified handshake, SHA256 challenge/response auth, SetInputSettings request) over plain ws://; vMix's real HTTP SetText API over plain http://. Both local-network-only by design, so no TLS backend is needed or pulled in.",
+  "newCode": {
+    "obsCrate": "integrations/obs/src/lib.rs: ObsTarget/ObsError, push_text (real handshake + auth + SetInputSettings request/response).",
+    "vmixCrate": "integrations/vmix/src/lib.rs: VmixTarget/VmixError, push_text (real SetText GET request).",
+    "productionRs": "apps/desktop/src-tauri/src/production.rs: ProductionIntegrationConfig/ProductionIntegrationStatus (in AppState, both in-memory Mutex, default disabled), push_to_configured_targets (best-effort, worker-thread, no-op when nothing configured), slide_push_text, test_obs_connection/test_vmix_connection.",
+    "commandsRs": "apps/desktop/src-tauri/src/commands.rs: set_production_integration_config, get_production_integration_status, test_obs_connection, test_vmix_connection - wired into display_presentation and clear_active_presentation, the same two call sites broadcast_to_live_screens already uses.",
+    "frontend": "domain/production.ts; commands.ts wrappers; new components/workspace/ProductionIntegrationPanel.tsx, wired into LiveChurchBrain.tsx only."
+  },
+  "newTests": {
+    "obsCrateTestCount": 6,
+    "obsCrateTests": [
+      "push_text succeeds against a real handshake with no password",
+      "push_text succeeds against a real handshake with a correct password",
+      "push_text reports auth required when OBS wants a password and none is configured",
+      "push_text surfaces a real OBS request failure honestly",
+      "push_text reports a clear error when nothing is listening",
+      "compute_auth_response matches the documented obs-websocket v5 algorithm"
+    ],
+    "vmixCrateTestCount": 4,
+    "vmixCrateTests": [
+      "push_text succeeds against a real HTTP 200 and sends the right query string",
+      "push_text includes SelectedName when configured",
+      "push_text surfaces a non-2xx status honestly",
+      "push_text reports a clear error when nothing is listening"
+    ],
+    "testingBoundaryNote": "Both crates are proven against real, protocol-correct in-process servers (a real tungstenite WebSocket handshake for OBS; a hand-rolled HTTP/1.1 server for vMix), not mock traits. production.rs's own worker-thread dispatch is thin glue over these already-tested clients and follows this codebase's established no-redundant-command-level-tests discipline (see commands.rs's test-module header, and Phase 7.3's identical reasoning).",
+    "frontendTestCountBeforePhase": 261,
+    "frontendTestCountAfterPhase": 266,
+    "frontendNewTests": [
+      "setProductionIntegrationConfig forwards the config object as-is",
+      "getProductionIntegrationStatus takes no arguments",
+      "testObsConnection/testVmixConnection forward their target objects as-is",
+      "rejects setProductionIntegrationConfig/getProductionIntegrationStatus/testObsConnection/testVmixConnection outside the Tauri runtime, without calling invoke()"
+    ],
+    "command": "cargo test -p cip-integrations-obs -p cip-integrations-vmix && npm run test -- --run",
+    "result": "6 passed (obs), 4 passed (vmix), 266 passed (frontend, 5 new)"
+  },
+  "dependencyAudit": {
+    "newWorkspaceDependencies": ["tungstenite 0.24", "ureq 2 (default-features = false)", "sha2 0.10", "base64 0.22"],
+    "tlsBackendPresent": false,
+    "verificationMethod": "cargo tree -p cip-integrations-obs and cargo tree -p cip-integrations-vmix, grepped for tls/ring/rustls - no matches. ureq's default tls/gzip features were explicitly disabled in the workspace Cargo.toml after an initial build showed they pulled in rustls/ring/webpki-roots; re-verified clean after disabling.",
+    "rationale": "OBS/vMix are local-network-only by design (never wss:// or https://), so no TLS backend is needed - matches this project's established preference for pure-Rust dependencies wherever the actual protocol allows it (the same reasoning Phase 7.1 used for rustfft/hound over any C-toolchain alternative)."
+  },
+  "fullRegression": {
+    "fmt": "cargo fmt --all -- --check: clean (after one cargo fmt --all pass)",
+    "clippy": "cargo clippy --workspace --all-targets -- -D warnings: clean, both feature configs (default and --features whisper)",
+    "check": "cargo check --workspace: clean, both feature configs",
+    "test": "cargo test --workspace: all crates passing, both feature configs, zero regressions",
+    "frontend": "npm run typecheck/lint/test/build: all clean - same 5 pre-existing lint warnings as before this phase, no new ones"
+  },
+  "architecturalSafetyNotes": [
+    "Exactly four new Tauri commands, zero new events, zero new database schema.",
+    "core/presentation and core/music (domain contract crates) are untouched - this phase adds a new sink, not a new domain concept.",
+    "broadcast_to_live_screens and every existing DisplayScreen/RouteMode code path are byte-identical to before this phase - the production push is purely additive alongside the existing broadcast, never a replacement.",
+    "production_integration_config/production_integration_status are in-memory only, defaulting to disabled - a build with nothing configured behaves identically to before this phase.",
+    "File/config-write ordering: a push failure is caught, logged, and recorded in status - never propagated as an error from display_presentation/clear_presentation_display, and never blocks or delays those commands' own return."
+  ],
+  "honestLimitation": "Text/title push only - no scene switching, no source visibility toggling, no recording/streaming control, no NDI output. Config does not persist across restarts. vMix's own SetText API returns a bare HTTP 200 regardless of whether the named input/field actually exists - a property of vMix's own API, not a gap in this client. Neither OBS nor vMix is installed in this container, so neither client has ever been exercised against the real applications."
+}

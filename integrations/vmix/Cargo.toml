@@ -1,6 +1,6 @@
 [package]
 name = "cip-integrations-vmix"
-description = "vMix integration - placeholder. Explicitly out of scope for Phase 1."
+description = "vMix integration - a real vMix HTTP API client that pushes the current presentation text into an operator-configured title field."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,3 +8,5 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+thiserror = { workspace = true }
+ureq = { workspace = true }
