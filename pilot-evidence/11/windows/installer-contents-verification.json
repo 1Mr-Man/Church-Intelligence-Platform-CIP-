@@ -1,0 +1,86 @@
+{
+  "phase": "11",
+  "summary": "Environment A direct-binary proof that Phase 11 (Local Congregant Companion View) compiled into the real Windows NSIS installer: the companion HTTP server, its three new Tauri commands, and its served JSON/HTML content are all present in the shipped exe, with zero regression against every prior phase's symbol tripwires.",
+  "gitCommit": "0df8f95829d3493c011b0660779805e7ec1514ea",
+  "gitCommitShort": "0df8f95",
+  "buildScript": "scripts/build-windows-whisper.sh",
+  "buildLog": "/tmp/phase11-build.log (not committed - ephemeral build log)",
+  "installer": {
+    "path": "release/windows/Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "fileSizeBytes": 14333864,
+    "sha256": "8cdc879881f859f237c781b2ce386b5994162bb7a448584526764f515a0a9e92",
+    "builtAtUtc": "2026-09-02T19:17:28Z",
+    "target": "x86_64-pc-windows-gnu",
+    "ggmlTwoPassFixApplied": true,
+    "ggmlTwoPassFixNote": "First build attempt failed as expected on the known whisper-rs-sys ggml lib-name defect; the build script applied its established fix and the retry succeeded - the same harmless, unrelated build-toolchain quirk documented and handled identically in every prior whisper-enabled Windows rebuild this project has done.",
+    "pnpmBuildSucceeded": true,
+    "nsisPackagingSucceeded": true,
+    "runtimeDllsConfirmedByBuildScript": [
+      "libstdc++-6.dll",
+      "libgcc_s_seh-1.dll",
+      "libwinpthread-1.dll"
+    ]
+  },
+  "extraction": {
+    "method": "7z x",
+    "exitCode": 0,
+    "confirmedPresent": [
+      "cip-desktop.exe",
+      "WebView2Loader.dll",
+      "libstdc++-6.dll",
+      "libgcc_s_seh-1.dll",
+      "libwinpthread-1.dll",
+      "uninstall.exe"
+    ]
+  },
+  "symbolRegressionCheck": {
+    "method": "x86_64-w64-mingw32-strings cip-desktop.exe | grep -c <symbol>, run against the extracted installer's main executable",
+    "tripwiresFromPriorPhases": {
+      "rejection_echo_count": 5,
+      "find_rejected_suggestion_for_reference": 1,
+      "record_rejection_echo": 1,
+      "silentWindowsSkipped": 1,
+      "audioErrorText": 1,
+      "speechErrorText": 1,
+      "enroll_acoustic_reference": 2,
+      "list_acoustic_enrollments": 2,
+      "remove_acoustic_reference": 2,
+      "whisper_full_with_state": 96
+    },
+    "tripwiresResult": "All 10 counts identical to the Phase 10 baseline - zero regression. whisper_full_with_state stable at 96 for a 5th consecutive rebuild (Phase 7.3 through Phase 11).",
+    "phase8Phase9Phase10SymbolCheck": {
+      "test_obs_connection": 3,
+      "set_production_integration_config": 2,
+      "ai_processing_allowed": 5,
+      "LicensingStatus": 6,
+      "ensure_admin": 3,
+      "create_operator_account": 3,
+      "login": 9,
+      "logout": 2,
+      "list_operator_accounts": 2,
+      "operator_accounts": 9,
+      "pin_hash": 4
+    },
+    "phase8Phase9Phase10Note": "Every prior-phase symbol checked (Production Integration, Bible Translation Registry v2, Church/User Roles & Permissions) remains present and unregressed."
+  },
+  "newSymbolsThisPhase": {
+    "enable_congregant_companion": 2,
+    "disable_congregant_companion": 2,
+    "get_congregant_companion_status": 2,
+    "congregant": 8,
+    "companion": 70,
+    "bodyLines": 4,
+    "updatedAt": 1,
+    "companion.rs (source path)": 1,
+    "Nothing is currently being displayed (served HTML text)": 1,
+    "saved only on your phone (notes disclosure text)": 1
+  },
+  "newSymbolsNote": "Direct strings inspection shows the exact literal command names in the Tauri invoke_handler registration list (...list_operator_accounts...enable_congregant_companion...disable_congregant_companion...get_congregant_companion_status...get_pilot_diagnostics...), the CompanionSnapshot/status JSON field names (active, heading, bodyLines, footer, updatedAt), both mutex-poisoned panic messages (companion_snapshot mutex poisoned, companion_server mutex poisoned) carrying the source path apps/desktop/src-tauri/src/companion.rs, the UDP routing-table-trick addresses (0.0.0.0:0, 8.8.8.8:80) used by detect_local_ip, the operator-facing log lines (congregant companion server enabled/disabled on port), and the served page's own localStorage key (cip-companion-notes) and notes-disclosure copy (saved only on your phone) - comprehensive, unambiguous direct proof this phase's server, commands, and served content all compiled into and shipped inside the real Windows executable. CompanionStatusDto (the Rust type name itself, never embedded as a string literal) and the literal port number 49876 (a numeric immediate, not ASCII text, so invisible to `strings`) both show 0 occurrences - the same 'not found as a string, not evidence of absence' pattern already documented for small helper names and constants in every prior phase's own installer-contents-verification.json.",
+  "frontendTextSearchLimitation": "The frontend bundle (dist/assets/index-*.js) is bundled into the Tauri resources directory, not searchable as plain strings inside cip-desktop.exe itself in the same way Rust symbols are - CongregantCompanionPanel.tsx's own UI copy was not independently string-searched in this phase, consistent with every prior phase's installer-contents-verification methodology in this project. This phase's frontend correctness rests on npm run typecheck's success, the fresh Vite build hash, and the full 280/280 frontend test pass.",
+  "architecturalSafetyNotes": [
+    "3 new Tauri commands, zero new events, zero new migrations - no persistence at all.",
+    "The two companion::update_snapshot call sites (visible in the strings output immediately beside test_obs_connection/production-related strings) sit alongside production::push_to_configured_targets's own existing calls, unchanged.",
+    "generate_verse_embeddings, ensure_admin, and every Phase 8/9/10 command remain present and unregressed, confirming this phase's additions did not disturb any prior gate."
+  ],
+  "environmentCStatus": "Not yet performed. A real operator on real Windows hardware enabling the companion server and a real phone on the same LAN opening the served page and confirming it tracks Stage live (displaying and clearing items) is required to close Environment C for this phase, exactly as for every prior phase's physicalHardwareStatement discipline."
+}
