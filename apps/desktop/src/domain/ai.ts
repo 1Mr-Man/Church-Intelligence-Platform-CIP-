@@ -69,6 +69,16 @@ export interface Suggestion {
    * never a reason a second suggestion was created. `0` for an explicit
    * citation or any suggestion never independently redetected. */
   confirmationCount: number;
+  /** How many times this suggestion's own reference was independently
+   * redetected (same paraphrase/semantic category) within the dedup
+   * window *after* an operator explicitly `rejected` it (Phase 5.4,
+   * "wrong-verse feedback loop") - the repeat is still silently
+   * suppressed exactly as before (a rejected suggestion is never
+   * resurrected to pending), but this count makes that already-existing
+   * suppression observable instead of leaving no trace at all. `0` for
+   * any suggestion never rejected, or rejected but never redetected
+   * again. */
+  rejectionEchoCount: number;
 }
 
 /**

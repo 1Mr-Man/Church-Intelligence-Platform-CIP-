@@ -34,6 +34,7 @@ describe("canonical operator workflow", () => {
           transcriptSegmentId: "seg-3",
           sourceText: "and we know that all things work together for good",
           confirmationCount: 0,
+          rejectionEchoCount: 0,
         },
       ],
       musicFindings: [

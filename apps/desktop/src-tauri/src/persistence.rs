@@ -364,8 +364,8 @@ pub fn persist_suggestion(conn: &Connection, suggestion: &Suggestion) -> Result<
     conn.execute(
         "INSERT INTO ai_suggestions
             (id, service_id, kind, payload, status, confidence_score, confidence_level, created_at,
-             transcript_segment_id, source_text, confirmation_count)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             transcript_segment_id, source_text, confirmation_count, rejection_echo_count)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             suggestion.id.to_string(),
             suggestion.service_id.to_string(),
@@ -378,6 +378,7 @@ pub fn persist_suggestion(conn: &Connection, suggestion: &Suggestion) -> Result<
             suggestion.transcript_segment_id.map(|id| id.to_string()),
             suggestion.source_text,
             suggestion.confirmation_count,
+            suggestion.rejection_echo_count,
         ],
     )?;
     Ok(())
@@ -488,6 +489,7 @@ fn row_to_suggestion(
     transcript_segment_id: Option<String>,
     source_text: Option<String>,
     confirmation_count: i64,
+    rejection_echo_count: i64,
 ) -> Result<Suggestion, PersistError> {
     Ok(Suggestion {
         id: Uuid::parse_str(&id).map_err(|_| PersistError::NotFound(id.clone()))?,
@@ -506,11 +508,12 @@ fn row_to_suggestion(
         transcript_segment_id: transcript_segment_id.and_then(|id| Uuid::parse_str(&id).ok()),
         source_text,
         confirmation_count: confirmation_count.max(0) as u32,
+        rejection_echo_count: rejection_echo_count.max(0) as u32,
     })
 }
 
 const SUGGESTION_COLUMNS: &str = "id, service_id, payload, status, confidence_score, created_at, \
-     transcript_segment_id, source_text, confirmation_count";
+     transcript_segment_id, source_text, confirmation_count, rejection_echo_count";
 
 #[allow(clippy::type_complexity)]
 fn suggestion_row(
@@ -525,6 +528,7 @@ fn suggestion_row(
     Option<String>,
     Option<String>,
     i64,
+    i64,
 )> {
     Ok((
         row.get(0)?,
@@ -536,6 +540,7 @@ fn suggestion_row(
         row.get(6)?,
         row.get(7)?,
         row.get(8)?,
+        row.get(9)?,
     ))
 }
 
@@ -559,7 +564,18 @@ pub fn list_suggestions(
 
     rows.into_iter()
         .map(
-            |(id, service_id, payload, status, score, created_at, seg_id, src, confirm_count)| {
+            |(
+                id,
+                service_id,
+                payload,
+                status,
+                score,
+                created_at,
+                seg_id,
+                src,
+                confirm_count,
+                reject_echo_count,
+            )| {
                 row_to_suggestion(
                     id,
                     service_id,
@@ -570,6 +586,7 @@ pub fn list_suggestions(
                     seg_id,
                     src,
                     confirm_count,
+                    reject_echo_count,
                 )
             },
         )
@@ -585,7 +602,18 @@ pub fn get_suggestion(conn: &Connection, suggestion_id: Uuid) -> Result<Suggesti
     .optional()?
     .ok_or_else(|| PersistError::NotFound(suggestion_id.to_string()))
     .and_then(
-        |(id, service_id, payload, status, score, created_at, seg_id, src, confirm_count)| {
+        |(
+            id,
+            service_id,
+            payload,
+            status,
+            score,
+            created_at,
+            seg_id,
+            src,
+            confirm_count,
+            reject_echo_count,
+        )| {
             row_to_suggestion(
                 id,
                 service_id,
@@ -596,6 +624,7 @@ pub fn get_suggestion(conn: &Connection, suggestion_id: Uuid) -> Result<Suggesti
                 seg_id,
                 src,
                 confirm_count,
+                reject_echo_count,
             )
         },
     )
@@ -638,7 +667,18 @@ pub fn update_suggestion_status(
     .optional()?
     .ok_or_else(|| PersistError::NotFound(suggestion_id.to_string()))
     .and_then(
-        |(id, service_id, payload, status, score, created_at, seg_id, src, confirm_count)| {
+        |(
+            id,
+            service_id,
+            payload,
+            status,
+            score,
+            created_at,
+            seg_id,
+            src,
+            confirm_count,
+            reject_echo_count,
+        )| {
             row_to_suggestion(
                 id,
                 service_id,
@@ -649,6 +689,7 @@ pub fn update_suggestion_status(
                 seg_id,
                 src,
                 confirm_count,
+                reject_echo_count,
             )
         },
     )
@@ -674,6 +715,50 @@ pub fn find_pending_suggestion_for_reference(
         SuggestionKind::Scripture { reference } => reference == reference_display,
         _ => false,
     }))
+}
+
+/// The most recently created `Rejected` suggestion for `service_id` whose
+/// `SuggestionKind::Scripture { reference }` exactly matches
+/// `reference_display`, if any - the Phase 5.4 ("wrong-verse feedback
+/// loop") target `pipeline::handle_final_transcript` echoes when a
+/// `Paraphrase`/`Semantic` detection's reference recurs within the dedup
+/// window and no `Pending` suggestion exists to confirm instead. Only
+/// `Rejected` is considered: an `Approved`/`Edited` suggestion's repeat is
+/// left exactly as silently absorbed as it already was (the operator
+/// already has what they wanted on screen; no feedback signal is missing
+/// there). Reuses [`list_suggestions`] (already ordered newest-first) for
+/// the same reason `find_pending_suggestion_for_reference` does.
+pub fn find_rejected_suggestion_for_reference(
+    conn: &Connection,
+    service_id: Uuid,
+    reference_display: &str,
+) -> Result<Option<Suggestion>, PersistError> {
+    let rejected = list_suggestions(conn, service_id, Some(SuggestionStatus::Rejected))?;
+    Ok(rejected.into_iter().find(|s| match &s.kind {
+        SuggestionKind::Scripture { reference } => reference == reference_display,
+        _ => false,
+    }))
+}
+
+/// Records that a `Rejected` suggestion's own reference was independently
+/// redetected again (Phase 5.4, "wrong-verse feedback loop") - the repeat
+/// itself is still silently suppressed by the caller's existing dedup
+/// check exactly as before; this only makes that already-existing
+/// suppression observable. Never changes `status`, `confidence`, or `kind`,
+/// since a rejected suggestion is a decided suggestion and this must never
+/// be the mechanism that quietly resurrects one. `rejection_echo_count` is
+/// an honest, unconditionally incrementing count of how many times this
+/// happened, mirroring `confirm_suggestion`'s own `confirmation_count`
+/// discipline.
+pub fn record_rejection_echo(
+    conn: &Connection,
+    suggestion_id: Uuid,
+) -> Result<Suggestion, PersistError> {
+    conn.execute(
+        "UPDATE ai_suggestions SET rejection_echo_count = rejection_echo_count + 1 WHERE id = ?1",
+        params![suggestion_id.to_string()],
+    )?;
+    get_suggestion(conn, suggestion_id)
 }
 
 /// Boosts a still-`Pending` suggestion's confidence because its own
@@ -2445,6 +2530,74 @@ mod tests {
         assert!(
             (confirmed.confidence.score - 0.8).abs() < 0.001,
             "confirm_suggestion must never lower a suggestion's score"
+        );
+    }
+
+    #[test]
+    fn find_rejected_suggestion_for_reference_finds_the_matching_rejected_suggestion() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let suggestion = sample_paraphrase_suggestion(session.id, 0.8);
+        persist_suggestion(&conn, &suggestion).unwrap();
+        update_suggestion_status(&conn, suggestion.id, SuggestionStatus::Rejected, None).unwrap();
+
+        let found = find_rejected_suggestion_for_reference(&conn, session.id, "ROM 8:28")
+            .unwrap()
+            .expect("a rejected suggestion for this reference exists");
+        assert_eq!(found.id, suggestion.id);
+    }
+
+    #[test]
+    fn find_rejected_suggestion_for_reference_ignores_pending_and_approved() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let pending = sample_paraphrase_suggestion(session.id, 0.8);
+        persist_suggestion(&conn, &pending).unwrap();
+
+        let approved = sample_paraphrase_suggestion(session.id, 0.8);
+        persist_suggestion(&conn, &approved).unwrap();
+        update_suggestion_status(&conn, approved.id, SuggestionStatus::Approved, None).unwrap();
+
+        let found = find_rejected_suggestion_for_reference(&conn, session.id, "ROM 8:28").unwrap();
+        assert!(
+            found.is_none(),
+            "a Pending or Approved suggestion must never be a rejection-echo target"
+        );
+    }
+
+    #[test]
+    fn find_rejected_suggestion_for_reference_returns_none_without_a_match() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+
+        let found = find_rejected_suggestion_for_reference(&conn, session.id, "ROM 8:28").unwrap();
+        assert!(found.is_none());
+    }
+
+    #[test]
+    fn record_rejection_echo_increments_the_count_without_touching_status_or_score() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let suggestion = sample_paraphrase_suggestion(session.id, 0.8);
+        persist_suggestion(&conn, &suggestion).unwrap();
+        update_suggestion_status(&conn, suggestion.id, SuggestionStatus::Rejected, None).unwrap();
+
+        let echoed = record_rejection_echo(&conn, suggestion.id).unwrap();
+        assert_eq!(echoed.rejection_echo_count, 1);
+        assert_eq!(
+            echoed.status,
+            SuggestionStatus::Rejected,
+            "recording an echo must never resurrect a decided suggestion"
+        );
+        assert!(
+            (echoed.confidence.score - 0.8).abs() < 0.001,
+            "recording an echo must never change the suggestion's score"
+        );
+
+        let second = record_rejection_echo(&conn, suggestion.id).unwrap();
+        assert_eq!(
+            second.rejection_echo_count, 2,
+            "rejection_echo_count is an honest, unconditionally incrementing count"
         );
     }
 

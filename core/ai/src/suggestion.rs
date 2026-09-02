@@ -64,6 +64,18 @@ pub struct Suggestion {
     /// ever increments it, since `core` has no notion of "redetected" -
     /// that requires already-persisted history this crate doesn't see.
     pub confirmation_count: u32,
+    /// How many times this suggestion's reference was independently
+    /// redetected (same `Paraphrase`/`Semantic` category) within the live
+    /// pipeline's suggestion-dedup window *after* an operator explicitly
+    /// `Rejected` it (Phase 5.4, "wrong-verse feedback loop") - the repeat
+    /// is still silently suppressed exactly as before (a rejected
+    /// suggestion is never resurrected to `Pending`), but this count makes
+    /// that already-existing suppression observable instead of leaving no
+    /// trace at all. Always `0` at construction; only the desktop-layer
+    /// pipeline (`apps/desktop/src-tauri/src/persistence.rs::record_rejection_echo`)
+    /// ever increments it, for exactly the same reason `confirmation_count`
+    /// is desktop-layer-only - `core` has no notion of "redetected."
+    pub rejection_echo_count: u32,
 }
 
 impl Suggestion {
@@ -78,6 +90,7 @@ impl Suggestion {
             transcript_segment_id: None,
             source_text: None,
             confirmation_count: 0,
+            rejection_echo_count: 0,
         }
     }
 
@@ -125,5 +138,17 @@ mod tests {
             ConfidenceResult::new(0.8, ConfidenceSource::Heuristic, None),
         );
         assert_eq!(suggestion.confirmation_count, 0);
+    }
+
+    #[test]
+    fn new_suggestions_start_with_zero_rejection_echoes() {
+        let suggestion = Suggestion::new(
+            Uuid::new_v4(),
+            SuggestionKind::Scripture {
+                reference: "ROM 8:28".into(),
+            },
+            ConfidenceResult::new(0.8, ConfidenceSource::Heuristic, None),
+        );
+        assert_eq!(suggestion.rejection_echo_count, 0);
     }
 }

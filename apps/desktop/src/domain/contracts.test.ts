@@ -91,6 +91,7 @@ describe("domain contracts", () => {
       transcriptSegmentId: null,
       sourceText: null,
       confirmationCount: 0,
+      rejectionEchoCount: 0,
     };
     expect(suggestion.status).toBe("pending");
   });
@@ -170,6 +171,7 @@ describe("domain contracts", () => {
       transcriptSegmentId: null,
       sourceText: null,
       confirmationCount: 0,
+      rejectionEchoCount: 0,
     };
     const processed: ProcessedSegment = {
       serviceId: suggestion.serviceId,

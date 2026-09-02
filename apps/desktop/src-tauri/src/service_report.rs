@@ -45,6 +45,13 @@ pub struct SuggestionStats {
     pub approved: u64,
     pub edited: u64,
     pub rejected: u64,
+    /// Sum of every suggestion's `rejection_echo_count` (Phase 5.4,
+    /// "wrong-verse feedback loop") - how many times, across this whole
+    /// service, a `Rejected` suggestion's own reference was independently
+    /// redetected again and silently suppressed rather than resurrected.
+    /// A nonzero value means the operator's Reject decisions genuinely
+    /// mattered more than once; it is never a count of suggestions itself.
+    pub rejection_echoes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -133,6 +140,7 @@ pub fn build_service_report(
             SuggestionStatus::Edited => suggestion_stats.edited += 1,
             SuggestionStatus::Rejected => suggestion_stats.rejected += 1,
         }
+        suggestion_stats.rejection_echoes += u64::from(suggestion.rejection_echo_count);
     }
 
     let detection_kind_counts = persistence::scripture_detection_kind_counts(conn, service_id)?
@@ -268,6 +276,44 @@ mod tests {
         assert_eq!(report.suggestion_stats.rejected, 2);
         assert_eq!(report.suggestion_stats.pending, 1);
         assert_eq!(report.suggestion_stats.edited, 0);
+        assert_eq!(
+            report.suggestion_stats.rejection_echoes, 0,
+            "no rejection echoes were ever recorded for these suggestions"
+        );
+    }
+
+    #[test]
+    fn report_sums_rejection_echoes_across_every_suggestion() {
+        let conn = open_test_db();
+        let service = persist_test_service(&conn);
+        let rejected_a = sample_suggestion(service.id, SuggestionStatus::Rejected);
+        persistence::persist_suggestion(&conn, &rejected_a).unwrap();
+        persistence::record_rejection_echo(&conn, rejected_a.id).unwrap();
+        persistence::record_rejection_echo(&conn, rejected_a.id).unwrap();
+
+        let rejected_b = sample_suggestion(service.id, SuggestionStatus::Rejected);
+        persistence::persist_suggestion(&conn, &rejected_b).unwrap();
+        persistence::record_rejection_echo(&conn, rejected_b.id).unwrap();
+
+        persistence::persist_suggestion(
+            &conn,
+            &sample_suggestion(service.id, SuggestionStatus::Pending),
+        )
+        .unwrap();
+
+        let report = build_service_report(
+            &conn,
+            service.id,
+            &SpeechDiagnostics::default(),
+            &EmbeddingDiagnostics::default(),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(
+            report.suggestion_stats.rejection_echoes, 3,
+            "2 echoes on rejected_a + 1 on rejected_b, summed across every suggestion"
+        );
     }
 
     #[test]

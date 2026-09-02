@@ -23,6 +23,7 @@ function suggestion(overrides: Partial<Suggestion> = {}): Suggestion {
     transcriptSegmentId: "seg-1",
     sourceText: "for we know that all things work together for good",
     confirmationCount: 0,
+    rejectionEchoCount: 0,
     ...overrides,
   };
 }

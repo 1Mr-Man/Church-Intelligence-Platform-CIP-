@@ -1,0 +1,54 @@
+{
+  "phase": "5.4",
+  "summary": "Environment A build/test evidence for the Wrong-Verse Feedback Loop: a rejected Paraphrase/Semantic suggestion's own reference, when independently redetected again within the existing dedup window, now increments an observable rejection_echo_count instead of vanishing with zero trace.",
+  "designChoice": "The operator was asked to choose between (1) a silent echo counter - keep suppressing the repeat exactly as today, but record that it happened - and (2) re-surfacing a new, dampened suggestion each time. The operator chose (1), with an explicit flow: detection -> same reference+category -> was it rejected within the window? -> silently suppress + increment rejection echo counter + record diagnostic information. This evidence file covers the implementation of exactly that flow.",
+  "auditFinding": "Before this phase, reject_suggestion only flipped SuggestionStatus to Rejected with zero downstream effect anywhere in the codebase. Because the dedup window checks scripture_detections (not suggestion status) and Phase 5.2's confirm_suggestion path only looks up Pending suggestions, a same-category repeat of an already-rejected reference within the 60s window was silently dropped with no trace at all - not unique to Rejected (Approved/Edited have the same gap), but the one case that actually matters since it discards the operator's explicit correction with no record.",
+  "newCode": {
+    "migration": "database/migrations/0015_suggestion_rejection_echo.sql: ai_suggestions.rejection_echo_count INTEGER NOT NULL DEFAULT 0.",
+    "coreAiSuggestion": "core/ai/src/suggestion.rs: Suggestion.rejection_echo_count: u32, always 0 at construction, mirroring confirmation_count's own discipline.",
+    "persistence": "apps/desktop/src-tauri/src/persistence.rs: find_rejected_suggestion_for_reference (mirrors find_pending_suggestion_for_reference, filtered to Rejected instead of Pending) and record_rejection_echo (increments rejection_echo_count unconditionally, never touches status/confidence/kind). persist_suggestion/get_suggestion/list_suggestions/update_suggestion_status extended for the new column.",
+    "pipeline": "apps/desktop/src-tauri/src/pipeline.rs: handle_final_transcript_inner's dedup-suppression branch, when no Pending suggestion exists for a Paraphrase/Semantic repeat, now falls back to a rejection-echo lookup and increments the echo count on the most recent Rejected suggestion for that reference. Dedup's own suppression (the continue) is completely unchanged.",
+    "serviceReport": "apps/desktop/src-tauri/src/service_report.rs: SuggestionStats gained rejection_echoes: u64 (sum of every suggestion's rejection_echo_count for the service) - the 'diagnostic information' step of the operator's chosen flow, surfaced through the existing Phase 5.1 Service Report aggregation.",
+    "frontend": "apps/desktop/src/domain/ai.ts Suggestion.rejectionEchoCount; apps/desktop/src/domain/service.ts SuggestionStats.rejectionEchoes; apps/desktop/src/components/library/HistoryView.tsx shows a rejection-echoes clause in the Service Report panel and an 'echoed ×N' suffix next to a rejected suggestion's status in the Scripture & Findings list, both only when nonzero."
+  },
+  "newTests": {
+    "persistenceRs": [
+      "find_rejected_suggestion_for_reference_finds_the_matching_rejected_suggestion",
+      "find_rejected_suggestion_for_reference_ignores_pending_and_approved",
+      "find_rejected_suggestion_for_reference_returns_none_without_a_match",
+      "record_rejection_echo_increments_the_count_without_touching_status_or_score"
+    ],
+    "pipelineRs": [
+      "a_repeated_paraphrase_after_rejection_echoes_instead_of_vanishing_silently"
+    ],
+    "serviceReportRs": [
+      "report_sums_rejection_echoes_across_every_suggestion"
+    ],
+    "coreAiSuggestion": [
+      "new_suggestions_start_with_zero_rejection_echoes"
+    ],
+    "cipDesktopTestCountBeforePhase": 307,
+    "cipDesktopTestCountAfterPhase": 313,
+    "command": "cargo test -p cip-desktop --features whisper,semantic-search -- --test-threads=1",
+    "result": "313 passed; 0 failed"
+  },
+  "fullRegression": {
+    "fmtCheck": "clean (one rustfmt auto-wrap applied to persistence.rs's 10-arity tuple-destructuring closures, then verified clean)",
+    "clippyDefaultFeatures": "cargo clippy --workspace --all-targets -- -D warnings: clean, 0 warnings (after fixing a doc-lazy-continuation lint in record_rejection_echo's doc comment)",
+    "clippyWhisperSemanticSearch": "cargo clippy --workspace --all-targets --features whisper,semantic-search -- -D warnings: clean, 0 warnings",
+    "testWorkspaceDefaultFeatures": "cargo test --workspace -- --test-threads=1: every crate green, 0 failed across all suites",
+    "testWorkspaceWhisperSemanticSearch": "cargo test --workspace --features whisper,semantic-search -- --test-threads=1: every crate green, 0 failed across all suites",
+    "singleThreadedRationale": "Routes around the pre-existing, unrelated config::tests::whisper_model_path_honors_the_env_override test-parallelism flake, first documented in Phase 5.1 and unrelated to this phase's changes."
+  },
+  "frontendRegression": {
+    "typecheck": "npm run typecheck: clean",
+    "lint": "npm run lint: only the 4 pre-existing set-state-in-effect/only-export-components warnings present before this phase - no new warnings",
+    "test": "npm run test -- --run: 220/220 passing (unchanged - fixture updates and two display conditionals with no dedicated new test)",
+    "build": "npm run build: succeeds"
+  },
+  "architecturalSafetyNotes": [
+    "Dedup's own suppression behavior is completely unchanged - a Paraphrase/Semantic repeat after a rejection is still silently absorbed, never creating a second suggestion.",
+    "record_rejection_echo never changes a suggestion's status, confidence, or kind - verified by a dedicated test asserting the score and status are byte-identical before and after recording an echo.",
+    "Approved/Edited suggestions are unaffected - the rejection-echo lookup only fires when the most recent suggestion for a reference is specifically Rejected."
+  ]
+}

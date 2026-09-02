@@ -123,6 +123,11 @@ export interface SuggestionStats {
   approved: number;
   edited: number;
   rejected: number;
+  /** Sum of every suggestion's rejection-echo count (Phase 5.4,
+   * "wrong-verse feedback loop") - how many times, across this whole
+   * service, a rejected suggestion's own reference was independently
+   * redetected again and silently suppressed rather than resurrected. */
+  rejectionEchoes: number;
 }
 
 /** A `ReferenceKind` label (e.g. `"DIRECT_REFERENCE"`, `"SEMANTIC_REFERENCE"`)

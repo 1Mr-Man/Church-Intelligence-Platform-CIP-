@@ -26,9 +26,10 @@ use std::time::Instant;
 use uuid::Uuid;
 
 use crate::persistence::{
-    confirm_suggestion, find_pending_suggestion_for_reference, has_recent_detection_for_reference,
-    persist_scripture_detection, persist_suggestion, persist_transcript_segment, DetectionCategory,
-    PersistError,
+    confirm_suggestion, find_pending_suggestion_for_reference,
+    find_rejected_suggestion_for_reference, has_recent_detection_for_reference,
+    persist_scripture_detection, persist_suggestion, persist_transcript_segment,
+    record_rejection_echo, DetectionCategory, PersistError,
 };
 
 /// Phase 1.3 suggestion deduplication window - see
@@ -257,6 +258,22 @@ fn handle_final_transcript_inner(
                         "confirmed {reference_display} (confirmation #{}, confidence now {:.2})",
                         confirmed.confirmation_count,
                         confirmed.confidence.score
+                    );
+                } else if let Some(rejected) =
+                    find_rejected_suggestion_for_reference(conn, service_id, &reference_display)?
+                {
+                    // Phase 5.4 (Wrong-Verse Feedback Loop): no `Pending`
+                    // suggestion exists for this reference because the
+                    // operator already `Rejected` it - the repeat is still
+                    // silently suppressed exactly as before (a decided
+                    // suggestion is never resurrected), but this makes that
+                    // suppression observable instead of leaving no trace at
+                    // all.
+                    let echoed = record_rejection_echo(conn, rejected.id)?;
+                    log::debug!(
+                        target: "cip::ai",
+                        "rejection echo for {reference_display} (echo #{}, still suppressed)",
+                        echoed.rejection_echo_count
                     );
                 }
             }
@@ -685,6 +702,82 @@ mod tests {
             "an explicit citation's repeat must never be treated as a confirmation"
         );
         assert!((reloaded.confidence.score - original_score).abs() < 0.001);
+    }
+
+    /// Phase 5.4 (Wrong-Verse Feedback Loop): once an operator has
+    /// `Rejected` a `Paraphrase`/`Semantic` suggestion, a same-category
+    /// repeat of that exact reference within the dedup window is still
+    /// silently suppressed as a new suggestion (a decided suggestion is
+    /// never resurrected), but now increments the rejected suggestion's
+    /// own `rejection_echo_count` instead of leaving zero trace at all.
+    #[test]
+    fn a_repeated_paraphrase_after_rejection_echoes_instead_of_vanishing_silently() {
+        let conn = seeded_db();
+        let session = ServiceSession::start("Rejection Echo Test");
+        persist_service(&conn, &session).unwrap();
+
+        let mut provider_conn = open_in_memory().unwrap();
+        run_migrations(&mut provider_conn).unwrap();
+        apply_dev_seed(&provider_conn).unwrap();
+        let provider = SqliteBibleProvider::new(provider_conn);
+        let mut context = DefaultScriptureContextManager::new("KJV");
+
+        // Same deliberately-below-cap paraphrase wording used by the
+        // confirmation test above - the exact scoring doesn't matter here,
+        // only that it reliably triggers the Paraphrase fallback.
+        let paraphrase_text = "We know that all things somehow work for good.";
+
+        let first = handle_final_transcript(
+            &conn,
+            &provider,
+            &mut context,
+            session.id,
+            "KJV",
+            segment(paraphrase_text, 0),
+        )
+        .unwrap();
+        assert_eq!(first.suggestions.len(), 1);
+        let original_id = first.suggestions[0].id;
+
+        crate::persistence::update_suggestion_status(
+            &conn,
+            original_id,
+            cip_core_ai::SuggestionStatus::Rejected,
+            None,
+        )
+        .unwrap();
+
+        let second = handle_final_transcript(
+            &conn,
+            &provider,
+            &mut context,
+            session.id,
+            "KJV",
+            segment(paraphrase_text, 1),
+        )
+        .unwrap();
+        assert!(
+            second.suggestions.is_empty(),
+            "a repeat of a rejected suggestion's reference must still never resurrect it as a new suggestion"
+        );
+
+        let rejected = get_suggestion(&conn, original_id).unwrap();
+        assert_eq!(
+            rejected.status,
+            cip_core_ai::SuggestionStatus::Rejected,
+            "the echo must never change the suggestion's decided status"
+        );
+        assert_eq!(
+            rejected.rejection_echo_count, 1,
+            "the rejected suggestion's echo count must increment"
+        );
+
+        let all_suggestions = list_suggestions(&conn, session.id, None).unwrap();
+        assert_eq!(
+            all_suggestions.len(),
+            1,
+            "a rejection echo must never create a second suggestion row"
+        );
     }
 
     /// A different reference is never suppressed, even moments after an

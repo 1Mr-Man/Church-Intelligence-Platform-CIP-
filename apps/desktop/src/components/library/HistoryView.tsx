@@ -148,6 +148,13 @@ export function HistoryView() {
                     {report.suggestionStats.total} total &middot; {report.suggestionStats.approved} approved &middot;{" "}
                     {report.suggestionStats.edited} edited &middot; {report.suggestionStats.rejected} rejected &middot;{" "}
                     {report.suggestionStats.pending} pending
+                    {report.suggestionStats.rejectionEchoes > 0 && (
+                      <>
+                        {" "}
+                        &middot; {report.suggestionStats.rejectionEchoes} rejected reference
+                        {report.suggestionStats.rejectionEchoes === 1 ? "" : "s"} redetected again and kept suppressed
+                      </>
+                    )}
                   </p>
                 </li>
                 {report.detectionKindCounts.length > 0 && (
@@ -253,7 +260,10 @@ export function HistoryView() {
                   <li key={s.id} className="library-card library-card--bible">
                     <div className="library-card__header">
                       <strong>{s.kind.type === "scripture" ? s.kind.reference : s.kind.label}</strong>
-                      <span className="library-card__meta">{s.status}</span>
+                      <span className="library-card__meta">
+                        {s.status}
+                        {s.rejectionEchoCount > 0 && ` · echoed ×${s.rejectionEchoCount}`}
+                      </span>
                     </div>
                   </li>
                 ))}
