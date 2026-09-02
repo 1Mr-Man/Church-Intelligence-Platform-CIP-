@@ -471,6 +471,7 @@ pub fn run() {
             commands::install_embedding_tokenizer_file,
             commands::list_acoustic_enrollments,
             commands::enroll_acoustic_reference,
+            commands::remove_acoustic_reference,
             commands::generate_verse_embeddings,
             commands::backup_database,
             commands::list_bible_translations,

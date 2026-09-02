@@ -62,6 +62,7 @@ import {
   rejectContentCandidate,
   rejectMusicFinding,
   rejectSermonFinding,
+  removeAcousticReference,
   resumeSermon,
   reviewCrossDomainCorrelation,
   searchBible,
@@ -439,13 +440,24 @@ describe("commands.ts Tauri IPC guard", () => {
     expect(invokeMock).not.toHaveBeenCalled();
   });
 
-  it("rejects listAcousticEnrollments/enrollAcousticReference outside the Tauri runtime, without calling invoke()", async () => {
+  it("removeAcousticReference forwards songId as-is", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue(undefined);
+
+    await removeAcousticReference("hymn-1");
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("remove_acoustic_reference", { songId: "hymn-1" });
+  });
+
+  it("rejects listAcousticEnrollments/enrollAcousticReference/removeAcousticReference outside the Tauri runtime, without calling invoke()", async () => {
     isTauriMock.mockReturnValue(false);
 
     await expect(listAcousticEnrollments()).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(enrollAcousticReference("s1", "music:dev", "/tmp/s1.wav")).rejects.toBeInstanceOf(
       TauriUnavailableError,
     );
+    await expect(removeAcousticReference("s1")).rejects.toBeInstanceOf(TauriUnavailableError);
     expect(invokeMock).not.toHaveBeenCalled();
   });
 

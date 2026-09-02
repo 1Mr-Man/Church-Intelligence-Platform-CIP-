@@ -1499,7 +1499,25 @@ export function LiveChurchBrain() {
             <ul className="live-brain__suggestions">
               {acousticEnrollments.map((entry) => (
                 <li key={entry.songId} className="live-brain__suggestion-card">
-                  <strong>{entry.songId}</strong> ({entry.contentId}) &mdash; {entry.audioPath}
+                  <div className="live-brain__suggestion-header">
+                    <strong>{entry.songId}</strong>
+                    <span className="live-brain__hint">
+                      {entry.contentId} &mdash; {entry.audioPath}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isBusy(`acoustic-remove-${entry.songId}`)}
+                    onClick={() =>
+                      withBusy(`acoustic-remove-${entry.songId}`, async () => {
+                        await commands.removeAcousticReference(entry.songId);
+                        setAcousticEnrollMessage("Removed. Restart CIP for it to take effect.");
+                        refreshAcousticEnrollments();
+                      })
+                    }
+                  >
+                    Remove
+                  </button>
                 </li>
               ))}
             </ul>

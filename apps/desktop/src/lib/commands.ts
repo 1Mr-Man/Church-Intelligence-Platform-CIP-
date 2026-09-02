@@ -544,6 +544,13 @@ export function enrollAcousticReference(
   return invokeCommand("enroll_acoustic_reference", { songId, contentId, sourcePath });
 }
 
+/** Removes one enrollment - the counterpart enrollAcousticReference never
+ * had. Rejects if songId names no current enrollment. Like enrollment
+ * itself, never takes effect until CIP restarts. */
+export function removeAcousticReference(songId: string): Promise<void> {
+  return invokeCommand("remove_acoustic_reference", { songId });
+}
+
 export function rejectMusicFinding(findingId: string): Promise<IntelligenceFinding> {
   return invokeCommand("reject_music_finding", { findingId });
 }

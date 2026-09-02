@@ -613,6 +613,58 @@ pub fn enroll_acoustic_reference(
     Ok(AcousticEnrollment::from(entry))
 }
 
+/// Removes one enrollment (Phase 7.3) - the counterpart
+/// `enroll_acoustic_reference` never had: an operator who enrolled the
+/// wrong song, a bad recording, or simply no longer wants a song
+/// fingerprinted had no way to undo it short of editing files inside the
+/// app's data directory by hand. Errors honestly if `song_id` names no
+/// current enrollment, rather than silently succeeding. The manifest
+/// entry is what actually matters for recognition, so removing it is
+/// unconditional; deleting the now-orphaned audio file from disk is
+/// best-effort cleanup and never fails the command - a leftover WAV file
+/// is untidy, not incorrect, and must never block the operator from
+/// fixing the manifest.
+#[tauri::command]
+pub fn remove_acoustic_reference(
+    song_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let song_id = require_non_empty(&song_id, "songId")
+        .map_err(log_and_return)?
+        .to_string();
+
+    let model_dir = &state.config.acoustic.model_dir;
+    let mut entries = cip_integrations_music_acoustic::read_manifest_entries(model_dir)
+        .map_err(AppError::InvalidInput)
+        .map_err(log_and_return)?;
+    let Some(removed) = entries.iter().position(|e| e.song_id == song_id) else {
+        return Err(log_and_return(AppError::InvalidInput(format!(
+            "no enrollment found for song \"{song_id}\""
+        ))));
+    };
+    let removed_entry = entries.remove(removed);
+    cip_integrations_music_acoustic::write_manifest_entries(model_dir, &entries)
+        .map_err(AppError::InvalidInput)
+        .map_err(log_and_return)?;
+
+    let audio_path = model_dir.join(&removed_entry.audio_path);
+    match std::fs::remove_file(&audio_path) {
+        Ok(()) => {}
+        Err(e) => log::warn!(
+            target: LogCategory::Music.target(),
+            "removed enrollment for song {song_id} but could not delete its reference audio file at {}: {e} (not fatal - the manifest no longer references it)",
+            audio_path.display()
+        ),
+    }
+
+    log::info!(
+        target: LogCategory::Music.target(),
+        "removed acoustic reference recording for song {song_id} - restart CIP for it to take effect"
+    );
+
+    Ok(())
+}
+
 /// Embeds every not-yet-embedded verse of `DEFAULT_TRANSLATION_ID` using
 /// the currently loaded embedding engine - the explicit, operator-triggered
 /// action that populates `bible_verse_embeddings` (nothing does this

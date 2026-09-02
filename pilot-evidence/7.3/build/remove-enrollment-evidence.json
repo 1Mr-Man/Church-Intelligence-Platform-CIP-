@@ -1,0 +1,39 @@
+{
+  "phase": "7.3",
+  "summary": "Environment A evidence for completing the enrollment CRUD lifecycle (list, add/replace, remove) that Phase 7.2 itself named as deferred work.",
+  "auditFinding": "An operator who enrolled the wrong song, a bad recording, or simply wanted to stop fingerprinting a song had no way to do so short of manually deleting files inside the app's data directory. See docs/phase-7-3-audit.md and docs/phase-7-3-remove-enrollment.md.",
+  "designChoice": "No genuine architectural fork - direct completion of the CRUD lifecycle Phase 7.2 started. One real decision, resolved by precedent: manifest-entry removal is unconditional/authoritative (it governs recognition), file deletion is best-effort and non-fatal (logged as a warning, never blocks the command), matching enroll_one's own per-file failure isolation.",
+  "newCode": {
+    "commandsRs": "apps/desktop/src-tauri/src/commands.rs: remove_acoustic_reference(song_id) - reads the manifest, errors with an honest 'no enrollment found' AppError if song_id names no entry, writes back the filtered list, then best-effort deletes the entry's audio file (delete failure logged as a warning, never surfaced as a command error). No new crate-level function - composes Phase 7.2's read_manifest_entries/write_manifest_entries as-is.",
+    "libRs": "apps/desktop/src-tauri/src/lib.rs: registered commands::remove_acoustic_reference in the invoke handler.",
+    "frontend": "commands.ts's removeAcousticReference(songId); LiveChurchBrain.tsx's enrolled-recordings list gains a per-entry Remove button, restructured onto the existing .live-brain__suggestion-header flex-row pattern already used elsewhere in the Music Intelligence panel."
+  },
+  "newTests": {
+    "rustCrateTestCount": 0,
+    "rustCrateTestCountUnchanged": 48,
+    "testingBoundaryRationale": "Matches this codebase's established discipline (commands.rs's test module header, reaffirmed in docs/phase-7-3-audit.md): thin command bodies orchestrating already-tested crate-level logic are not separately unit-tested at the Tauri-command layer. install_whisper_model and enroll_acoustic_reference follow the same rule. read_manifest_entries/write_manifest_entries's round-trip and full-replace semantics are already proven in cip-integrations-music-acoustic's Phase 7.2 suite.",
+    "frontendTestCountBeforePhase": 261,
+    "frontendTestCountAfterPhase": 262,
+    "frontendNewTests": [
+      "removeAcousticReference forwards songId as-is",
+      "rejects listAcousticEnrollments/enrollAcousticReference/removeAcousticReference outside the Tauri runtime, without calling invoke() (extended existing test)"
+    ],
+    "command": "cargo test -p cip-integrations-music-acoustic && npm run test -- --run",
+    "result": "48 passed (Rust crate, unchanged), 262 passed (frontend, 1 new)"
+  },
+  "fullRegression": {
+    "fmt": "cargo fmt --all -- --check: clean",
+    "clippy": "cargo clippy --workspace --all-targets -- -D warnings: clean, both feature configs (default and --features whisper)",
+    "check": "cargo check --workspace: clean, both feature configs",
+    "test": "cargo test --workspace: all crates passing, both feature configs, zero regressions (cip-integrations-music-acoustic stable at 48 tests, matching the audit's explicit no-new-crate-tests decision)",
+    "frontend": "npm run typecheck/lint/test/build: all clean - same 5 pre-existing lint warnings as before this phase, no new ones"
+  },
+  "architecturalSafetyNotes": [
+    "Exactly one new Tauri command (remove_acoustic_reference), zero new events, zero new database schema, zero new crate-level functions.",
+    "core/music (the domain contract crate) is untouched.",
+    "list_acoustic_enrollments/enroll_acoustic_reference and every existing acoustic-recognition code path are byte-identical to before this phase.",
+    "remove_acoustic_reference never mutates AppState.acoustic_recognizer - the currently-active recognizer is unaffected until the next restart, matching enrollment's own restart-required discipline.",
+    "File deletion is strictly ordered after the manifest write succeeds: an entry can never be left half-removed (present in the manifest but its file already gone), and a file-delete failure never leaves the manifest entry behind."
+  ],
+  "honestLimitation": "No confirmation prompt before removing - the Remove button acts immediately, matching every other operator-decision button in this panel (Accept/Reject on findings). Still no real recorded audio anywhere in this repository or container to actually exercise enroll-then-remove end to end against a genuine acoustic match."
+}
