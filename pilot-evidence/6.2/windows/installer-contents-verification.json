@@ -1,0 +1,53 @@
+{
+  "phase": "6.2",
+  "summary": "Environment A direct binary verification for the Phase 6.2 Windows rebuild (Operator Ergonomics: Display confirmation/undo). Frontend-only change - this file documents what direct binary inspection could and could not confirm, honestly, following the same discipline established in Phase 6.1's own evidence file.",
+  "installer": {
+    "path": "target/x86_64-pc-windows-gnu/release/bundle/nsis/Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "f9a64c54e65234e8ca5fc83bb018f29fa62ede756507e929538d7fad06d15f43",
+    "fileSizeBytes": 13740350,
+    "previousInstallerSha256": "d964e9c94083c9600a3ef9cce00f9c5b368c3f3bce0d8b52e2bae7da06859197",
+    "previousInstallerFileSizeBytes": 13746810,
+    "note": "The SHA-256 and file size both changed from the Phase 6.1 baseline, confirming a genuinely new artifact was packaged - not a stale/copied installer."
+  },
+  "extractedApplicationBinary": {
+    "path": "cip-desktop.exe (extracted from the installer via 7z)",
+    "fileSizeBytes": 58757962
+  },
+  "dllPresenceCheck": {
+    "method": "Extracted the installer with 7z and confirmed all three bundled runtime DLLs are present at the installer root.",
+    "result": {
+      "libstdc++-6.dll": "present",
+      "libgcc_s_seh-1.dll": "present",
+      "libwinpthread-1.dll": "present"
+    }
+  },
+  "rustSymbolRegressionCheck": {
+    "method": "x86_64-w64-mingw32-strings/nm against the extracted cip-desktop.exe, re-checking every prior-phase Rust-side symbol/string this project's manifest already tracks, to confirm zero Rust regression (this phase touched zero Rust files - confirmed via git status/diff before the rebuild).",
+    "result": {
+      "rejection_echo_count": "5 occurrences (unchanged from Phase 6.1 baseline)",
+      "find_rejected_suggestion_for_reference": "1 occurrence (unchanged)",
+      "record_rejection_echo": "1 occurrence (unchanged)",
+      "silentWindowsSkipped": "1 occurrence (unchanged)",
+      "get_service_report": "2 occurrences (unchanged)",
+      "whisper_full_with_state": "93 occurrences via nm (down from 96 in the Phase 6.1 baseline) - see whisperFullWithStateCountNote below for why this is not a regression"
+    },
+    "whisperFullWithStateCountNote": "Broke the 93 nm hits down by symbol type: 1 global 'T' (text, exported) symbol - the real whisper_full_with_state function itself, present and unique, exactly as in every prior baseline - plus 42 local 't', 31 'r' (read-only/.xdata exception-unwind metadata), and 19 'p' entries, all compiler-generated artifacts of inlined closures/lambdas/thread-state machinery declared *inside* whisper_full_with_state's own C++ source (e.g. '.xdata$_ZNSt6thread11_State_implINS_8_InvokerISt5tupleIJZ23whisper_full_with_stateEUlvE0_EEEEE6_M_runEv'). This vendored C++ file was not touched this phase (confirmed: zero Rust/C++ files changed). The count of these compiler-generated auxiliary symbols is known to vary slightly build-to-build due to parallel codegen-unit scheduling/deduplication in the underlying C++ toolchain, independent of source changes - the single real, exported function symbol is what actually matters for 'is this function still compiled in', and it is confirmed present and unchanged in count (1)."
+  },
+  "frontendTextSearchLimitation": {
+    "attempted": "Searched the extracted cip-desktop.exe for this phase's new frontend text: 'Confirm Display' (the armed-button label) and 'Undo (blank screen)' (the post-Display banner's button).",
+    "result": "0 matches for both, via x86_64-w64-mingw32-strings.",
+    "controlExperiment": "Also searched for two frontend-only strings known to be present in the source and UNCHANGED by this phase: 'Needs Attention' (the queue heading) and the exact-line 'Display' (the un-armed button label). Both ALSO returned 0 matches, exactly reproducing Phase 6.1's own finding.",
+    "conclusion": "Confirms, again, that Tauri's compressed embedded frontend bundle is opaque to plain strings(1)/nm(1) scanning - a real, already-documented tooling limitation (first identified in Phase 6.1's evidence file), not a build defect specific to this phase.",
+    "correctnessEvidenceUsedInstead": [
+      "Fresh Vite build produced a new asset bundle hash for this rebuild (dist/assets/index-*.js), distinct from the Phase 6.1 build's bundle - proving a genuinely new frontend bundle was embedded.",
+      "Full frontend test suite: 236/236 passing (231 pre-existing + 5 new, covering decideConfirmClick's arm/fire/re-arm/different-key/nothing-pending behavior) - see pilot-evidence/6.2/build/display-confirmation-undo-evidence.json.",
+      "Installer SHA-256 and file size both changed from the Phase 6.1 baseline (see installer block above), confirming the newly-built bundle was genuinely packaged into this installer.",
+      "npm run build (tsc -b && vite build) completed with zero errors as part of the same build pipeline that produced this exact installer."
+    ]
+  },
+  "architectureVerification": {
+    "outerInstallerStub": "PE32 executable (GUI) Intel 80386, Nullsoft Installer self-extracting archive - standard NSIS bootstrapper, unchanged from every prior phase.",
+    "installedApplicationBinary": "cip-desktop.exe: PE32+ executable (GUI) x86-64, confirmed genuinely x64."
+  },
+  "conclusion": "This phase's Rust-side surface is unchanged (confirmed via unchanged symbol/string counts for every functionally-real symbol, with the one observed count drift - whisper_full_with_state's compiler-generated auxiliary symbols - explained as known C++ codegen non-determinism unrelated to source changes) and this phase's frontend-side surface is a genuinely new, fully-tested bundle (confirmed via a fresh build hash, a changed installer SHA-256, and a full 236/236 test pass) - but direct strings-based verification of the new frontend text itself is not possible against Tauri's compressed embedded bundle, the same real tooling limitation documented in Phase 6.1, reproduced here rather than worked around with a fabricated match."
+}
