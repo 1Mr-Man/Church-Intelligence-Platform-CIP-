@@ -12,6 +12,11 @@ statistics, and end-to-end validation results - see
 This document (`bible-datasets.md`) still describes the general-purpose
 importer/format/validation architecture that milestone reuses unchanged.
 
+**For the registry this policy and importer together implement - what's
+currently in it, and the exact playbook for adding a translation #2
+(public-domain or, later, under a real licensing agreement) - see
+[`docs/bible-translation-registry.md`](bible-translation-registry.md).**
+
 ## Licensing policy - read this first
 
 **CIP does not bulk-download or scrape Bible translations from the
