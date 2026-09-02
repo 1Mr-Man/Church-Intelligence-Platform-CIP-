@@ -1,0 +1,16 @@
+[package]
+name = "cip-integrations-access"
+description = "Operator account store adapter. Phase 10 ships one: a local SQLite-backed OperatorAccountStore."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cip-core-access.workspace = true
+chrono.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+cip-database.workspace = true

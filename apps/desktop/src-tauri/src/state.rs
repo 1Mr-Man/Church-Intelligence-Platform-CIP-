@@ -361,6 +361,17 @@ pub struct AppState {
     /// The most recent push outcome per target, surfaced to the operator
     /// via `get_production_integration_status`.
     pub production_integration_status: Mutex<crate::production::ProductionIntegrationStatus>,
+    /// Operator account storage (Phase 10: Church/User Roles &
+    /// Permissions) - its own connection, mirroring `content_registry`'s
+    /// own dedicated connection above, for the same reason: checking who
+    /// is logged in must never contend with the primary `db` mutex.
+    pub operator_account_store: Box<dyn cip_core_access::OperatorAccountStore>,
+    /// The currently-logged-in operator for this running process -
+    /// `None` until `login` succeeds. In-memory/session-scoped by design
+    /// (see `crate::access::OperatorSession`'s own docs), identical
+    /// precedent to `screen_route_modes`: a restart always requires
+    /// logging in again.
+    pub current_operator: Mutex<Option<crate::access::OperatorSession>>,
 }
 
 impl AppState {
@@ -380,6 +391,7 @@ impl AppState {
         embedding_engine: Box<dyn EmbeddingEngine>,
         embedding_diagnostics: EmbeddingDiagnostics,
         verse_embedding_store: crate::embeddings::SqliteVerseEmbeddingStore,
+        operator_account_store: Box<dyn cip_core_access::OperatorAccountStore>,
     ) -> Self {
         let speech_ready = speech_engine.is_ready();
         let embedding_ready = embedding_engine.is_ready();
@@ -424,6 +436,8 @@ impl AppState {
             production_integration_status: Mutex::new(
                 crate::production::ProductionIntegrationStatus::default(),
             ),
+            operator_account_store,
+            current_operator: Mutex::new(None),
         }
     }
 }

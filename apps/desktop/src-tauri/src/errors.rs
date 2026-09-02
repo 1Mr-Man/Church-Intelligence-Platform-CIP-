@@ -48,6 +48,10 @@ pub enum AppError {
     NoActiveSermon,
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    /// Phase 10: a command requiring a specific operator role (usually
+    /// Admin) was called without one - see `access::ensure_admin`.
+    #[error("{0}")]
+    Forbidden(String),
 }
 
 impl AppError {
@@ -70,6 +74,7 @@ impl AppError {
             AppError::NoActiveService => LogCategory::App,
             AppError::NoActiveSermon => LogCategory::App,
             AppError::InvalidInput(_) => LogCategory::App,
+            AppError::Forbidden(_) => LogCategory::Security,
         }
     }
 }

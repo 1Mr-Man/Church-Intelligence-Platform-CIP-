@@ -547,6 +547,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "cip-core-access"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
+ "uuid",
+]
+
+[[package]]
 name = "cip-core-ai"
 version = "0.1.0"
 dependencies = [
@@ -673,6 +686,7 @@ dependencies = [
  "chrono",
  "cip-ai-embeddings",
  "cip-ai-speech",
+ "cip-core-access",
  "cip-core-ai",
  "cip-core-bible",
  "cip-core-confidence",
@@ -683,6 +697,7 @@ dependencies = [
  "cip-core-sermon",
  "cip-core-service",
  "cip-database",
+ "cip-integrations-access",
  "cip-integrations-audio",
  "cip-integrations-bible",
  "cip-integrations-content",
@@ -718,6 +733,16 @@ dependencies = [
  "cip-integrations-bible",
  "cip-presentation-renderer",
  "uuid",
+]
+
+[[package]]
+name = "cip-integrations-access"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "cip-core-access",
+ "cip-database",
+ "rusqlite",
 ]
 
 [[package]]

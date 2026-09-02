@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "apps/desktop/src-tauri",
 
+  "core/access",
   "core/bible",
   "core/content",
   "core/music",
@@ -16,6 +17,7 @@ members = [
 
   "database",
 
+  "integrations/access",
   "integrations/audio",
   "integrations/bible",
   "integrations/content",
@@ -60,6 +62,7 @@ ureq = { version = "2", default-features = false }
 sha2 = "0.10"
 base64 = "0.22"
 
+cip-core-access = { path = "core/access" }
 cip-core-bible = { path = "core/bible" }
 cip-core-content = { path = "core/content" }
 cip-core-music = { path = "core/music" }
@@ -71,6 +74,7 @@ cip-core-ai = { path = "core/ai" }
 cip-core-confidence = { path = "core/confidence" }
 cip-core-intelligence = { path = "core/intelligence" }
 cip-database = { path = "database" }
+cip-integrations-access = { path = "integrations/access" }
 cip-integrations-audio = { path = "integrations/audio" }
 cip-integrations-bible = { path = "integrations/bible" }
 cip-integrations-content = { path = "integrations/content" }

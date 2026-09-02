@@ -2,9 +2,17 @@ import { useEffect, useState } from "react";
 import "./App.css";
 import "./components/library/library.css";
 import type { AppConfig } from "./config/appConfig";
-import type { BibleTranslation } from "./domain";
-import { appHealthCheck, getAppConfig, listBibleTranslations, type HealthReport } from "./lib/commands";
+import type { BibleTranslation, OperatorAccountSummary } from "./domain";
+import {
+  appHealthCheck,
+  getAppConfig,
+  getCurrentOperator,
+  listBibleTranslations,
+  logout,
+  type HealthReport,
+} from "./lib/commands";
 import { LiveChurchBrain } from "./components/LiveChurchBrain";
+import { LoginScreen } from "./components/LoginScreen";
 import { OnboardingWalkthrough } from "./components/OnboardingWalkthrough";
 import { BibleLibrary } from "./components/library/BibleLibrary";
 import { MusicLibrary } from "./components/library/MusicLibrary";
@@ -46,6 +54,13 @@ function App() {
   // during its lifetime.
   const [tauriRuntime] = useState(isTauriRuntime);
 
+  // Phase 10: Church/User Roles & Permissions - `undefined` means "still
+  // checking," `null` means "nobody logged in" (render LoginScreen),
+  // an object means the app renders normally.
+  const [currentOperator, setCurrentOperator] = useState<OperatorAccountSummary | null | undefined>(
+    undefined,
+  );
+
   useEffect(() => {
     if (!tauriRuntime) return;
     let cancelled = false;
@@ -63,9 +78,38 @@ function App() {
     };
   }, [tauriRuntime]);
 
+  useEffect(() => {
+    if (!tauriRuntime) return;
+    let cancelled = false;
+    getCurrentOperator()
+      .then((operator) => {
+        if (!cancelled) setCurrentOperator(operator);
+      })
+      .catch(() => {
+        if (!cancelled) setCurrentOperator(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tauriRuntime]);
+
   if (!tauriRuntime) {
     return <WebRuntimeNotice />;
   }
+
+  if (currentOperator === undefined) {
+    return null;
+  }
+
+  if (currentOperator === null) {
+    return <LoginScreen onLoggedIn={setCurrentOperator} />;
+  }
+
+  const handleLogout = () => {
+    logout()
+      .catch(() => undefined)
+      .finally(() => setCurrentOperator(null));
+  };
 
   return (
     <>
@@ -76,6 +120,12 @@ function App() {
             {s.label}
           </button>
         ))}
+        <span className="app-nav__operator">
+          {currentOperator.displayName} ({currentOperator.role})
+          <button type="button" onClick={handleLogout}>
+            Log Out
+          </button>
+        </span>
       </nav>
 
       {section === "live" && <LiveChurchBrain />}

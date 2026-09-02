@@ -1,0 +1,40 @@
+{
+  "phase": "10",
+  "summary": "Environment A evidence for Church/User Roles & Permissions - a local operator-account model (Admin/Operator), session-only login, and a real fail-closed Admin gate on seven existing configuration commands plus five new account/login commands.",
+  "trigger": "User's explicit instruction: 'Keep going into church/user roles & permissions next' - item 5 in docs/phase-4-master-plan-gap-audit.md's own Phase 4 candidate list, graded NOT STARTED ('no login, no user table, no role enforcement'). See docs/phase-10-audit.md, including clarification that Phase 8/Phase 9 in this codebase were already complete before this phase began (the user's separately-pasted item list used the external advice document's own numbering, not this project's phase history).",
+  "designChoice": "Two closed roles (Admin/Operator). Local PIN-based auth: base64(sha256(salt||pin)), the same algorithm shape Phase 8's OBS auth already uses - chosen over bcrypt/argon2 since the threat model is a single local desktop machine, not a networked credential. Session-only login (AppState.current_operator, never persisted, identical precedent to screen_route_modes). Bootstrap rule: the first account ever created needs no login and always becomes Admin.",
+  "newCode": {
+    "coreAccess": "core/access/src/lib.rs: Role, OperatorAccount, OperatorAccountStore trait, AccessError, generate_salt/hash_pin/verify_pin.",
+    "migration": "database/migrations/0017_operator_accounts.sql: operator_accounts table.",
+    "integrationsAccess": "integrations/access/src/lib.rs: SqliteOperatorAccountStore.",
+    "accessRs": "apps/desktop/src-tauri/src/access.rs: OperatorSession, ensure_admin (pure, fail-closed), create_operator_account (bootstrap logic), login.",
+    "commandsRs": "apps/desktop/src-tauri/src/commands.rs: OperatorAccountSummaryDto (never carries pinHash/pinSalt); 5 new commands (list_operator_accounts, create_operator_account, login, logout, get_current_operator); ensure_admin/ensure_admin_string_err gates added to 7 existing commands (import_bible_dataset, set_content_enabled, set_production_integration_config, generate_verse_embeddings, install_whisper_model, install_embedding_model_file, install_embedding_tokenizer_file).",
+    "stateRs": "apps/desktop/src-tauri/src/state.rs: operator_account_store (own connection), current_operator (Mutex<Option<OperatorSession>>, session-only).",
+    "errorsRs": "apps/desktop/src-tauri/src/errors.rs: new AppError::Forbidden variant, categorized under LogCategory::Security.",
+    "frontend": "domain/access.ts; 5 new commands.ts wrappers; new components/LoginScreen.tsx (full-app gate mirroring WebRuntimeNotice's pattern); App.tsx gains currentOperator state, the login gate, and a Log Out control."
+  },
+  "newTests": {
+    "coreAccessTestCount": 6,
+    "integrationsAccessTestCount": 6,
+    "accessRsTestCount": 12,
+    "frontendCommandsTestCount": 6,
+    "frontendContractTestCount": 2,
+    "testingBoundaryNote": "ensure_admin/create_operator_account/login are pure functions tested against a real in-memory SQLite store (cip_database::open_in_memory + run_migrations + SqliteOperatorAccountStore) - the same resolve_default_translation_id_from_registry/ensure_ai_processing_permitted pattern already established (no tauri::test harness exists). No existing Rust test called any of the 7 newly-gated commands as a #[tauri::command] wrapper (verified before adding gates), so the gates could not have broken any pre-existing test.",
+    "command": "cargo test --workspace && cargo test --features whisper (apps/desktop/src-tauri) && npm run test -- --run",
+    "result": "1001 passed (workspace default, +24 from Phase 9's 977), 332 passed (desktop, --features whisper, +12 from Phase 9's 320), 274 passed (frontend, +8 from Phase 9's 266) - 0 failures across all three"
+  },
+  "fullRegression": {
+    "fmt": "cargo fmt --all -- --check: clean",
+    "clippy": "cargo clippy --workspace --all-targets -- -D warnings: clean, both feature configs",
+    "check": "cargo check --workspace / --features whisper: clean",
+    "test": "see newTests.result above",
+    "frontend": "npm run typecheck/lint/test/build: all clean - same 5 pre-existing lint warnings, no new ones"
+  },
+  "architecturalSafetyNotes": [
+    "5 new Tauri commands, zero new events, one new migration - purely additive (a new table, no existing table's shape changes).",
+    "Every gated command's existing logic is unchanged below the new ensure_admin/ensure_admin_string_err call at its top - a build with a logged-in Admin behaves identically to before this phase for every one of the seven commands.",
+    "No existing Rust test called any of the seven gated commands as a #[tauri::command] wrapper, so the new gates could not have broken any pre-existing test.",
+    "core/bible, core/service, core/presentation (every domain contract crate) are entirely untouched."
+  ],
+  "honestLimitation": "No password recovery, no account editing/deactivation/deletion (list/create only), no per-action audit attribution (audit_events records what happened, not which operator). The login screen is a workflow control, not itself the security boundary - the real boundary is the seven ensure_admin calls inside the Rust commands. No multi-church/multi-tenant data isolation. The LoginScreen UI was not visually verified via a real Xvfb+screenshot pass in this phase - judged proportionate since it is ordinary React form content, not a new windowing/pixel-placement mechanism, but stated honestly rather than silently implied verified."
+}

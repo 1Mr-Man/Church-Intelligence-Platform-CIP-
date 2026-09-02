@@ -27,11 +27,13 @@ import {
   closePresentationDisplay,
   correctServicePhase,
   createManualPresentation,
+  createOperatorAccount,
   displayPresentation,
   dismissCrossDomainCorrelation,
   endSermon,
   enrollAcousticReference,
   getAppConfig,
+  getCurrentOperator,
   getIntelligenceCapabilities,
   getPresentationDisplayState,
   getProductionIntegrationStatus,
@@ -48,6 +50,7 @@ import {
   listContentRegistry,
   listCrossDomainCorrelations,
   listMusicFindings,
+  listOperatorAccounts,
   listServiceAnomalies,
   listServiceTransitions,
   listSermonFindings,
@@ -55,6 +58,8 @@ import {
   listSermonSections,
   listSermonSegments,
   logDisplayDiagnostic,
+  login,
+  logout,
   markServicePhase,
   openPresentationDisplay,
   pauseSermon,
@@ -903,6 +908,80 @@ describe("commands.ts Tauri IPC guard", () => {
     await expect(listSermonSections()).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(listSermonHistory(10)).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(getSermon("id")).rejects.toBeInstanceOf(TauriUnavailableError);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  // --- Phase 10: Church/User Roles & Permissions -----------------------------
+
+  it("listOperatorAccounts takes no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue([]);
+
+    await listOperatorAccounts();
+
+    expect(invokeMock).toHaveBeenCalledWith("list_operator_accounts", undefined);
+  });
+
+  it("createOperatorAccount forwards displayName/pin/role as-is", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({
+      id: "op-1",
+      displayName: "Pastor Sam",
+      role: "admin",
+      createdAt: "2026-01-01T00:00:00Z",
+    });
+
+    await createOperatorAccount("Pastor Sam", "4242", "admin");
+
+    expect(invokeMock).toHaveBeenCalledWith("create_operator_account", {
+      displayName: "Pastor Sam",
+      pin: "4242",
+      role: "admin",
+    });
+  });
+
+  it("login forwards accountId/pin as-is", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({
+      id: "op-1",
+      displayName: "Pastor Sam",
+      role: "admin",
+      createdAt: "2026-01-01T00:00:00Z",
+    });
+
+    await login("op-1", "4242");
+
+    expect(invokeMock).toHaveBeenCalledWith("login", { accountId: "op-1", pin: "4242" });
+  });
+
+  it("logout takes no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue(undefined);
+
+    await logout();
+
+    expect(invokeMock).toHaveBeenCalledWith("logout", undefined);
+  });
+
+  it("getCurrentOperator takes no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue(null);
+
+    await getCurrentOperator();
+
+    expect(invokeMock).toHaveBeenCalledWith("get_current_operator", undefined);
+  });
+
+  it("rejects listOperatorAccounts/createOperatorAccount/login/logout/getCurrentOperator outside the Tauri runtime, without calling invoke()", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    await expect(listOperatorAccounts()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(createOperatorAccount("Name", "1234", "operator")).rejects.toBeInstanceOf(
+      TauriUnavailableError,
+    );
+    await expect(login("op-1", "1234")).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(logout()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(getCurrentOperator()).rejects.toBeInstanceOf(TauriUnavailableError);
     expect(invokeMock).not.toHaveBeenCalled();
   });
 });

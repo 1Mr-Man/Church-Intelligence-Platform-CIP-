@@ -59,6 +59,7 @@ import type {
   ThemeCandidate,
 } from "./sermon";
 import type { ContentCandidate, ContentCandidateType } from "./contentIntelligence";
+import type { OperatorAccountSummary, Role } from "./access";
 
 describe("domain contracts", () => {
   it("constructs a ScriptureReference and a matching BibleTranslation", () => {
@@ -1061,5 +1062,25 @@ describe("domain contracts", () => {
     const accepted: FindingStatus = "accepted";
     const rejected: FindingStatus = "rejected";
     expect([detected, accepted, rejected]).toEqual(["detected", "accepted", "rejected"]);
+  });
+});
+
+describe("Phase 10: Church/User Roles & Permissions domain contracts", () => {
+  it("constructs an OperatorAccountSummary with no pin fields present on the type at all", () => {
+    const admin: OperatorAccountSummary = {
+      id: "op-1",
+      displayName: "Pastor Sam",
+      role: "admin",
+      createdAt: new Date().toISOString(),
+    };
+    expect(admin.role).toBe("admin");
+    // @ts-expect-error - OperatorAccountSummary must never carry secret material
+    expect(admin.pinHash).toBeUndefined();
+  });
+
+  it("Role is exactly the closed two-value set admin/operator", () => {
+    const admin: Role = "admin";
+    const operator: Role = "operator";
+    expect([admin, operator]).toEqual(["admin", "operator"]);
   });
 });

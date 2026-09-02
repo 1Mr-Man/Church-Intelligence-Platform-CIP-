@@ -1,3 +1,4 @@
+export * from "./access";
 export * from "./ai";
 export * from "./bible";
 export * from "./confidence";

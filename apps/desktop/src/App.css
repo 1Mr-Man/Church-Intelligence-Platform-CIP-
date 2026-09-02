@@ -125,3 +125,12 @@ dd.path {
   border-radius: 6px;
   padding: 0.5rem 1.1rem;
 }
+
+.app-nav__operator {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-h, #333);
+}

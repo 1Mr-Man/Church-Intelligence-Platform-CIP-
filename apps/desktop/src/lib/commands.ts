@@ -35,6 +35,7 @@ import type {
   MusicImportReport,
   MusicQueryType,
   ObsTargetConfig,
+  OperatorAccountSummary,
   PresentationDisplayState,
   PresentationItem,
   PresentationPreview,
@@ -42,6 +43,7 @@ import type {
   ProcessedSegment,
   ProductionIntegrationConfigInput,
   ProductionIntegrationStatus,
+  Role,
   RouteMode,
   ScriptureContext,
   Sermon,
@@ -881,4 +883,35 @@ export function acknowledgeServiceAnomaly(findingId: string): Promise<Intelligen
 
 export function getLiveStatus(): Promise<LiveStatus> {
   return invokeCommand("get_live_status");
+}
+
+// --- Phase 10: Church/User Roles & Permissions ---------------------------------
+
+/** Every operator account, oldest first - available without being
+ * logged in (the login screen itself needs this list). */
+export function listOperatorAccounts(): Promise<OperatorAccountSummary[]> {
+  return invokeCommand("list_operator_accounts");
+}
+
+/** The very first account ever created becomes Admin unconditionally,
+ * regardless of `role` - see `access::create_operator_account`'s docs.
+ * Every account after that requires a logged-in Admin. */
+export function createOperatorAccount(
+  displayName: string,
+  pin: string,
+  role: Role,
+): Promise<OperatorAccountSummary> {
+  return invokeCommand("create_operator_account", { displayName, pin, role });
+}
+
+export function login(accountId: string, pin: string): Promise<OperatorAccountSummary> {
+  return invokeCommand("login", { accountId, pin });
+}
+
+export function logout(): Promise<void> {
+  return invokeCommand("logout");
+}
+
+export function getCurrentOperator(): Promise<OperatorAccountSummary | null> {
+  return invokeCommand("get_current_operator");
 }

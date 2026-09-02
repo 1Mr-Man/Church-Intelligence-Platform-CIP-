@@ -5,6 +5,7 @@
 //! reach the frontend as a clear message rather than a panic - per the
 //! "manual fallback" requirement, nothing here may crash the application.
 
+use crate::access;
 use crate::acoustic;
 use crate::config::AppConfig;
 use crate::content;
@@ -84,6 +85,170 @@ fn require_non_empty(value: &str, field: &str) -> Result<String, AppError> {
         return Err(AppError::InvalidInput(format!("{field} must not be empty")));
     }
     Ok(trimmed.to_string())
+}
+
+// --- Phase 10: Church/User Roles & Permissions ------------------------
+//
+// See docs/phase-10-audit.md/docs/roles-permissions.md for the full
+// design record. `access::ensure_admin` is the pure, directly-testable
+// gate (mirroring `ensure_ai_processing_permitted`, Phase 9); these two
+// small wrappers exist only so every gated command below can write one
+// short line instead of repeating the lock/clone/map_err boilerplate.
+
+fn ensure_admin(state: &State<'_, AppState>) -> Result<(), AppError> {
+    let current = state
+        .current_operator
+        .lock()
+        .expect("current operator lock poisoned")
+        .clone();
+    access::ensure_admin(&current).map_err(AppError::Forbidden)
+}
+
+fn ensure_admin_string_err(state: &State<'_, AppState>) -> Result<(), String> {
+    let current = state
+        .current_operator
+        .lock()
+        .expect("current operator lock poisoned")
+        .clone();
+    access::ensure_admin(&current)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperatorAccountSummaryDto {
+    pub id: String,
+    pub display_name: String,
+    pub role: cip_core_access::Role,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<&cip_core_access::OperatorAccount> for OperatorAccountSummaryDto {
+    fn from(account: &cip_core_access::OperatorAccount) -> Self {
+        Self {
+            id: account.id.clone(),
+            display_name: account.display_name.clone(),
+            role: account.role,
+            created_at: account.created_at,
+        }
+    }
+}
+
+/// Every operator account, oldest first - never includes `pin_hash`/
+/// `pin_salt` (see `OperatorAccountSummaryDto`'s own docs). Available
+/// without being logged in: the login screen itself needs this list to
+/// render (or to know the store is empty and show account-creation
+/// instead).
+#[tauri::command]
+pub fn list_operator_accounts(
+    state: State<'_, AppState>,
+) -> Result<Vec<OperatorAccountSummaryDto>, AppError> {
+    Ok(state
+        .operator_account_store
+        .list()
+        .map_err(|e| AppError::InvalidInput(e.to_string()))
+        .map_err(log_and_return)?
+        .iter()
+        .map(OperatorAccountSummaryDto::from)
+        .collect())
+}
+
+/// Creates a new operator account - see `access::create_operator_account`
+/// for the bootstrap rule (the very first account ever created becomes
+/// Admin unconditionally; every account after that requires a logged-in
+/// Admin).
+#[tauri::command]
+pub fn create_operator_account(
+    display_name: String,
+    pin: String,
+    role: cip_core_access::Role,
+    state: State<'_, AppState>,
+) -> Result<OperatorAccountSummaryDto, AppError> {
+    let current = state
+        .current_operator
+        .lock()
+        .expect("current operator lock poisoned")
+        .clone();
+    let account = access::create_operator_account(
+        state.operator_account_store.as_ref(),
+        &current,
+        &display_name,
+        &pin,
+        role,
+    )
+    .map_err(|e| match e {
+        cip_core_access::AccessError::Forbidden(msg) => AppError::Forbidden(msg),
+        other => AppError::InvalidInput(other.to_string()),
+    })
+    .map_err(log_and_return)?;
+    Ok(OperatorAccountSummaryDto::from(&account))
+}
+
+/// Verifies `pin` against `accountId` and, on success, sets this
+/// process's `current_operator` - see `access::login`'s own docs for why
+/// a wrong PIN and an unknown account id return the same error text.
+#[tauri::command]
+pub fn login(
+    account_id: String,
+    pin: String,
+    state: State<'_, AppState>,
+) -> Result<OperatorAccountSummaryDto, AppError> {
+    let account_id = require_non_empty(&account_id, "accountId").map_err(log_and_return)?;
+    let session = access::login(state.operator_account_store.as_ref(), &account_id, &pin)
+        .map_err(|e| AppError::Forbidden(e.to_string()))
+        .map_err(log_and_return)?;
+    let account = state
+        .operator_account_store
+        .get(&session.id)
+        .map_err(|e| AppError::InvalidInput(e.to_string()))
+        .map_err(log_and_return)?
+        .ok_or_else(|| {
+            log_and_return(AppError::Forbidden("incorrect account or PIN".to_string()))
+        })?;
+    *state
+        .current_operator
+        .lock()
+        .expect("current operator lock poisoned") = Some(session);
+    log::info!(
+        target: LogCategory::Security.target(),
+        "operator {} logged in ({:?})",
+        account.display_name,
+        account.role
+    );
+    Ok(OperatorAccountSummaryDto::from(&account))
+}
+
+/// Clears this process's `current_operator` - the operator must log in
+/// again before any command (Admin-gated or not) that checks
+/// `AppState.current_operator` behaves as "someone is logged in."
+#[tauri::command]
+pub fn logout(state: State<'_, AppState>) {
+    let mut current = state
+        .current_operator
+        .lock()
+        .expect("current operator lock poisoned");
+    if let Some(session) = current.take() {
+        log::info!(
+            target: LogCategory::Security.target(),
+            "operator {} logged out",
+            session.display_name
+        );
+    }
+}
+
+#[tauri::command]
+pub fn get_current_operator(state: State<'_, AppState>) -> Option<OperatorAccountSummaryDto> {
+    let current = state
+        .current_operator
+        .lock()
+        .expect("current operator lock poisoned")
+        .clone()?;
+    state
+        .operator_account_store
+        .get(&current.id)
+        .ok()
+        .flatten()
+        .as_ref()
+        .map(OperatorAccountSummaryDto::from)
 }
 
 /// Record one service-timeline entry (Phase 1.3), logging - never
@@ -303,6 +468,7 @@ pub fn install_whisper_model(
     state: State<'_, AppState>,
     source_path: String,
 ) -> Result<WhisperModelDiagnostic, String> {
+    ensure_admin_string_err(&state)?;
     let source = std::path::PathBuf::from(&source_path);
     let metadata =
         std::fs::metadata(&source).map_err(|e| format!("cannot read \"{source_path}\": {e}"))?;
@@ -471,6 +637,7 @@ pub fn install_embedding_model_file(
     state: State<'_, AppState>,
     source_path: String,
 ) -> Result<EmbeddingFileDiagnostic, String> {
+    ensure_admin_string_err(&state)?;
     install_file_at(&source_path, &state.config.embedding_model_path)?;
     log::info!(
         target: LogCategory::Bible.target(),
@@ -487,6 +654,7 @@ pub fn install_embedding_tokenizer_file(
     state: State<'_, AppState>,
     source_path: String,
 ) -> Result<EmbeddingFileDiagnostic, String> {
+    ensure_admin_string_err(&state)?;
     install_file_at(&source_path, &state.config.embedding_tokenizer_path)?;
     log::info!(
         target: LogCategory::Bible.target(),
@@ -759,6 +927,7 @@ pub fn set_production_integration_config(
     config: ProductionIntegrationConfigInput,
     state: State<'_, AppState>,
 ) -> Result<(), AppError> {
+    ensure_admin(&state).map_err(log_and_return)?;
     let obs_configured = config.obs.is_some();
     let vmix_configured = config.vmix.is_some();
     let new_config = production::ProductionIntegrationConfig {
@@ -845,6 +1014,7 @@ pub fn test_vmix_connection(target: VmixTargetConfig) -> Result<(), AppError> {
 pub fn generate_verse_embeddings(
     state: State<'_, AppState>,
 ) -> Result<crate::embeddings::EmbeddingGenerationSummary, String> {
+    ensure_admin_string_err(&state)?;
     if !state.embedding_ready {
         return Err(
             "no embedding model is loaded - install a model weights + tokenizer file pair and \
@@ -4353,6 +4523,7 @@ pub fn set_content_enabled(
     enabled: bool,
     state: State<'_, AppState>,
 ) -> Result<ContentMetadata, AppError> {
+    ensure_admin(&state).map_err(log_and_return)?;
     let content_id = require_non_empty(&content_id, "contentId").map_err(log_and_return)?;
     state
         .content_registry
@@ -4379,6 +4550,7 @@ pub fn import_bible_dataset(
     dataset_json: String,
     state: State<'_, AppState>,
 ) -> Result<ImportReport, AppError> {
+    ensure_admin(&state).map_err(log_and_return)?;
     let dataset_json = require_non_empty(&dataset_json, "datasetJson").map_err(log_and_return)?;
     let dataset: BibleDatasetInput = serde_json::from_str(&dataset_json).map_err(|e| {
         log_and_return(AppError::InvalidInput(format!(

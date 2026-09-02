@@ -1,3 +1,4 @@
+mod access;
 mod acoustic;
 mod bible_production_dataset;
 mod commands;
@@ -289,6 +290,16 @@ pub fn run() {
                 content::register_dev_seed_content_if_missing(content_registry.as_ref())?;
             }
 
+            // Phase 10: operator accounts (Church/User Roles & Permissions).
+            // Its own connection, mirroring every other independent read
+            // path above - `AppState.operator_account_store` never
+            // contends with the primary `db` mutex just to check who's
+            // logged in.
+            let access_conn = cip_database::open(&config.database_path)?;
+            let operator_account_store = Box::new(
+                cip_integrations_access::SqliteOperatorAccountStore::new(access_conn),
+            );
+
             // Real Bible dataset production import milestone: the complete
             // 66-book Berean Standard Bible (docs/bible-production-dataset.md)
             // installs here, idempotently, in every environment including
@@ -459,12 +470,18 @@ pub fn run() {
                 embedding_engine,
                 embedding_diagnostics,
                 verse_embedding_store,
+                operator_account_store,
             ));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_app_config,
             commands::app_health_check,
+            commands::list_operator_accounts,
+            commands::create_operator_account,
+            commands::login,
+            commands::logout,
+            commands::get_current_operator,
             commands::get_pilot_diagnostics,
             commands::install_whisper_model,
             commands::get_embedding_capabilities,
