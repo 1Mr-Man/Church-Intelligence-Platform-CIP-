@@ -26,8 +26,9 @@ use std::time::Instant;
 use uuid::Uuid;
 
 use crate::persistence::{
-    has_recent_detection_for_reference, persist_scripture_detection, persist_suggestion,
-    persist_transcript_segment, DetectionCategory, PersistError,
+    confirm_suggestion, find_pending_suggestion_for_reference, has_recent_detection_for_reference,
+    persist_scripture_detection, persist_suggestion, persist_transcript_segment, DetectionCategory,
+    PersistError,
 };
 
 /// Phase 1.3 suggestion deduplication window - see
@@ -36,6 +37,19 @@ use crate::persistence::{
 /// reference while still explaining it, short enough that a genuinely new
 /// mention later in the service is never suppressed.
 const SUGGESTION_DEDUP_WINDOW_SECONDS: i64 = 60;
+
+/// Phase 5.2 (Temporal Confirmation / Sliding Re-Score): how much a
+/// `Paraphrase`/`Semantic` suggestion's confidence score rises each time
+/// its reference is independently redetected within the dedup window
+/// above, while the suggestion is still `Pending` - see
+/// `persistence::confirm_suggestion`'s docs for the full policy.
+const CONFIRMATION_SCORE_BONUS: f32 = 0.1;
+
+/// The confidence ceiling a repeatedly-confirmed heuristic suggestion can
+/// reach - deliberately below the ~0.97 an explicit citation (`Direct`)
+/// earns, so no amount of repetition ever lets a heuristic guess outrank a
+/// real citation.
+const MAX_CONFIRMED_SCORE: f32 = 0.9;
 
 /// Run one **final** transcript segment through the full pipeline,
 /// persisting every step. Returns the same [`ProcessedSegment`] the Bible
@@ -55,10 +69,22 @@ const SUGGESTION_DEDUP_WINDOW_SECONDS: i64 = 60;
 /// Only *suggestion* creation is deduplicated: a suggestion is skipped (not
 /// persisted, not emitted, not present in the returned `ProcessedSegment`)
 /// if an identical reference *in the same category* (explicit citation vs.
-/// `Paraphrase` guess - see `persistence::DetectionCategory`) was already
-/// suggested for this same service within `SUGGESTION_DEDUP_WINDOW_SECONDS`.
-/// See `persistence::has_recent_detection_for_reference` for exactly why
-/// this scope/window/category split was chosen.
+/// `Paraphrase`/`Semantic` guess - see `persistence::DetectionCategory`)
+/// was already suggested for this same service within
+/// `SUGGESTION_DEDUP_WINDOW_SECONDS`. See
+/// `persistence::has_recent_detection_for_reference` for exactly why this
+/// scope/window/category split was chosen.
+///
+/// ## Temporal confirmation (Phase 5.2)
+///
+/// A suppressed `Paraphrase`/`Semantic` duplicate is not simply discarded:
+/// if the reference's original suggestion is still `Pending`,
+/// `persistence::confirm_suggestion` bumps its confidence (capped below
+/// what an explicit citation earns) and increments its
+/// `confirmation_count` - repetition of a single-shot heuristic guess is
+/// corroborating evidence, and this is where that evidence gets recorded.
+/// Explicit citations are already near the confidence ceiling and are
+/// never confirmation-boosted.
 ///
 /// ## Performance logging (Phase 1.3 section 44)
 ///
@@ -181,16 +207,16 @@ fn handle_final_transcript_inner(
         };
         // The dedup window suppresses a repeat *within the same category*
         // (an explicit citation repeated soon after, or a fuzzy
-        // `Paraphrase` guess repeated soon after) - but never across
-        // categories: an explicit citation always deserves its own
-        // confident suggestion even if a `Paraphrase` guess for the same
-        // verse was already made moments earlier, and vice versa (e.g. the
-        // pastor paraphrases a verse, then reads it verbatim, or reads it
-        // and later paraphrases it again).
-        let category = if kind == ReferenceKind::Paraphrase {
-            DetectionCategory::Paraphrase
-        } else {
-            DetectionCategory::Explicit
+        // `Paraphrase`/`Semantic` guess repeated soon after) - but never
+        // across categories: an explicit citation always deserves its own
+        // confident suggestion even if a `Paraphrase`/`Semantic` guess for
+        // the same verse was already made moments earlier, and vice versa
+        // (e.g. the pastor paraphrases a verse, then reads it verbatim, or
+        // reads it and later paraphrases it again).
+        let category = match kind {
+            ReferenceKind::Paraphrase => DetectionCategory::Paraphrase,
+            ReferenceKind::Semantic => DetectionCategory::Semantic,
+            _ => DetectionCategory::Explicit,
         };
         let is_duplicate = !reference_display.is_empty()
             && has_recent_detection_for_reference(
@@ -206,6 +232,34 @@ fn handle_final_transcript_inner(
                 target: "cip::ai",
                 "suppressed duplicate suggestion for {reference_display} (repeated within {SUGGESTION_DEDUP_WINDOW_SECONDS}s)"
             );
+            // Phase 5.2 (Temporal Confirmation): a repeated heuristic
+            // (`Paraphrase`/`Semantic`) guess for the same reference is
+            // corroborating evidence, not just noise to discard - bump the
+            // still-`Pending` suggestion's confidence instead of silently
+            // dropping the signal entirely. Explicit citations are already
+            // near the confidence ceiling (~0.97) and are left untouched -
+            // repetition of an already-confident citation adds nothing.
+            if matches!(
+                category,
+                DetectionCategory::Paraphrase | DetectionCategory::Semantic
+            ) {
+                if let Some(existing) =
+                    find_pending_suggestion_for_reference(conn, service_id, &reference_display)?
+                {
+                    let confirmed = confirm_suggestion(
+                        conn,
+                        existing.id,
+                        CONFIRMATION_SCORE_BONUS,
+                        MAX_CONFIRMED_SCORE,
+                    )?;
+                    log::debug!(
+                        target: "cip::ai",
+                        "confirmed {reference_display} (confirmation #{}, confidence now {:.2})",
+                        confirmed.confirmation_count,
+                        confirmed.confidence.score
+                    );
+                }
+            }
             continue;
         }
 
@@ -227,7 +281,7 @@ fn handle_final_transcript_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::persistence::{list_suggestions, persist_service};
+    use crate::persistence::{get_suggestion, list_suggestions, persist_service};
     use cip_core_ai::TranscriptSegment;
     use cip_core_bible::ScriptureContextManager;
     use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
@@ -515,6 +569,122 @@ mod tests {
             1,
             "only one suggestion should ever be persisted"
         );
+    }
+
+    /// Phase 5.2 (Temporal Confirmation): a repeated `Paraphrase` guess for
+    /// the same verse within the dedup window is still suppressed as a
+    /// *new* suggestion (unchanged from Phase 1.3/4.1's dedup policy), but
+    /// is no longer silent noise - it bumps the original, still-`Pending`
+    /// suggestion's confidence and confirmation count.
+    #[test]
+    fn a_repeated_paraphrase_within_the_dedup_window_confirms_the_original_suggestion() {
+        let conn = seeded_db();
+        let session = ServiceSession::start("Confirmation Test");
+        persist_service(&conn, &session).unwrap();
+
+        let mut provider_conn = open_in_memory().unwrap();
+        run_migrations(&mut provider_conn).unwrap();
+        apply_dev_seed(&provider_conn).unwrap();
+        let provider = SqliteBibleProvider::new(provider_conn);
+        let mut context = DefaultScriptureContextManager::new("KJV");
+
+        // Wording chosen to trigger the Paraphrase fallback (no explicit
+        // citation) against ROM 8:28 in the dev seed, deliberately scoring
+        // below the MAX_CONFIRMED_SCORE cap (4 of 5 significant words -
+        // "know"/"thing"/"work"/"good" - match the verse; "somehow" does
+        // not, giving 0.8) so a genuine confirmation-driven rise is
+        // observable rather than immediately clamped by the cap.
+        let paraphrase_text = "We know that all things somehow work for good.";
+
+        let first = handle_final_transcript(
+            &conn,
+            &provider,
+            &mut context,
+            session.id,
+            "KJV",
+            segment(paraphrase_text, 0),
+        )
+        .unwrap();
+        assert_eq!(first.suggestions.len(), 1);
+        let original_id = first.suggestions[0].id;
+        let original_score = first.suggestions[0].confidence.score;
+        assert_eq!(first.suggestions[0].confirmation_count, 0);
+
+        let second = handle_final_transcript(
+            &conn,
+            &provider,
+            &mut context,
+            session.id,
+            "KJV",
+            segment(paraphrase_text, 1),
+        )
+        .unwrap();
+        assert!(
+            second.suggestions.is_empty(),
+            "a repeated Paraphrase guess must still never create a second suggestion"
+        );
+
+        let confirmed = get_suggestion(&conn, original_id).unwrap();
+        assert_eq!(
+            confirmed.confirmation_count, 1,
+            "the original suggestion's confirmation_count must increment"
+        );
+        assert!(
+            confirmed.confidence.score > original_score,
+            "a confirmed suggestion's confidence must rise above its original score"
+        );
+
+        let all_suggestions = list_suggestions(&conn, session.id, None).unwrap();
+        assert_eq!(
+            all_suggestions.len(),
+            1,
+            "confirmation must never create a second suggestion row"
+        );
+    }
+
+    /// Explicit citations are already near the confidence ceiling and are
+    /// never confirmation-boosted - repeating one is still pure dedup
+    /// suppression, exactly as it was before Phase 5.2.
+    #[test]
+    fn a_repeated_explicit_citation_is_never_confirmation_boosted() {
+        let conn = seeded_db();
+        let session = ServiceSession::start("No Confirmation For Citations Test");
+        persist_service(&conn, &session).unwrap();
+
+        let mut provider_conn = open_in_memory().unwrap();
+        run_migrations(&mut provider_conn).unwrap();
+        apply_dev_seed(&provider_conn).unwrap();
+        let provider = SqliteBibleProvider::new(provider_conn);
+        let mut context = DefaultScriptureContextManager::new("KJV");
+
+        let first = handle_final_transcript(
+            &conn,
+            &provider,
+            &mut context,
+            session.id,
+            "KJV",
+            segment("Romans 8:28", 0),
+        )
+        .unwrap();
+        let original_id = first.suggestions[0].id;
+        let original_score = first.suggestions[0].confidence.score;
+
+        handle_final_transcript(
+            &conn,
+            &provider,
+            &mut context,
+            session.id,
+            "KJV",
+            segment("Romans 8:28", 1),
+        )
+        .unwrap();
+
+        let reloaded = get_suggestion(&conn, original_id).unwrap();
+        assert_eq!(
+            reloaded.confirmation_count, 0,
+            "an explicit citation's repeat must never be treated as a confirmation"
+        );
+        assert!((reloaded.confidence.score - original_score).abs() < 0.001);
     }
 
     /// A different reference is never suppressed, even moments after an

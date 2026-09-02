@@ -2387,6 +2387,14 @@ function SuggestionCard({
           <div className="live-brain__suggestion-header">
             <strong>{reference}</strong>
             <span className="live-brain__confidence">Confidence: {confidencePercent}%</span>
+            {suggestion.confirmationCount > 0 && (
+              <span
+                className="live-brain__confirmation-badge"
+                title="Independently redetected while pending - confidence raised accordingly (Phase 5.2)"
+              >
+                Confirmed &times;{suggestion.confirmationCount}
+              </span>
+            )}
           </div>
           {suggestion.sourceText && <p className="live-brain__source-text">&ldquo;{suggestion.sourceText}&rdquo;</p>}
           {suggestion.confidence.reason && (

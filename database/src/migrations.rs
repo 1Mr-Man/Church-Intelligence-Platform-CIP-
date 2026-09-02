@@ -76,6 +76,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0013_bible_verse_embeddings",
         sql: include_str!("../migrations/0013_bible_verse_embeddings.sql"),
     },
+    Migration {
+        version: 14,
+        name: "0014_suggestion_confirmation",
+        sql: include_str!("../migrations/0014_suggestion_confirmation.sql"),
+    },
 ];
 
 /// A migration that was applied during this call to [`run_migrations`].

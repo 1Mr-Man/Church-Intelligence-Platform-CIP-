@@ -62,6 +62,13 @@ export interface Suggestion {
   /** The transcript substring that produced this suggestion - "what did
    * the pastor say" next to a suggestion in the queue. */
   sourceText: string | null;
+  /** How many times this suggestion's reference was independently
+   * redetected while still `pending`, within the live pipeline's
+   * suggestion-dedup window (Phase 5.2, "temporal confirmation") -
+   * corroborating evidence for a heuristic (paraphrase/semantic) guess,
+   * never a reason a second suggestion was created. `0` for an explicit
+   * citation or any suggestion never independently redetected. */
+  confirmationCount: number;
 }
 
 /**

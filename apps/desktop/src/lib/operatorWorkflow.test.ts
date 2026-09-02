@@ -33,6 +33,7 @@ describe("canonical operator workflow", () => {
           createdAt: "2026-01-01T10:05:00Z",
           transcriptSegmentId: "seg-3",
           sourceText: "and we know that all things work together for good",
+          confirmationCount: 0,
         },
       ],
       musicFindings: [

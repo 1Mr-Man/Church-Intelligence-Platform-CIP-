@@ -22,6 +22,7 @@ function suggestion(overrides: Partial<Suggestion> = {}): Suggestion {
     createdAt: "2026-01-01T10:00:00Z",
     transcriptSegmentId: "seg-1",
     sourceText: "for we know that all things work together for good",
+    confirmationCount: 0,
     ...overrides,
   };
 }

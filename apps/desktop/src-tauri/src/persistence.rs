@@ -364,8 +364,8 @@ pub fn persist_suggestion(conn: &Connection, suggestion: &Suggestion) -> Result<
     conn.execute(
         "INSERT INTO ai_suggestions
             (id, service_id, kind, payload, status, confidence_score, confidence_level, created_at,
-             transcript_segment_id, source_text)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             transcript_segment_id, source_text, confirmation_count)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             suggestion.id.to_string(),
             suggestion.service_id.to_string(),
@@ -377,6 +377,7 @@ pub fn persist_suggestion(conn: &Connection, suggestion: &Suggestion) -> Result<
             suggestion.created_at.to_rfc3339(),
             suggestion.transcript_segment_id.map(|id| id.to_string()),
             suggestion.source_text,
+            suggestion.confirmation_count,
         ],
     )?;
     Ok(())
@@ -391,6 +392,16 @@ pub enum DetectionCategory {
     Explicit,
     /// `PARAPHRASE_REFERENCE` - a lexical-overlap guess, never a citation.
     Paraphrase,
+    /// `SEMANTIC_REFERENCE` - an embedding-similarity guess, never a
+    /// citation. Phase 5.2 fix: previously fell into the `Explicit` bucket
+    /// by omission (`ReferenceKind::Semantic` was never routed to its own
+    /// category in `pipeline.rs`), so a repeated semantic guess was never
+    /// deduped against itself - only ever checked against
+    /// `DIRECT`/`VERSE`/`SEQUENTIAL_REFERENCE` types, which a semantic
+    /// match almost never shares a `detected_at` window with. Its own
+    /// bucket restores the same "repeat within the window is suppressed"
+    /// guarantee `Paraphrase` already had.
+    Semantic,
 }
 
 /// Phase 1.3 session-aware suggestion deduplication, extended in Phase 4.1
@@ -405,13 +416,13 @@ pub enum DetectionCategory {
 ///
 /// Queries `scripture_detections` (written for every detection, not just
 /// the ones that survived dedup as a suggestion) and filters by
-/// `category` - so a repeated `Paraphrase` guess for the same verse is
-/// suppressed, and a repeated explicit citation is suppressed, but an
-/// explicit citation is **never** suppressed just because a `Paraphrase`
-/// guess for the same verse was already made moments earlier (or vice
-/// versa). A pastor who paraphrases a verse and then reads it verbatim -
-/// or the reverse - should see both, since the second one is new, more
-/// specific information.
+/// `category` - so a repeated `Paraphrase`/`Semantic` guess for the same
+/// verse is suppressed, and a repeated explicit citation is suppressed,
+/// but an explicit citation is **never** suppressed just because a
+/// `Paraphrase`/`Semantic` guess for the same verse was already made
+/// moments earlier (or vice versa). A pastor who paraphrases a verse and
+/// then reads it verbatim - or the reverse - should see both, since the
+/// second one is new, more specific information.
 ///
 /// `excluding_transcript_segment_id` must be the current segment's id: the
 /// caller (`pipeline::handle_final_transcript`) always persists every
@@ -439,6 +450,12 @@ pub fn has_recent_detection_for_reference(
              WHERE service_id = ?1 AND reference = ?2 AND detected_at >= ?3
              AND (transcript_segment_id IS NULL OR transcript_segment_id != ?4)
              AND detection_type = 'PARAPHRASE_REFERENCE'"
+        }
+        DetectionCategory::Semantic => {
+            "SELECT count(*) FROM scripture_detections
+             WHERE service_id = ?1 AND reference = ?2 AND detected_at >= ?3
+             AND (transcript_segment_id IS NULL OR transcript_segment_id != ?4)
+             AND detection_type = 'SEMANTIC_REFERENCE'"
         }
     };
     let count: i64 = conn.query_row(
@@ -470,6 +487,7 @@ fn row_to_suggestion(
     created_at: String,
     transcript_segment_id: Option<String>,
     source_text: Option<String>,
+    confirmation_count: i64,
 ) -> Result<Suggestion, PersistError> {
     Ok(Suggestion {
         id: Uuid::parse_str(&id).map_err(|_| PersistError::NotFound(id.clone()))?,
@@ -487,11 +505,12 @@ fn row_to_suggestion(
             .unwrap_or_else(|_| Utc::now()),
         transcript_segment_id: transcript_segment_id.and_then(|id| Uuid::parse_str(&id).ok()),
         source_text,
+        confirmation_count: confirmation_count.max(0) as u32,
     })
 }
 
 const SUGGESTION_COLUMNS: &str = "id, service_id, payload, status, confidence_score, created_at, \
-     transcript_segment_id, source_text";
+     transcript_segment_id, source_text, confirmation_count";
 
 #[allow(clippy::type_complexity)]
 fn suggestion_row(
@@ -505,6 +524,7 @@ fn suggestion_row(
     String,
     Option<String>,
     Option<String>,
+    i64,
 )> {
     Ok((
         row.get(0)?,
@@ -515,6 +535,7 @@ fn suggestion_row(
         row.get(5)?,
         row.get(6)?,
         row.get(7)?,
+        row.get(8)?,
     ))
 }
 
@@ -538,9 +559,17 @@ pub fn list_suggestions(
 
     rows.into_iter()
         .map(
-            |(id, service_id, payload, status, score, created_at, seg_id, src)| {
+            |(id, service_id, payload, status, score, created_at, seg_id, src, confirm_count)| {
                 row_to_suggestion(
-                    id, service_id, payload, status, score, created_at, seg_id, src,
+                    id,
+                    service_id,
+                    payload,
+                    status,
+                    score,
+                    created_at,
+                    seg_id,
+                    src,
+                    confirm_count,
                 )
             },
         )
@@ -556,9 +585,17 @@ pub fn get_suggestion(conn: &Connection, suggestion_id: Uuid) -> Result<Suggesti
     .optional()?
     .ok_or_else(|| PersistError::NotFound(suggestion_id.to_string()))
     .and_then(
-        |(id, service_id, payload, status, score, created_at, seg_id, src)| {
+        |(id, service_id, payload, status, score, created_at, seg_id, src, confirm_count)| {
             row_to_suggestion(
-                id, service_id, payload, status, score, created_at, seg_id, src,
+                id,
+                service_id,
+                payload,
+                status,
+                score,
+                created_at,
+                seg_id,
+                src,
+                confirm_count,
             )
         },
     )
@@ -601,12 +638,80 @@ pub fn update_suggestion_status(
     .optional()?
     .ok_or_else(|| PersistError::NotFound(suggestion_id.to_string()))
     .and_then(
-        |(id, service_id, payload, status, score, created_at, seg_id, src)| {
+        |(id, service_id, payload, status, score, created_at, seg_id, src, confirm_count)| {
             row_to_suggestion(
-                id, service_id, payload, status, score, created_at, seg_id, src,
+                id,
+                service_id,
+                payload,
+                status,
+                score,
+                created_at,
+                seg_id,
+                src,
+                confirm_count,
             )
         },
     )
+}
+
+/// The most recently created still-`Pending` suggestion for `service_id`
+/// whose `SuggestionKind::Scripture { reference }` exactly matches
+/// `reference_display`, if any - the Phase 5.2 ("temporal confirmation")
+/// target `pipeline::handle_final_transcript` boosts when a `Paraphrase`/
+/// `Semantic` detection's reference recurs within the dedup window. Only
+/// `Pending` is considered: once an operator has approved/edited/rejected
+/// a suggestion, its fate is decided and a later redetection must never
+/// touch it again. Reuses [`list_suggestions`] (already ordered
+/// newest-first) rather than a second bespoke query - a service's pending
+/// queue is never large enough for the extra `Vec` allocation to matter.
+pub fn find_pending_suggestion_for_reference(
+    conn: &Connection,
+    service_id: Uuid,
+    reference_display: &str,
+) -> Result<Option<Suggestion>, PersistError> {
+    let pending = list_suggestions(conn, service_id, Some(SuggestionStatus::Pending))?;
+    Ok(pending.into_iter().find(|s| match &s.kind {
+        SuggestionKind::Scripture { reference } => reference == reference_display,
+        _ => false,
+    }))
+}
+
+/// Boosts a still-`Pending` suggestion's confidence because its own
+/// reference was just independently redetected within the dedup window
+/// (Phase 5.2, "temporal confirmation / sliding re-score") - repetition of
+/// a heuristic (`Paraphrase`/`Semantic`) guess is corroborating evidence,
+/// never a reason to create a second suggestion (the caller's dedup check
+/// already suppresses that). The score only ever moves up, by exactly
+/// `score_bonus`, and is capped at `max_score` - deliberately kept below
+/// the ~0.97 an explicit citation earns, so a repeated heuristic guess can
+/// never out-rank a real citation regardless of how many times it recurs.
+/// `confirmation_count` increments unconditionally (even once the score
+/// cap is reached), since it is an honest count of how many times this
+/// happened, not a proxy for the score itself.
+pub fn confirm_suggestion(
+    conn: &Connection,
+    suggestion_id: Uuid,
+    score_bonus: f32,
+    max_score: f32,
+) -> Result<Suggestion, PersistError> {
+    let current = get_suggestion(conn, suggestion_id)?;
+    let new_score = (current.confidence.score + score_bonus)
+        .min(max_score)
+        .max(current.confidence.score);
+    let new_level = ConfidenceLevel::from_score(new_score);
+    let new_count = current.confirmation_count + 1;
+    conn.execute(
+        "UPDATE ai_suggestions
+         SET confidence_score = ?1, confidence_level = ?2, confirmation_count = ?3
+         WHERE id = ?4",
+        params![
+            new_score,
+            confidence_level_str(new_level),
+            new_count,
+            suggestion_id.to_string(),
+        ],
+    )?;
+    get_suggestion(conn, suggestion_id)
 }
 
 // --- presentation_items ---------------------------------------------------
@@ -2157,6 +2262,190 @@ mod tests {
             segment_id,
         )
         .unwrap());
+    }
+
+    // --- temporal confirmation / sliding re-score (Phase 5.2) -----------------
+
+    /// Regression lock for the Phase 5.2 dedup-category fix: before this
+    /// phase, `ReferenceKind::Semantic` fell into the `Explicit` bucket by
+    /// omission (`pipeline.rs` never routed it to its own category), so a
+    /// repeated semantic guess was checked only against
+    /// `DIRECT`/`VERSE`/`SEQUENTIAL_REFERENCE` rows - never against another
+    /// `SEMANTIC_REFERENCE` row - meaning it could never dedup against
+    /// itself. `DetectionCategory::Semantic` restores that guarantee.
+    #[test]
+    fn has_recent_detection_for_reference_semantic_category_dedupes_against_itself() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+
+        let first_segment = sample_transcript_segment("God causes all things to work for good", 0);
+        let first_segment_id = first_segment.id;
+        persist_transcript_segment(&conn, session.id, &first_segment).unwrap();
+        persist_scripture_detection(
+            &conn,
+            session.id,
+            Some(first_segment_id),
+            "KJV",
+            &rom_8_28_detection(ReferenceKind::Semantic),
+        )
+        .unwrap();
+
+        let second_segment = sample_transcript_segment("Everything works for the good of those", 1);
+        let second_segment_id = second_segment.id;
+        persist_transcript_segment(&conn, session.id, &second_segment).unwrap();
+
+        assert!(
+            has_recent_detection_for_reference(
+                &conn,
+                session.id,
+                "ROM 8:28",
+                DetectionCategory::Semantic,
+                60,
+                second_segment_id,
+            )
+            .unwrap(),
+            "a repeated Semantic guess for the same verse must dedup against a prior Semantic guess"
+        );
+    }
+
+    /// The `Semantic` bucket is still its own category, isolated from
+    /// `Explicit` in both directions - the same guarantee `Paraphrase`
+    /// already had (see the tests above).
+    #[test]
+    fn has_recent_detection_for_reference_semantic_category_is_isolated_from_explicit() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+
+        let semantic_segment = sample_transcript_segment("Everything works for good somehow", 0);
+        let semantic_segment_id = semantic_segment.id;
+        persist_transcript_segment(&conn, session.id, &semantic_segment).unwrap();
+        persist_scripture_detection(
+            &conn,
+            session.id,
+            Some(semantic_segment_id),
+            "KJV",
+            &rom_8_28_detection(ReferenceKind::Semantic),
+        )
+        .unwrap();
+
+        let explicit_segment = sample_transcript_segment("Romans 8:28", 1);
+        let explicit_segment_id = explicit_segment.id;
+        persist_transcript_segment(&conn, session.id, &explicit_segment).unwrap();
+
+        assert!(
+            !has_recent_detection_for_reference(
+                &conn,
+                session.id,
+                "ROM 8:28",
+                DetectionCategory::Explicit,
+                60,
+                explicit_segment_id,
+            )
+            .unwrap(),
+            "an explicit citation must never be suppressed by a recent Semantic guess for the same verse"
+        );
+    }
+
+    fn sample_paraphrase_suggestion(service_id: Uuid, score: f32) -> Suggestion {
+        Suggestion::new(
+            service_id,
+            SuggestionKind::Scripture {
+                reference: "ROM 8:28".into(),
+            },
+            ConfidenceResult::new(score, ConfidenceSource::Heuristic, None),
+        )
+    }
+
+    #[test]
+    fn find_pending_suggestion_for_reference_finds_the_matching_pending_suggestion() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let suggestion = sample_paraphrase_suggestion(session.id, 0.8);
+        persist_suggestion(&conn, &suggestion).unwrap();
+
+        let found = find_pending_suggestion_for_reference(&conn, session.id, "ROM 8:28")
+            .unwrap()
+            .expect("a pending suggestion for this reference exists");
+        assert_eq!(found.id, suggestion.id);
+    }
+
+    #[test]
+    fn find_pending_suggestion_for_reference_ignores_non_pending_suggestions() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let suggestion = sample_paraphrase_suggestion(session.id, 0.8);
+        persist_suggestion(&conn, &suggestion).unwrap();
+        update_suggestion_status(&conn, suggestion.id, SuggestionStatus::Approved, None).unwrap();
+
+        let found = find_pending_suggestion_for_reference(&conn, session.id, "ROM 8:28").unwrap();
+        assert!(
+            found.is_none(),
+            "a suggestion the operator already acted on must never be a confirmation target"
+        );
+    }
+
+    #[test]
+    fn find_pending_suggestion_for_reference_returns_none_without_a_match() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+
+        let found = find_pending_suggestion_for_reference(&conn, session.id, "ROM 8:28").unwrap();
+        assert!(found.is_none());
+    }
+
+    #[test]
+    fn confirm_suggestion_increments_count_and_boosts_score() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let suggestion = sample_paraphrase_suggestion(session.id, 0.75);
+        persist_suggestion(&conn, &suggestion).unwrap();
+
+        let confirmed = confirm_suggestion(&conn, suggestion.id, 0.1, 0.9).unwrap();
+        assert_eq!(confirmed.confirmation_count, 1);
+        assert!((confirmed.confidence.score - 0.85).abs() < 0.001);
+
+        let reloaded = get_suggestion(&conn, suggestion.id).unwrap();
+        assert_eq!(reloaded.confirmation_count, 1);
+        assert!((reloaded.confidence.score - 0.85).abs() < 0.001);
+    }
+
+    #[test]
+    fn confirm_suggestion_caps_the_score_but_keeps_counting() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let suggestion = sample_paraphrase_suggestion(session.id, 0.88);
+        persist_suggestion(&conn, &suggestion).unwrap();
+
+        let first = confirm_suggestion(&conn, suggestion.id, 0.1, 0.9).unwrap();
+        assert!((first.confidence.score - 0.9).abs() < 0.001);
+        assert_eq!(first.confirmation_count, 1);
+
+        let second = confirm_suggestion(&conn, suggestion.id, 0.1, 0.9).unwrap();
+        assert!(
+            (second.confidence.score - 0.9).abs() < 0.001,
+            "score must never exceed max_score even after another confirmation"
+        );
+        assert_eq!(
+            second.confirmation_count, 2,
+            "confirmation_count is an honest count of occurrences, not a proxy for the score"
+        );
+    }
+
+    #[test]
+    fn confirm_suggestion_never_decreases_the_score() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        // A negative bonus should never happen in practice (the caller
+        // always passes CONFIRMATION_SCORE_BONUS), but confirm_suggestion
+        // itself guards against ever lowering a suggestion's score.
+        let suggestion = sample_paraphrase_suggestion(session.id, 0.8);
+        persist_suggestion(&conn, &suggestion).unwrap();
+
+        let confirmed = confirm_suggestion(&conn, suggestion.id, -0.5, 0.9).unwrap();
+        assert!(
+            (confirmed.confidence.score - 0.8).abs() < 0.001,
+            "confirm_suggestion must never lower a suggestion's score"
+        );
     }
 
     // --- sermon foundation (Phase 2.5, per the authoritative Phase 2 roadmap) --

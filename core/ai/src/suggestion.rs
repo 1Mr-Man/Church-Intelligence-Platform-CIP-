@@ -54,6 +54,16 @@ pub struct Suggestion {
     /// The transcript substring that produced this suggestion, denormalized
     /// so the link survives even if the referenced segment is ever gone.
     pub source_text: Option<String>,
+    /// How many times this suggestion's reference was independently
+    /// redetected while still `Pending`, within the live pipeline's
+    /// suggestion-dedup window (Phase 5.2, "temporal confirmation") -
+    /// corroborating evidence for a heuristic (`Paraphrase`/`Semantic`)
+    /// guess, not a reason a second suggestion was ever created. Always `0`
+    /// at construction; only the desktop-layer pipeline
+    /// (`apps/desktop/src-tauri/src/persistence.rs::confirm_suggestion`)
+    /// ever increments it, since `core` has no notion of "redetected" -
+    /// that requires already-persisted history this crate doesn't see.
+    pub confirmation_count: u32,
 }
 
 impl Suggestion {
@@ -67,6 +77,7 @@ impl Suggestion {
             created_at: Utc::now(),
             transcript_segment_id: None,
             source_text: None,
+            confirmation_count: 0,
         }
     }
 
@@ -102,5 +113,17 @@ mod tests {
             ConfidenceResult::new(0.95, ConfidenceSource::Heuristic, None),
         );
         assert_eq!(suggestion.status, SuggestionStatus::Pending);
+    }
+
+    #[test]
+    fn new_suggestions_start_with_zero_confirmations() {
+        let suggestion = Suggestion::new(
+            Uuid::new_v4(),
+            SuggestionKind::Scripture {
+                reference: "ROM 8:28".into(),
+            },
+            ConfidenceResult::new(0.8, ConfidenceSource::Heuristic, None),
+        );
+        assert_eq!(suggestion.confirmation_count, 0);
     }
 }
