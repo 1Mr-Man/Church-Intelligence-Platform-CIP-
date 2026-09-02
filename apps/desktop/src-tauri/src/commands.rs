@@ -641,6 +641,12 @@ pub struct SpeechRuntimeDiagnostics {
     /// Derived from `queue_pending_ms` against fixed thresholds - see
     /// `classify_overload`'s own docs. Never stored redundantly.
     pub overload_state: OverloadState,
+    /// Phase 5.3: count of fully-buffered windows the speech engine's own
+    /// voice-activity detection classified as silence and skipped without
+    /// running real inference - see
+    /// `state::SpeechDiagnostics::silent_windows_skipped` and
+    /// `docs/phase-5-3-audio-vad.md`.
+    pub silent_windows_skipped: u64,
 }
 
 /// Phase 3.8.7.3: the speech pipeline's operator-visible backlog state,
@@ -812,6 +818,7 @@ pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> Pilo
             avg_inference_duration_ms,
             last_transcript_pipeline_duration_ms: diag.last_transcript_pipeline_duration_ms,
             overload_state: classify_overload(diag.queue_pending_ms),
+            silent_windows_skipped: diag.silent_windows_skipped,
         }
     };
 
@@ -1844,6 +1851,19 @@ fn handle_audio_chunk(
                 Some(diag.max_inference_duration_ms.unwrap_or(0).max(duration_ms));
             diag.inference_duration_ms_sum += duration_ms;
             diag.inference_duration_samples += 1;
+        }
+
+        // Phase 5.3: a full window that VAD classified as silence also
+        // reports `triggered_inference == false` (no real inference ran),
+        // so this check must happen independently of the block above, not
+        // nested inside it - see `SpeechEngine::last_feed_was_silence`'s
+        // doc comment for why the two cases must stay distinguishable.
+        if speech.last_feed_was_silence() {
+            state
+                .speech_diagnostics
+                .lock()
+                .expect("speech_diagnostics mutex poisoned")
+                .silent_windows_skipped += 1;
         }
 
         match feed_result {
@@ -6990,6 +7010,7 @@ mod tests {
                 avg_inference_duration_ms: None,
                 last_transcript_pipeline_duration_ms: None,
                 overload_state: OverloadState::Normal,
+                silent_windows_skipped: 0,
             },
             audio_devices: Vec::new(),
             audio: AudioEngineStatus {

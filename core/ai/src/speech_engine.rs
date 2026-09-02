@@ -99,6 +99,24 @@ pub trait SpeechEngine: Send + Sync {
         false
     }
 
+    /// Whether the most recent `feed_audio` call's fully-buffered window
+    /// was classified as silence by voice-activity detection and skipped
+    /// without ever running the engine's real inference pass - distinct
+    /// from `last_feed_triggered_inference() == false`, which is also true
+    /// for a window that simply hasn't finished buffering yet. `false` by
+    /// default - only an engine with its own VAD gate (`WhisperSpeechEngine`,
+    /// Phase 5.3) overrides this.
+    ///
+    /// Phase 5.3: added so a caller can honestly distinguish "no inference
+    /// happened yet because the window is still filling" from "a full
+    /// window arrived but was near-silent, so inference was deliberately
+    /// skipped" - both report `last_feed_triggered_inference() == false`,
+    /// but only the latter should count as a real, observable VAD event in
+    /// diagnostics.
+    fn last_feed_was_silence(&self) -> bool {
+        false
+    }
+
     /// Discard any buffered-but-not-yet-inferred audio without running
     /// inference on it. A no-op by default (`NullSpeechEngine`/
     /// `ScriptedSpeechEngine` hold no such buffer).

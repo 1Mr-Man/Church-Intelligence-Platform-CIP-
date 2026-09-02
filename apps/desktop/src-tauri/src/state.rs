@@ -138,6 +138,16 @@ pub struct SpeechDiagnostics {
     /// generation combined) - see `docs/phase-3-8-7-3-audit.md` Finding 6.
     /// `None` until the first final transcript is processed.
     pub last_transcript_pipeline_duration_ms: Option<u64>,
+    /// Phase 5.3: count of fully-buffered windows the speech engine's own
+    /// voice-activity detection classified as silence and skipped without
+    /// running real inference (`SpeechEngine::last_feed_was_silence() ==
+    /// true`) - see `docs/phase-5-3-audio-vad.md`. Distinct from both
+    /// `chunks_skipped_engine_not_ready` (the engine wasn't ready at all)
+    /// and simply not incrementing `inferences_attempted` (a window that
+    /// hasn't finished buffering yet also doesn't trigger inference, but
+    /// was never classified as silence either) - this field only ever
+    /// counts a real, observed VAD decision.
+    pub silent_windows_skipped: u64,
 }
 
 /// Phase 4.4 counterpart to [`SpeechDiagnostics`], much smaller: there is

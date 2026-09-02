@@ -101,6 +101,13 @@ export interface SpeechRuntimeDiagnostics {
   lastTranscriptPipelineDurationMs: number | null;
   /** Derived from `queuePendingMs` against fixed thresholds - see `commands.rs::classify_overload`. */
   overloadState: "normal" | "busy" | "falling_behind" | "overloaded";
+  /**
+   * Phase 5.3: count of fully-buffered windows the speech engine's own
+   * voice-activity detection classified as silence and skipped without
+   * running real inference. Distinct from a window that simply hasn't
+   * finished buffering yet - that case never increments this counter.
+   */
+  silentWindowsSkipped: number;
 }
 
 export interface PilotDiagnostics {

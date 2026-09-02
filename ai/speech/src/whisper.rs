@@ -37,6 +37,48 @@ const SAMPLE_RATE_HZ: u32 = 16_000;
 /// true low-latency streaming interface.
 const CHUNK_SAMPLES: usize = SAMPLE_RATE_HZ as usize * 3;
 
+/// Voice-activity RMS floor (Phase 5.3) below which a fully-buffered ~3s
+/// window is treated as silence and whisper.cpp's real inference pass is
+/// skipped entirely - the window's elapsed-time bookkeeping still advances
+/// exactly as if inference had run (see [`WhisperSpeechEngine::run_inference`]),
+/// so later segments' `start_ms`/`end_ms` are never distorted; only the
+/// (expensive, and on slow hardware potentially hallucination-prone -
+/// see `docs/phase-5-3-audio-vad.md`) whisper.cpp call itself is avoided.
+///
+/// Deliberately conservative (near the noise floor of an unmuted,
+/// otherwise-quiet microphone) rather than tuned to filter quiet speech -
+/// skipping a window that actually contained soft-but-real speech is a
+/// far worse failure than occasionally spending one inference pass on
+/// true silence. Documented, not empirically calibrated against real
+/// hardware, matching every other threshold in this codebase
+/// (`MIN_PARAPHRASE_SCORE`, `MIN_SEMANTIC_SIMILARITY`,
+/// `CONFIRMATION_SCORE_BONUS`) - revisit once real operator feedback from
+/// a live sanctuary environment exists.
+const SILENCE_RMS_THRESHOLD: f32 = 0.01;
+
+/// RMS energy of a PCM16 buffer, `0.0..=1.0` - the same formula
+/// `integrations/audio`'s own input-level meter uses, duplicated here
+/// rather than adding a new cross-crate dependency (`ai/speech` has no
+/// existing dependency on `integrations/audio`) since this is a small,
+/// pure, independently-testable function.
+fn rms_level(samples: &[i16]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum_sq: f64 = samples
+        .iter()
+        .map(|s| (f64::from(*s) / f64::from(i16::MAX)).powi(2))
+        .sum();
+    ((sum_sq / samples.len() as f64).sqrt() as f32).clamp(0.0, 1.0)
+}
+
+/// Whether `samples` is quiet enough to be treated as silence - see
+/// [`SILENCE_RMS_THRESHOLD`]'s own docs for the conservative reasoning
+/// behind the cutoff.
+fn is_silence(samples: &[i16]) -> bool {
+    rms_level(samples) < SILENCE_RMS_THRESHOLD
+}
+
 pub struct WhisperSpeechEngine {
     ctx: WhisperContext,
     buffer: Vec<i16>,
@@ -47,6 +89,10 @@ pub struct WhisperSpeechEngine {
     /// ran `run_inference` - see `SpeechEngine::last_feed_triggered_inference`'s
     /// own docs for why a caller needs this.
     last_feed_triggered_inference: bool,
+    /// Phase 5.3: whether the most recent fully-buffered window was
+    /// classified as silence and skipped rather than fed to whisper.cpp -
+    /// see `SpeechEngine::last_feed_was_silence`'s own docs.
+    last_feed_was_silence: bool,
 }
 
 impl WhisperSpeechEngine {
@@ -75,23 +121,44 @@ impl WhisperSpeechEngine {
             elapsed_ms: 0,
             language: None,
             last_feed_triggered_inference: false,
+            last_feed_was_silence: false,
         })
     }
 
     fn run_inference(&mut self) -> Result<Vec<TranscriptSegment>, SpeechEngineError> {
         if self.buffer.is_empty() {
+            self.last_feed_triggered_inference = false;
+            self.last_feed_was_silence = false;
             return Ok(vec![]);
         }
+
+        let duration_ms = (self.buffer.len() as u64 * 1000) / u64::from(SAMPLE_RATE_HZ);
+        let start_ms = self.elapsed_ms;
+
+        // Phase 5.3 (VAD gating): a near-silent window still advances the
+        // clock and is still cleared, exactly as if inference had run - it
+        // just never reaches whisper.cpp, avoiding both a wasted (on slow
+        // hardware, expensive) inference pass and the hallucination risk
+        // of running Whisper on near-empty audio. See
+        // `SILENCE_RMS_THRESHOLD`'s own docs for why the cutoff is
+        // deliberately conservative.
+        if is_silence(&self.buffer) {
+            self.elapsed_ms += duration_ms;
+            self.buffer.clear();
+            self.last_feed_triggered_inference = false;
+            self.last_feed_was_silence = true;
+            return Ok(vec![]);
+        }
+        self.last_feed_was_silence = false;
 
         let audio_f32: Vec<f32> = self
             .buffer
             .iter()
             .map(|s| f32::from(*s) / f32::from(i16::MAX))
             .collect();
-        let duration_ms = (self.buffer.len() as u64 * 1000) / u64::from(SAMPLE_RATE_HZ);
-        let start_ms = self.elapsed_ms;
         self.elapsed_ms += duration_ms;
         self.buffer.clear();
+        self.last_feed_triggered_inference = true;
 
         let mut state = self
             .ctx
@@ -167,10 +234,10 @@ impl SpeechEngine for WhisperSpeechEngine {
     fn feed_audio(&mut self, samples: &[i16]) -> Result<Vec<TranscriptSegment>, SpeechEngineError> {
         self.buffer.extend_from_slice(samples);
         if self.buffer.len() >= CHUNK_SAMPLES {
-            self.last_feed_triggered_inference = true;
             self.run_inference()
         } else {
             self.last_feed_triggered_inference = false;
+            self.last_feed_was_silence = false;
             Ok(vec![])
         }
     }
@@ -187,6 +254,10 @@ impl SpeechEngine for WhisperSpeechEngine {
         self.last_feed_triggered_inference
     }
 
+    fn last_feed_was_silence(&self) -> bool {
+        self.last_feed_was_silence
+    }
+
     fn discard_buffered_audio(&mut self) {
         self.buffer.clear();
     }
@@ -196,6 +267,57 @@ impl SpeechEngine for WhisperSpeechEngine {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    // --- Phase 5.3 VAD gating: the pure classification functions, fully
+    // testable without a real model file or `WhisperContext` -----------
+
+    #[test]
+    fn silence_has_near_zero_rms() {
+        let silence = vec![0i16; SAMPLE_RATE_HZ as usize];
+        assert!(rms_level(&silence) < 0.001);
+        assert!(is_silence(&silence));
+    }
+
+    #[test]
+    fn a_full_scale_tone_is_never_classified_as_silence() {
+        // A square wave alternating between full positive and negative
+        // scale - deliberately loud, not a realistic voice waveform, but
+        // enough to prove the RMS floor doesn't false-positive on any
+        // genuinely energetic signal.
+        let tone: Vec<i16> = (0..SAMPLE_RATE_HZ)
+            .map(|i| if i % 2 == 0 { i16::MAX } else { i16::MIN })
+            .collect();
+        assert!(rms_level(&tone) > 0.9);
+        assert!(!is_silence(&tone));
+    }
+
+    #[test]
+    fn low_level_room_noise_just_above_the_floor_is_not_silence() {
+        // A quiet but real signal (5% of full scale) - well above
+        // SILENCE_RMS_THRESHOLD (0.01), proving the gate does not
+        // over-trigger on quiet-but-genuine audio, only on near-total
+        // silence.
+        let quiet: Vec<i16> = (0..SAMPLE_RATE_HZ)
+            .map(|i| {
+                let amplitude = (f32::from(i16::MAX) * 0.05) as i16;
+                if i % 2 == 0 {
+                    amplitude
+                } else {
+                    -amplitude
+                }
+            })
+            .collect();
+        assert!(
+            !is_silence(&quiet),
+            "a quiet-but-real signal must never be misclassified as silence"
+        );
+    }
+
+    #[test]
+    fn rms_level_of_an_empty_buffer_is_zero_not_a_panic() {
+        assert_eq!(rms_level(&[]), 0.0);
+        assert!(is_silence(&[]));
+    }
 
     /// The one thing about this engine that's fully verifiable without a
     /// real model file: a missing model is reported cleanly, never

@@ -1,0 +1,45 @@
+{
+  "phase": "5.3",
+  "summary": "Environment A build/test evidence for Voice Activity Detection (RMS-energy silence gating) inside WhisperSpeechEngine's inference path.",
+  "scope": "RMS-energy thresholding only, chosen over noise suppression (needs a new native dependency) and acoustic echo cancellation (needs real hardware to validate) - see docs/phase-5-3-audio-vad.md's Why-this-phase-exists section.",
+  "newCode": {
+    "coreAiSpeechEngine": "core/ai/src/speech_engine.rs: new default-false trait method last_feed_was_silence(&self) -> bool.",
+    "aiSpeechWhisper": "ai/speech/src/whisper.rs: SILENCE_RMS_THRESHOLD constant (0.01, documented as a policy choice, not empirically calibrated), rms_level(samples: &[i16]) -> f32 (pure function), is_silence(samples: &[i16]) -> bool, WhisperSpeechEngine.last_feed_was_silence field + trait impl, VAD gate inside run_inference() placed after duration_ms/start_ms computation and before whisper.cpp's state.full() call.",
+    "desktopState": "apps/desktop/src-tauri/src/state.rs: SpeechDiagnostics.silent_windows_skipped: u64.",
+    "desktopCommands": "apps/desktop/src-tauri/src/commands.rs: speech-worker loop increments silent_windows_skipped when speech.last_feed_was_silence() is true (checked independently of the existing triggered_inference branch); SpeechRuntimeDiagnostics gained the same field, populated in get_pilot_diagnostics.",
+    "frontend": "apps/desktop/src/config/appConfig.ts SpeechRuntimeDiagnostics.silentWindowsSkipped; apps/desktop/src/components/workspace/PilotDiagnosticsPanel.tsx displays it in the Inferences line when nonzero."
+  },
+  "newUnitTests": {
+    "crate": "cip-ai-speech",
+    "featureFlag": "whisper",
+    "tests": [
+      "silence_has_near_zero_rms",
+      "a_full_scale_tone_is_never_classified_as_silence",
+      "low_level_room_noise_just_above_the_floor_is_not_silence",
+      "rms_level_of_an_empty_buffer_is_zero_not_a_panic"
+    ],
+    "testCountBeforePhase": 7,
+    "testCountAfterPhase": 11,
+    "command": "cargo test -p cip-ai-speech --features whisper -- --test-threads=1",
+    "result": "11 passed; 0 failed"
+  },
+  "fullRegression": {
+    "fmtCheck": "clean",
+    "clippyDefaultFeatures": "cargo clippy --workspace --all-targets -- -D warnings: clean, 0 warnings",
+    "clippyWhisperSemanticSearch": "cargo clippy --workspace --all-targets --features whisper,semantic-search -- -D warnings: clean, 0 warnings",
+    "testWorkspaceDefaultFeatures": "cargo test --workspace -- --test-threads=1: every crate green, 0 failed across all suites",
+    "testWorkspaceWhisperSemanticSearch": "cargo test --workspace --features whisper,semantic-search -- --test-threads=1: every crate green, 0 failed across all suites (cip-ai-speech reporting 11 passed, up from 7 pre-phase)",
+    "singleThreadedRationale": "Routes around the pre-existing, unrelated config::tests::whisper_model_path_honors_the_env_override test-parallelism flake, first documented in Phase 5.1 and unrelated to this phase's changes."
+  },
+  "frontendRegression": {
+    "typecheck": "npm run typecheck: clean",
+    "lint": "npm run lint: only the 4 pre-existing set-state-in-effect/only-export-components warnings present before this phase, all in files this phase did not touch - no new warnings",
+    "test": "npm run test -- --run: 220/220 passing (unchanged from Phase 5.2 baseline - this phase's only frontend change is a diagnostics-display conditional with no dedicated test)",
+    "build": "npm run build: succeeds"
+  },
+  "architecturalSafetyNotes": [
+    "Zero change to segment timestamp math - the silent-window path advances elapsed_ms and clears the buffer exactly as the inferred-window path already did.",
+    "Zero change to ScriptedSpeechEngine/NullSpeechEngine - both inherit the trait default (false) for last_feed_was_silence().",
+    "silent_windows_skipped, inferences_attempted, and chunks_skipped_engine_not_ready are mutually exclusive per feed_audio call - never double-counted."
+  ]
+}

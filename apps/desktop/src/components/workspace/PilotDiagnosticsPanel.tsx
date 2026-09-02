@@ -175,6 +175,9 @@ export function PilotDiagnosticsPanel() {
                 {diagnostics.speech.chunksSkippedEngineNotReady > 0 && (
                   <> ({diagnostics.speech.chunksSkippedEngineNotReady} more chunks skipped - engine not ready)</>
                 )}
+                {diagnostics.speech.silentWindowsSkipped > 0 && (
+                  <> ({diagnostics.speech.silentWindowsSkipped} windows skipped - classified as silence)</>
+                )}
               </div>
               {diagnostics.speech.lastError && <div>Last error: {diagnostics.speech.lastError}</div>}
             </dd>
