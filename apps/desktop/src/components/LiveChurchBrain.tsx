@@ -1193,8 +1193,8 @@ export function LiveChurchBrain() {
         )}
       </section>
 
-      <section className="live-brain__panel">
-        <h2>Manual Bible Search</h2>
+      <details className="live-brain__panel">
+        <summary>Manual Bible Search</summary>
         <p className="live-brain__hint">Works with no speech model, no audio device, and no internet connection.</p>
         <div className="live-brain__row">
           <input
@@ -1269,7 +1269,7 @@ export function LiveChurchBrain() {
             ))}
           </ul>
         )}
-      </section>
+      </details>
 
       {/* "Current Output" (pre-3.5) is now also folded into the
           Presentation card, unconditionally visible in Operator Mode
@@ -1427,8 +1427,8 @@ export function LiveChurchBrain() {
         </ul>
       </details>
 
-      <section className="live-brain__panel">
-        <h2>Music Intelligence</h2>
+      <details className="live-brain__panel">
+        <summary>Music Intelligence</summary>
         <p className="live-brain__hint">
           Deterministic title/alias/number/lyric recognition (Phase 2.1), plus acoustic (audio-fingerprint)
           recognition (Phase 2.2) when a local model is configured. Findings are never automatically prepared as a
@@ -1598,10 +1598,10 @@ export function LiveChurchBrain() {
             </ul>
           )}
         </details>
-      </section>
+      </details>
 
-      <section className="live-brain__panel">
-        <h2>Sermon Foundation</h2>
+      <details className="live-brain__panel">
+        <summary>Sermon Foundation</summary>
         <p className="live-brain__hint">
           Structural message context (Phase 2.5, per the authoritative Phase 2 roadmap): what sermon is active, who
           is speaking, and which section it's in - deterministic facts and explicit operator actions only. This is
@@ -1764,10 +1764,10 @@ export function LiveChurchBrain() {
             Link latest transcript segment
           </button>
         </div>
-      </section>
+      </details>
 
-      <section className="live-brain__panel">
-        <h2>Sermon Intelligence</h2>
+      <details className="live-brain__panel">
+        <summary>Sermon Intelligence</summary>
         <p className="live-brain__hint">
           Deterministic structural/theme detection from live or manually-entered transcript text (Phase 2.3).
           Every item below is clearly marked Observed or Inferred - CIP never claims the pastor said something that
@@ -1892,10 +1892,10 @@ export function LiveChurchBrain() {
             ))}
           </ul>
         )}
-      </section>
+      </details>
 
-      <section className="live-brain__panel">
-        <h2>Sermon Harvest</h2>
+      <details className="live-brain__panel">
+        <summary>Sermon Harvest</summary>
         <p className="live-brain__hint">
           One-click, read-only aggregation of everything already captured for the active sermon - sections, findings,
           Bible suggestions, transcript, and timeline (Phase 3.9). Runs no new detection and generates no new text;
@@ -1999,10 +1999,10 @@ export function LiveChurchBrain() {
             </details>
           </div>
         )}
-      </section>
+      </details>
 
-      <section className="live-brain__panel">
-        <h2>Cross-Domain Intelligence</h2>
+      <details className="live-brain__panel">
+        <summary>Cross-Domain Intelligence</summary>
         <p className="live-brain__hint">
           Correlations between Bible/Music/Sermon findings, derived by a deterministic rule engine - never a new
           detection, never automatic presentation. Every correlation names the rule that produced it and the exact
@@ -2100,10 +2100,10 @@ export function LiveChurchBrain() {
             ))}
           </ul>
         )}
-      </section>
+      </details>
 
-      <section className="live-brain__panel">
-        <h2>Content Intelligence</h2>
+      <details className="live-brain__panel">
+        <summary>Content Intelligence</summary>
         <p className="live-brain__hint">
           Future content opportunities structured from already-proven findings (Phase 2.7, per the authoritative
           Phase 2 roadmap) - never final copy, never a social post, never published or scheduled. Each candidate
@@ -2201,10 +2201,10 @@ export function LiveChurchBrain() {
             </ul>
           )}
         </details>
-      </section>
+      </details>
 
-      <section className="live-brain__panel">
-        <h2>Service Intelligence</h2>
+      <details className="live-brain__panel">
+        <summary>Service Intelligence</summary>
         <p className="live-brain__hint">
           What part of the service is happening right now, derived deterministically from transcript evidence or
           explicit operator action - never automatic presentation, never a rigid state machine that blocks an
@@ -2342,15 +2342,24 @@ export function LiveChurchBrain() {
             </ul>
           </details>
         )}
-      </section>
+      </details>
 
-      <section className="live-brain__panel">
-        <h2>
+      <details className="live-brain__panel">
+        <summary>
           Service History{" "}
-          <button type="button" onClick={openHistory}>
+          {/* Phase 6.7: this button sits inside <summary>, so a click
+              would otherwise also toggle the new outer <details> collapse
+              - stopPropagation keeps it doing only what it always did. */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              openHistory();
+            }}
+          >
             {historyOpen ? "Hide" : "Show"}
           </button>
-        </h2>
+        </summary>
         {historyOpen && (
           <>
             {history.length === 0 ? (
@@ -2385,7 +2394,7 @@ export function LiveChurchBrain() {
             )}
           </>
         )}
-      </section>
+      </details>
       </>
       )}
     </div>

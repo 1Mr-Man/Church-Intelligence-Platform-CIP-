@@ -215,6 +215,27 @@
   opacity: 0.9;
 }
 
+/* Phase 6.7 (Operator Ergonomics: Diagnostics Mode density) - the
+   collapsed-by-default panels (Manual Bible Search, Music/Sermon/Content/
+   Service Intelligence, Sermon Foundation, Sermon Harvest, Cross-Domain
+   Intelligence, Service History) use <summary> in place of <h2>; this
+   mirrors .live-brain__panel h2's own styling so collapsing a panel
+   doesn't also change how its heading looks. Also fixes the same gap in
+   the two panels that were already <details> before this phase (System
+   Diagnostics, Content Registry), whose <summary> never had it either. */
+.live-brain__panel summary {
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-h);
+  opacity: 0.9;
+  cursor: pointer;
+}
+
+.live-brain__panel[open] summary {
+  margin-bottom: 0.75rem;
+}
+
 .live-brain__row {
   display: flex;
   flex-wrap: wrap;

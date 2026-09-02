@@ -1,0 +1,29 @@
+{
+  "phase": "6.7",
+  "summary": "Environment A evidence for making 9 always-expanded Diagnostics Mode panels collapsible, defaulting the least-used ones closed - the seventh Phase 6 (Operator Ergonomics) slice.",
+  "auditFinding": "Diagnostics Mode rendered 11 top-level panels back to back, always fully expanded, with no way to collapse any of them - a technician debugging one domain scrolled past everything else. Two other panels (System Diagnostics, Content Registry/Intelligence Status) were already collapsible via <details>, establishing the precedent this phase follows. See docs/phase-6-7-audit.md.",
+  "designChoice": "AskUserQuestion: all panels default open (purely additive) vs. collapse the least-used ones by default, keeping Pending Suggestions/Service Timeline open. Operator chose the latter.",
+  "newCode": {
+    "liveChurchBrainTsx": "9 of 11 top-level panels (Manual Bible Search, Music Intelligence, Sermon Foundation, Sermon Intelligence, Sermon Harvest, Cross-Domain Intelligence, Content Intelligence, Service Intelligence, Service History) converted from <section className=\"live-brain__panel\"> to <details className=\"live-brain__panel\"> (h2 -> summary), collapsed by default. Pending Suggestions and Service Timeline left unchanged as plain <section>, still always visible. Service History's Show/Hide button gained e.stopPropagation() so it no longer also toggles the new outer collapse.",
+    "liveChurchBrainCss": "New .live-brain__panel summary rule mirrors .live-brain__panel h2's existing uppercase/letter-spacing styling, applying retroactively to the two panels that were already <details> before this phase too."
+  },
+  "newTests": {
+    "note": "No new pure logic was introduced this phase - purely structural JSX (details/summary) and CSS. npm run typecheck's success is the authoritative proof every converted tag pair balances correctly (a mismatched open/close details/section tag is a tsc compile error).",
+    "frontendTestCountBeforePhase": 257,
+    "frontendTestCountAfterPhase": 257,
+    "command": "npm run test -- --run",
+    "result": "257 passed (unchanged count)"
+  },
+  "fullRegression": {
+    "typecheck": "npm run typecheck: clean",
+    "lint": "npm run lint: same 5 pre-existing warnings as before this phase - no new ones",
+    "build": "npm run build: succeeds",
+    "rustChanges": "None - zero Rust files touched this phase, confirmed via git status, so no Rust regression re-run was needed. Fourth Phase 6.x frontend-only slice, after 6.2/6.3/6.6."
+  },
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands, zero new events, zero new database schema changes.",
+    "No panel's content changed - every field, button, and action inside the 9 converted panels renders exactly as before; only the outer wrapper element and default visibility changed.",
+    "Pending Suggestions and Service Timeline (the two panels with real mid-service actions) are completely unaffected.",
+    "Service History's Show/Hide button behavior is unchanged from an operator's perspective - only its event no longer also toggles the new outer collapse."
+  ]
+}
