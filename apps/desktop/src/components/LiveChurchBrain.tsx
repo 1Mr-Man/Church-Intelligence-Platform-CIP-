@@ -605,6 +605,15 @@ export function LiveChurchBrain() {
               setDisplayUndo({ presentationItemId: displayed.id, expiresAt: Date.now() + DISPLAY_UNDO_WINDOW_MS });
             });
           } else if (action === "reject") void withBusy(busyKey, async () => { await commands.rejectSuggestion(item.id); });
+          else if (action === "edit") {
+            // Phase 6.8: opens the exact same editingId/editValue state
+            // Diagnostics Mode's Pending Suggestions panel already uses -
+            // no command call here, editSuggestion fires on Save below.
+            // item.summary is already suggestion.kind.reference for a
+            // scripture-kind item (unifiedFeed.ts's fromSuggestion).
+            setEditingId(item.id);
+            setEditValue(item.summary);
+          }
           return;
         case "music":
           if (action === "accept") void withBusy(busyKey, async () => { await commands.acceptMusicFinding(item.id); });
@@ -627,7 +636,7 @@ export function LiveChurchBrain() {
           return;
       }
     },
-    [withBusy, pendingConfirm],
+    [withBusy, pendingConfirm, setEditingId, setEditValue],
   );
 
   // Phase 6.2: whichever confirm-guard arm is currently pending
@@ -846,6 +855,16 @@ export function LiveChurchBrain() {
         busy={busy}
         onAction={handleUnifiedAction}
         confirmingKey={pendingConfirm?.key ?? null}
+        editingId={editingId}
+        editValue={editValue}
+        onEditValueChange={setEditValue}
+        onCancelEdit={() => setEditingId(null)}
+        onSaveEdit={(id) =>
+          withBusy(`edit-${id}`, async () => {
+            await commands.editSuggestion(id, editValue.trim());
+            setEditingId(null);
+          })
+        }
       />
       <IntelligenceFeed items={unifiedFeed} />
 

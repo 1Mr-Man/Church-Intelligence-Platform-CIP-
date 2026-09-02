@@ -22,6 +22,14 @@
  * projects content to a real live screen - can swap its own label to
  * "Confirm ...?" without this component needing to know which action
  * that is.
+ *
+ * Phase 6.8 (Operator Ergonomics): `editingId`/`editValue`/`onSaveEdit`/
+ * `onCancelEdit`/`onEditValueChange` are forwarded straight through to
+ * every `IntelligenceCard` - the exact same state Diagnostics Mode's
+ * Pending Suggestions panel already uses, so editing a Bible reference
+ * from either surface never desyncs. This component still never talks
+ * to the backend itself; `LiveChurchBrain.tsx` owns the actual
+ * `edit_suggestion` call.
  */
 import { IntelligenceCard } from "./IntelligenceCard";
 import { actionsFor, type UnifiedItemAction } from "./actions";
@@ -35,9 +43,27 @@ export interface AttentionQueueProps {
   /** Phase 6.2 - forwarded straight through to each `IntelligenceCard`;
    * see its own doc comment for what this key means. */
   confirmingKey?: string | null;
+  /** Phase 6.8 (Operator Ergonomics: unified-queue Edit support) -
+   * forwarded straight through to each `IntelligenceCard`; see its own
+   * doc comment for what these mean. */
+  editingId?: string | null;
+  editValue?: string;
+  onEditValueChange?: (value: string) => void;
+  onSaveEdit?: (id: string) => void;
+  onCancelEdit?: () => void;
 }
 
-export function AttentionQueue({ items, busy, onAction, confirmingKey }: AttentionQueueProps) {
+export function AttentionQueue({
+  items,
+  busy,
+  onAction,
+  confirmingKey,
+  editingId,
+  editValue,
+  onEditValueChange,
+  onSaveEdit,
+  onCancelEdit,
+}: AttentionQueueProps) {
   const legend = shortcutLegend(items);
   return (
     <section className="live-brain__panel workspace-attention">
@@ -56,6 +82,11 @@ export function AttentionQueue({ items, busy, onAction, confirmingKey }: Attenti
               busy={busy}
               onAction={onAction}
               confirmingKey={confirmingKey}
+              editingId={editingId}
+              editValue={editValue}
+              onEditValueChange={onEditValueChange}
+              onSaveEdit={onSaveEdit}
+              onCancelEdit={onCancelEdit}
             />
           ))}
         </ul>

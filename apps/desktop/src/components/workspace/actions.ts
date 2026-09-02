@@ -15,21 +15,28 @@ export type UnifiedItemAction =
   | "accept"
   | "acknowledge"
   | "review"
-  | "dismiss";
+  | "dismiss"
+  | "edit";
 
 /**
  * The actions available for one item, by domain and current status.
  * Mirrors exactly what the existing per-domain panels already offer -
  * never invents a new action a real command doesn't back:
  *
- * - `bible` (a `Suggestion`): display / reject. "Display" replaces the old
- *   "Approve" here (operator feedback: a live Bible reference shouldn't
- *   need a second trip to the Presentation card and an extra click to
- *   reach the screen) - it chains the same `approve_suggestion` +
- *   `prepare_presentation` + `display_presentation` commands the
+ * - `bible` (a `Suggestion`): display / reject / edit. "Display" replaces
+ *   the old "Approve" here (operator feedback: a live Bible reference
+ *   shouldn't need a second trip to the Presentation card and an extra
+ *   click to reach the screen) - it chains the same `approve_suggestion`
+ *   + `prepare_presentation` + `display_presentation` commands the
  *   Presentation card's own three separate buttons already call, in one
  *   operator action. No new backend command; see `handleUnifiedAction` in
- *   `LiveChurchBrain.tsx`.
+ *   `LiveChurchBrain.tsx`. "Edit" (Phase 6.8) is deliberately last, not
+ *   inserted before "reject" - `resolveUnifiedShortcutAction`
+ *   (`lib/keyboardShortcuts.ts`) maps "R" to `actions[1]` positionally,
+ *   so inserting a third action earlier would silently reassign "R" away
+ *   from reject. It reuses the exact same inline edit UI, `editingId`/
+ *   `editValue` state, and `edit_suggestion` command Diagnostics Mode's
+ *   Pending Suggestions panel already has - not a new edit mechanism.
  * - `music` / `sermon` (an `IntelligenceFinding`): accept / reject.
  * - `service` (only ever an anomaly here - see `unifiedFeed.ts`'s docs on
  *   why transitions never reach the attention queue): acknowledge only.
@@ -39,7 +46,7 @@ export type UnifiedItemAction =
 export function actionsFor(domain: string): UnifiedItemAction[] {
   switch (domain) {
     case "bible":
-      return ["display", "reject"];
+      return ["display", "reject", "edit"];
     case "music":
     case "sermon":
       return ["accept", "reject"];
@@ -62,4 +69,5 @@ export const ACTION_LABELS: Record<UnifiedItemAction, string> = {
   acknowledge: "Acknowledge",
   review: "Review",
   dismiss: "Dismiss",
+  edit: "Edit",
 };

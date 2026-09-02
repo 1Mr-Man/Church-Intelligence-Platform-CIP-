@@ -30,10 +30,34 @@ export interface IntelligenceCardProps {
    * next click actually fires it - never a blocking dialog, since only
    * the one armed button changes. */
   confirmingKey?: string | null;
+  /** Phase 6.8 (Operator Ergonomics: unified-queue Edit support) - the
+   * exact same `editingId`/`editValue` state and `edit_suggestion`-backed
+   * save/cancel handlers Diagnostics Mode's Pending Suggestions panel
+   * already uses (see `LiveChurchBrain.tsx`), so editing the same
+   * `Suggestion` from either surface never desyncs. Undefined/omitted on
+   * any card whose domain has no "edit" action - `actionsFor` never
+   * offers it outside `bible`, so these stay unused there. */
+  editingId?: string | null;
+  editValue?: string;
+  onEditValueChange?: (value: string) => void;
+  onSaveEdit?: (id: string) => void;
+  onCancelEdit?: () => void;
 }
 
-export function IntelligenceCard({ item, actions, busy, onAction, confirmingKey }: IntelligenceCardProps) {
+export function IntelligenceCard({
+  item,
+  actions,
+  busy,
+  onAction,
+  confirmingKey,
+  editingId,
+  editValue,
+  onEditValueChange,
+  onSaveEdit,
+  onCancelEdit,
+}: IntelligenceCardProps) {
   const confidencePercent = Math.round(item.confidence.score * 100);
+  const isEditing = editingId === item.id;
   return (
     <li className={`workspace-card workspace-card--${item.domain}`}>
       <div className="workspace-card__header">
@@ -48,24 +72,42 @@ export function IntelligenceCard({ item, actions, busy, onAction, confirmingKey 
         {item.evidenceCount > 0 && <> &middot; {item.evidenceCount} evidence</>}
       </p>
       {item.detailLine && <p className="workspace-card__detail">{item.detailLine}</p>}
-      {actions && actions.length > 0 && onAction && (
-        <div className="workspace-card__actions">
-          {actions.map((action) => {
-            const key = `${item.domain}-${action}-${item.id}`;
-            const isConfirming = confirmingKey === key;
-            return (
-              <button
-                key={action}
-                type="button"
-                className={isConfirming ? "workspace-card__action--confirming" : undefined}
-                disabled={busy === key}
-                onClick={() => onAction(item, action)}
-              >
-                {isConfirming ? `Confirm ${ACTION_LABELS[action]}?` : ACTION_LABELS[action]}
-              </button>
-            );
-          })}
+      {isEditing ? (
+        <div className="workspace-card__edit">
+          <input
+            value={editValue ?? ""}
+            onChange={(e) => onEditValueChange?.(e.target.value)}
+            aria-label="Edit reference"
+          />
+          <button type="button" disabled={busy === `edit-${item.id}`} onClick={() => onSaveEdit?.(item.id)}>
+            Save
+          </button>
+          <button type="button" onClick={() => onCancelEdit?.()}>
+            Cancel
+          </button>
         </div>
+      ) : (
+        actions &&
+        actions.length > 0 &&
+        onAction && (
+          <div className="workspace-card__actions">
+            {actions.map((action) => {
+              const key = `${item.domain}-${action}-${item.id}`;
+              const isConfirming = confirmingKey === key;
+              return (
+                <button
+                  key={action}
+                  type="button"
+                  className={isConfirming ? "workspace-card__action--confirming" : undefined}
+                  disabled={busy === key}
+                  onClick={() => onAction(item, action)}
+                >
+                  {isConfirming ? `Confirm ${ACTION_LABELS[action]}?` : ACTION_LABELS[action]}
+                </button>
+              );
+            })}
+          </div>
+        )
       )}
     </li>
   );

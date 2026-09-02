@@ -137,6 +137,18 @@
   margin-top: 0.5rem;
 }
 
+/* Phase 6.8 (Operator Ergonomics: unified-queue Edit support) - replaces
+   .workspace-card__actions while editing, mirroring the layout of
+   Diagnostics Mode's own inline edit row (.live-brain__row) so the same
+   Suggestion looks and behaves consistently on either surface. */
+.workspace-card__edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
 /* Phase 6.2 (Operator Ergonomics: Display confirmation/undo) - the one
    action button currently armed by `confirmGuard`'s two-click guard
    (today only Bible's "Display"). Reuses the existing warn tone so a

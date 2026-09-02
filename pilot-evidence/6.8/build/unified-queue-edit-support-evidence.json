@@ -1,0 +1,34 @@
+{
+  "phase": "6.8",
+  "summary": "Environment A evidence for adding Edit to the Needs Attention queue's Bible action - the eighth and last Phase 6 (Operator Ergonomics) audit gap.",
+  "auditFinding": "Diagnostics Mode's Pending Suggestions panel already had a full inline Edit flow (editingId/editValue state + commands.editSuggestion). The Needs Attention queue's action model (actionsFor/handleUnifiedAction) had no equivalent - no edit action, no inline-input rendering path - even though the data Edit needs (item.summary equals the reference text for a scripture-kind item) was already present in the unified feed. See docs/phase-6-8-audit.md.",
+  "designChoice": "No genuine architectural fork this phase - the target UI (reuse the existing inline edit pattern from SuggestionCard) was the only reasonable shape. The one real engineering constraint was keyboard-shortcut safety: edit had to be appended last in actionsFor('bible'), not inserted before reject, since resolveUnifiedShortcutAction maps 'R' to actions[1] positionally.",
+  "newCode": {
+    "actionsTs": "workspace/actions.ts: UnifiedItemAction gains 'edit'; actionsFor('bible') returns ['display', 'reject', 'edit'] - edit appended last to preserve the A/R keyboard-shortcut positions. Only bible gets it - edit_suggestion is scripture-reference-specific.",
+    "intelligenceCardTsx": "New editingId/editValue/onEditValueChange/onSaveEdit/onCancelEdit props; when editingId === item.id, the action-button row is replaced by an inline input + Save/Cancel, mirroring Diagnostics Mode's SuggestionCard.",
+    "attentionQueueTsx": "Forwards the same five props straight through to each IntelligenceCard - still never talks to the backend itself.",
+    "liveChurchBrainTsx": "handleUnifiedAction's bible case gains an edit branch setting the exact same editingId/editValue state Diagnostics Mode's Edit flow already uses (no new state); <AttentionQueue> wired to the same commands.editSuggestion Diagnostics Mode's own Save button already calls."
+  },
+  "newTests": {
+    "actionsTestTs": [
+      "actionsFor('bible') now returns ['display', 'reject', 'edit']",
+      "edit is last, not before reject - resolveUnifiedShortcutAction maps R to actions[1] positionally"
+    ],
+    "frontendTestCountBeforePhase": 257,
+    "frontendTestCountAfterPhase": 258,
+    "command": "npm run test -- --run",
+    "result": "258 passed"
+  },
+  "fullRegression": {
+    "typecheck": "npm run typecheck: clean",
+    "lint": "npm run lint: same 5 pre-existing warnings as before this phase - no new ones",
+    "build": "npm run build: succeeds",
+    "rustChanges": "None - zero Rust files touched this phase, confirmed via git status, so no Rust regression re-run was needed. Fifth Phase 6.x frontend-only slice, after 6.2/6.3/6.6/6.7."
+  },
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands, zero new events, zero new database schema changes - edit_suggestion (Phase 3.5) is reused entirely unchanged.",
+    "The unified queue's Edit reuses the exact same editingId/editValue state Diagnostics Mode's Pending Suggestions panel already uses - editing the same Suggestion from either surface can never desync.",
+    "Every other unified-queue action (display, reject, accept, acknowledge, review, dismiss) is byte-identical to before - Edit is strictly additive to the bible domain's action list.",
+    "resolveUnifiedShortcutAction's A/R keyboard shortcuts are unaffected - actions[0]/actions[1] still resolve to display/reject exactly as before, verified by a new dedicated test."
+  ]
+}

@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import { actionsFor } from "./actions";
 
 describe("actionsFor", () => {
-  it("offers display/reject for the bible domain (a Suggestion) - display replaces approve so a live reference reaches the screen in one click", () => {
-    expect(actionsFor("bible")).toEqual(["display", "reject"]);
+  it("offers display/reject/edit for the bible domain (a Suggestion) - display replaces approve so a live reference reaches the screen in one click", () => {
+    expect(actionsFor("bible")).toEqual(["display", "reject", "edit"]);
+  });
+
+  it("puts edit last, not before reject - resolveUnifiedShortcutAction maps R to actions[1] positionally", () => {
+    expect(actionsFor("bible")[1]).toBe("reject");
   });
 
   it("offers accept/reject for music and sermon findings", () => {
