@@ -1,0 +1,72 @@
+{
+  "phase": "8",
+  "summary": "Environment A direct-binary verification for the Phase 8 Windows rebuild (Production Integration - OBS/vMix text push) - this phase adds two new Rust crates and new orchestration code compiled into the desktop binary, so a genuine rebuild with direct binary proof is required.",
+  "buildCommand": "bash scripts/build-windows-whisper.sh (--features whisper,semantic-search, x86_64-pc-windows-gnu target)",
+  "buildResult": "Rust build succeeded (whisper-rs-sys ggml lib-name two-pass fix applied as expected on the first-attempt failure, unrelated to this phase's own changes - cip-integrations-obs and cip-integrations-vmix both compiled cleanly on the first pass alongside it); pnpm build (tsc -b && vite build) succeeded producing a fresh dist/assets bundle; NSIS packaging finished with the three runtime DLLs confirmed present by the script's own built-in check.",
+  "installer": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "fileSizeBytes": 14301989,
+    "sha256": "b3724dc437a3b832bad9764171b1a6cff3d6148f1426e6ee4527a9386293f6a1",
+    "priorPhaseFileSizeBytes": 14042454,
+    "priorPhaseSha256": "d41215a254f1d39ff39f170ac2b1c94cc09d0e3f9d7ea21a4543a558bfb8e599",
+    "sha256Changed": true,
+    "fileSizeChanged": true,
+    "fileSizeDeltaBytes": 259535,
+    "fileSizeDeltaNote": "A real increase, consistent with two new crates (cip-integrations-obs, cip-integrations-vmix) and their new dependencies (tungstenite, ureq, sha2, base64) compiled into the binary, plus the new production.rs orchestration module and four new commands - the installer's SHA-256 changing, plus the newSymbolsThisPhase entries below, are the decisive proof this rebuild reflects this phase's real code."
+  },
+  "extractionMethod": "7z x against the built installer into a scratch directory; confirmed exit code 0 and listed contents.",
+  "runtimeDllsPresent": ["libstdc++-6.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll"],
+  "symbolRegressionCheck": {
+    "method": "x86_64-w64-mingw32-strings/nm against the extracted cip-desktop.exe, re-run for every prior-phase symbol/string this project has established as a regression tripwire.",
+    "rejection_echo_count": { "count": 5, "priorPhaseCount": 5, "unchanged": true },
+    "find_rejected_suggestion_for_reference": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "record_rejection_echo": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "silentWindowsSkipped": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "audioErrorText": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "speechErrorText": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "enroll_acoustic_reference": { "count": 2, "priorPhaseCount": 2, "unchanged": true },
+    "list_acoustic_enrollments": { "count": 2, "priorPhaseCount": 2, "unchanged": true },
+    "remove_acoustic_reference": { "count": 2, "priorPhaseCount": 2, "unchanged": true },
+    "whisper_full_with_state": {
+      "count": 96,
+      "priorPhaseCount": 96,
+      "unchanged": true,
+      "note": "Stable at 96 for a second consecutive rebuild since the Phase 7.3 investigation confirmed this is the same non-deterministic strings/grep line-coalescing artifact previously stabilized at 93 for nine rebuilds (Phase 6.2-7.2) - no file in ai/speech, integrations/audio, or any whisper-rs-touching path changed this phase either."
+    },
+    "conclusion": "Every prior-phase Rust-side symbol/string count is exactly unchanged from the Phase 7.3 baseline. Zero regression in any pre-existing feature."
+  },
+  "newSymbolsThisPhase": {
+    "method": "x86_64-w64-mingw32-nm -C against the extracted cip-desktop.exe, searching for this phase's own new function names - direct proof the real production-integration code actually compiled into this exact binary.",
+    "symbolsFound": [
+      "cip_desktop_lib::commands::set_production_integration_config",
+      "cip_desktop_lib::commands::get_production_integration_status",
+      "cip_desktop_lib::commands::test_obs_connection",
+      "cip_desktop_lib::commands::test_vmix_connection",
+      "cip_desktop_lib::production::push_to_configured_targets",
+      "cip_desktop_lib::production::slide_push_text",
+      "cip_integrations_obs::push_text",
+      "cip_integrations_vmix::push_text"
+    ],
+    "workerThreadProof": "core::ptr::drop_in_place<std::thread::lifecycle::spawn_unchecked<cip_desktop_lib::production::push_to_configured_targets::{{closure}},()>::{{closure}}> is present - direct proof the worker-thread dispatch (not just the function definitions) is genuinely compiled into this exact binary, matching the acoustic/speech worker precedent this phase's design deliberately mirrors.",
+    "protocolStringsFound": {
+      "SetInputSettings": 2,
+      "obsWebSocketOrSetTextCombined": 10
+    },
+    "conclusion": "All 8 expected new symbols present with real, distinct addresses, plus direct evidence of the worker-thread dispatch itself - direct proof this phase's implementation is compiled into this exact packaged .exe."
+  },
+  "frontendTextSearch": {
+    "method": "x86_64-w64-mingw32-strings against the extracted cip-desktop.exe.",
+    "controlStringSearched": "Needs Attention",
+    "controlStringMatches": 0,
+    "newStringsSearched": ["set_production_integration_config"],
+    "newStringsMatches": [2],
+    "conclusion": "Reproduces the established Tauri-frontend-bundle tooling limitation (documented since Phase 6.1) an eleventh time for UI copy specifically - the control string itself returns 0 matches, so this says nothing about correctness either way. The command-name string itself (used by both the Rust #[tauri::command] registration and the frontend's invoke() call) does appear, at the same count (2) as every other single-command name in this codebase's symbol table. Correctness for the frontend surface rests on npm run typecheck's success, the fresh Vite build producing a new asset bundle hash, and the full 266/266 frontend test pass already recorded in pilot-evidence/8/build/production-integration-evidence.json."
+  },
+  "architecturalSafetyNotes": [
+    "Exactly four new Tauri commands, zero new events, zero new database schema.",
+    "core/presentation and core/music (domain contract crates) have zero symbol-level changes.",
+    "Every prior acoustic-recognition and presentation-router symbol tracked above is present and unchanged - confirmed by direct nm lookup, not just absence of a regression flag.",
+    "New dependencies (tungstenite, ureq, sha2, base64) verified pure-Rust with no TLS backend via cargo tree before this rebuild - re-confirmed by this build's own compile log showing no rustls/ring/webpki-roots crates compiled."
+  ],
+  "environmentCStatus": "NOT YET VERIFIED for this exact artifact - the decisive pending gate is the operator's own real-hardware test: with real OBS and/or vMix running, configure a target in the Production Integration panel, click Test Connection and confirm the named source/input updates, then Save and confirm displaying a real verse/slide in CIP updates that same source/input live, and that clearing the display blanks it."
+}
