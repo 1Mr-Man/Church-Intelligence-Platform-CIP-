@@ -114,9 +114,16 @@ proving an explicit citation's repeat is never confirmation-boosted), 1 in
 
 ## Windows rebuild
 
-No new native dependency was introduced. See
+No new native dependency was introduced. Installer: `Church Intelligence
+Platform_0.1.0_x64-setup.exe`, SHA-256
+`b06ba51af70681e66a3e6c9aa978acaf2a0fbc290779298f1dd650c3178d0eec`,
+13,742,758 bytes (+4,703 bytes over the Phase 5.1 baseline of
+13,738,055 bytes - expected for the small amount of new compiled code,
+no new dependency). See
 `pilot-evidence/5.2/windows/installer-contents-verification.json` for
-direct binary proof.
+direct binary proof (new `confirm_suggestion`/
+`find_pending_suggestion_for_reference` symbols present, prior-phase
+symbols confirmed unaffected).
 
 ## Architectural safety diff
 
