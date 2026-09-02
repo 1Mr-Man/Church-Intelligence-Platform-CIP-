@@ -1,0 +1,53 @@
+{
+  "phase": "6.1",
+  "summary": "Environment A direct binary verification for the Phase 6.1 Windows rebuild (Operator Ergonomics: keyboard shortcuts for the Needs Attention queue). This is a frontend-only change, so this evidence file documents both what direct binary inspection could and could not confirm, honestly.",
+  "installer": {
+    "path": "target/x86_64-pc-windows-gnu/release/bundle/nsis/Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "d964e9c94083c9600a3ef9cce00f9c5b368c3f3bce0d8b52e2bae7da06859197",
+    "fileSizeBytes": 13746810,
+    "previousInstallerSha256": "19f62376c71692633629a47d60eb10ca484f213b1a11fab8c989d4b6e553ea06",
+    "previousInstallerFileSizeBytes": 13749533,
+    "note": "The SHA-256 and file size both changed from the Phase 5.4 baseline, confirming a genuinely new artifact was packaged - not a stale/copied installer."
+  },
+  "extractedApplicationBinary": {
+    "path": "cip-desktop.exe (extracted from the installer via 7z)",
+    "fileSizeBytes": 58757623
+  },
+  "dllPresenceCheck": {
+    "method": "Extracted the installer with 7z and confirmed all three bundled runtime DLLs are present at the installer root.",
+    "result": {
+      "libstdc++-6.dll": "present",
+      "libgcc_s_seh-1.dll": "present",
+      "libwinpthread-1.dll": "present"
+    }
+  },
+  "rustSymbolRegressionCheck": {
+    "method": "x86_64-w64-mingw32-strings/nm against the extracted cip-desktop.exe, re-checking every prior-phase Rust-side symbol/string this project's manifest already tracks, to confirm zero Rust regression (this phase touched zero Rust files).",
+    "result": {
+      "rejection_echo_count": "5 occurrences (unchanged from Phase 5.4 baseline)",
+      "find_rejected_suggestion_for_reference": "1 occurrence (unchanged)",
+      "record_rejection_echo": "1 occurrence (unchanged)",
+      "silentWindowsSkipped": "1 occurrence (unchanged)",
+      "get_service_report": "2 occurrences (unchanged)",
+      "whisper_full_with_state": "96 occurrences (unchanged)"
+    },
+    "conclusion": "Every previously-tracked Rust-side symbol/string count is byte-for-byte identical to the Phase 5.4 baseline - confirms zero Rust-side regression, consistent with this phase changing only TypeScript/TSX files."
+  },
+  "frontendTextSearchLimitation": {
+    "attempted": "Searched the extracted cip-desktop.exe for the new shortcut-legend text this phase adds (the literal substring 'for the first item', part of shortcutLegend's output, e.g. 'A = Display, R = Reject for the first item').",
+    "result": "0 matches via x86_64-w64-mingw32-strings.",
+    "controlExperiment": "To rule out a build defect versus a tooling limitation, also searched for two other frontend-only strings known to be present in the source and UNCHANGED by this phase: the literal heading text 'Needs Attention' and the literal button label 'Display'. Both ALSO returned 0 matches, despite being present in every prior Windows build's frontend bundle including this one.",
+    "conclusion": "This is a strings(1)/nm(1) tooling limitation, not a build defect: Tauri embeds the built frontend (dist/) bundle into cip-desktop.exe in a compressed form its bundler produces, so plain byte-string scanning cannot find frontend-only literal text at all - not even long-standing, unchanged text. This was not previously documented in this project's evidence because no prior phase attempted to verify frontend-only literal text via strings; every prior frontend-affecting phase (e.g. Phase 3.8.7.8's Bible Display shortcut) instead verified via the frontend test suite plus a build/bundle-hash change, which is the same approach this phase's evidence relies on below.",
+    "correctnessEvidenceUsedInstead": [
+      "Fresh Vite build produced a new asset bundle hash for this rebuild (dist/assets/index-*.js), distinct from the Phase 5.4 build's bundle - proving a genuinely new frontend bundle was embedded, not a stale one.",
+      "Full frontend test suite: 231/231 passing (220 pre-existing + 11 new, covering resolveUnifiedShortcutAction and shortcutLegend across every domain's action shape) - see pilot-evidence/6.1/build/keyboard-shortcuts-evidence.json.",
+      "Installer SHA-256 and file size both changed from the Phase 5.4 baseline (see installer block above), confirming the newly-built bundle was genuinely packaged into this installer.",
+      "npm run build (tsc -b && vite build) completed with zero errors as part of the same build pipeline that produced this exact installer (see the build task's own log: 'built in 766ms')."
+    ]
+  },
+  "architectureVerification": {
+    "outerInstallerStub": "PE32 executable (GUI) Intel 80386, Nullsoft Installer self-extracting archive - standard NSIS bootstrapper, unchanged from every prior phase.",
+    "installedApplicationBinary": "cip-desktop.exe: PE32+ executable (GUI) x86-64, confirmed genuinely x64."
+  },
+  "conclusion": "This phase's Rust-side surface is unchanged (confirmed via unchanged symbol/string counts) and this phase's frontend-side surface is a genuinely new, fully-tested bundle (confirmed via a fresh build hash, a changed installer SHA-256, and a full 231/231 test pass) - but direct strings-based verification of the new frontend text itself is not possible against Tauri's compressed embedded bundle, a real tooling limitation documented here rather than worked around with a fabricated match."
+}
