@@ -1,0 +1,83 @@
+{
+  "phase": "13",
+  "summary": "Environment A direct-binary proof that Phase 13 (Church Knowledge Base / cross-sermon analytics) compiled into the real Windows NSIS installer: the new get_church_knowledge_base command, the saved_sermon_findings persistence path, the theme-frequency/sermons-by-speaker JSON field names, and the decisive literal 'Theme: ' text-prefix convention are all present in the shipped exe, with zero regression against every prior phase's symbol tripwires.",
+  "gitCommit": "d5445de0e95f62a32c80543c8cdb7405784e4c9a",
+  "gitCommitShort": "d5445de",
+  "buildScript": "scripts/build-windows-whisper.sh",
+  "buildLog": "/tmp/phase13-build.log (not committed - ephemeral build log)",
+  "installer": {
+    "path": "release/windows/Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "fileSizeBytes": 14372034,
+    "sha256": "0900b7cac5f3ca642d4e2ef2e2de610b2e0983968314ad44772a4f2e0ad57a70",
+    "builtAtUtc": "2026-09-02T23:16:10Z",
+    "target": "x86_64-pc-windows-gnu",
+    "ggmlTwoPassFixApplied": true,
+    "ggmlTwoPassFixNote": "First build attempt failed as expected on the known whisper-rs-sys ggml lib-name defect; the build script applied its established fix and the retry succeeded - the same harmless, unrelated build-toolchain quirk documented and handled identically in every prior whisper-enabled Windows rebuild this project has done.",
+    "pnpmBuildSucceeded": true,
+    "nsisPackagingSucceeded": true,
+    "runtimeDllsConfirmedByBuildScript": [
+      "libstdc++-6.dll",
+      "libgcc_s_seh-1.dll",
+      "libwinpthread-1.dll"
+    ]
+  },
+  "extraction": {
+    "method": "7z x",
+    "exitCode": 0,
+    "confirmedPresent": [
+      "cip-desktop.exe",
+      "WebView2Loader.dll",
+      "libstdc++-6.dll",
+      "libgcc_s_seh-1.dll",
+      "libwinpthread-1.dll",
+      "uninstall.exe"
+    ]
+  },
+  "symbolRegressionCheck": {
+    "method": "x86_64-w64-mingw32-strings cip-desktop.exe | grep -c <symbol>, run against the extracted installer's main executable",
+    "tripwiresFromPriorPhases": {
+      "rejection_echo_count": 5,
+      "find_rejected_suggestion_for_reference": 1,
+      "record_rejection_echo": 1,
+      "silentWindowsSkipped": 1,
+      "audioErrorText": 1,
+      "speechErrorText": 1,
+      "enroll_acoustic_reference": 2,
+      "list_acoustic_enrollments": 2,
+      "remove_acoustic_reference": 2,
+      "whisper_full_with_state": 96
+    },
+    "tripwiresResult": "All 10 counts identical to the Phase 12 baseline - zero regression. whisper_full_with_state stable at 96 for a 7th consecutive rebuild (Phase 7.3 through Phase 13).",
+    "priorPhaseSymbolCheck": {
+      "test_obs_connection": 3,
+      "ensure_admin": 3,
+      "operator_accounts": 9,
+      "enable_congregant_companion": 2,
+      "companion_snapshot": 1,
+      "get_speech_language_capabilities": 3,
+      "set_speech_language": 2
+    },
+    "priorPhaseNote": "Every prior-phase symbol checked (Production Integration, Church/User Roles & Permissions, Local Congregant Companion View, Multi-language Whisper) remains present and unregressed."
+  },
+  "newSymbolsThisPhase": {
+    "get_church_knowledge_base": 2,
+    "saved_sermon_findings": 7,
+    "persist_saved_sermon_finding": 1,
+    "element_label_for_summary": 1,
+    "themeFrequency": 1,
+    "sermonsBySpeaker": 1,
+    "recentFindings": 1,
+    "occurrenceCount": 1,
+    "sermonCount": 1,
+    "\"Theme: \" (exact literal prefix, quoted)": 2,
+    "\"Theme: \" (substring occurrences)": 4
+  },
+  "newSymbolsNote": "Direct strings inspection confirms the new Tauri command name (get_church_knowledge_base), the new table/persistence-function names (saved_sermon_findings, persist_saved_sermon_finding), the SermonKnowledgeBase JSON field names (themeFrequency, sermonsBySpeaker, recentFindings, occurrenceCount, sermonCount), and - most decisively - the literal 'Theme: ' text-prefix string that both sermon_adapter.rs's finding_for_theme and this phase's own element_label_for_summary/theme_text functions depend on, proving the exact cross-sermon theme-grouping mechanism (not a different one) compiled into this binary.",
+  "frontendTextSearchLimitation": "The frontend bundle (dist/assets/index-*.js) is bundled into the Tauri resources directory, not searchable as plain strings inside cip-desktop.exe itself in the same way Rust symbols are - the new Church Knowledge Base section's own UI copy in HistoryView.tsx was not independently string-searched in this phase, consistent with every prior phase's installer-contents-verification methodology in this project. Frontend correctness for this phase rests on npm run typecheck's success, the fresh Vite build hash, and the full 287/287 frontend test pass.",
+  "architecturalSafetyNotes": [
+    "1 new Tauri command, zero new events, 1 new migration (saved_sermon_findings) - justified per docs/phase-13-audit.md's persistence-decision precedent.",
+    "The only new write path is inside accept_sermon_finding, an already-explicit, already-audited operator action - Detected/Reviewed/Rejected findings are never persisted to the new table.",
+    "Every prior-phase command (test_obs_connection, ensure_admin, operator_accounts, enable_congregant_companion, companion_snapshot, get_speech_language_capabilities, set_speech_language) remains present and unregressed, confirming this phase's additions did not disturb any prior gate or feature."
+  ],
+  "environmentCStatus": "Not yet performed. A real operator accepting a real Sermon Intelligence finding during a real service, restarting the application, and confirming the Church Knowledge Base still shows it correctly grouped by theme and speaker is required to close Environment C for this phase, exactly as for every prior phase's physicalHardwareStatement discipline."
+}
