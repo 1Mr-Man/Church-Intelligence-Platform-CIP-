@@ -5555,6 +5555,14 @@ pub fn accept_sermon_finding(
             .expect("just-accepted finding is still present")
     };
     let db = state.db.lock().expect("db connection poisoned");
+    // Phase 13 (Church Knowledge Base): explicit acceptance is the one
+    // moment a Sermon-domain finding becomes durable history - mirrors
+    // accept_content_candidate -> persist_saved_content_candidate exactly.
+    // Detected/Reviewed/Rejected findings are never persisted here.
+    let element_label = crate::sermon_knowledge_base::element_label_for_summary(&updated.summary);
+    persistence::persist_saved_sermon_finding(&db, &updated, element_label)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
     record_timeline(
         &db,
         Some(updated.service_id),
@@ -6189,6 +6197,23 @@ pub fn harvest_sermon(
     drop(db);
     let _ = emit(&app, AppEvent::SermonHarvested, harvest.clone());
     Ok(harvest)
+}
+
+/// The Church Knowledge Base (Phase 13): read-only, cross-sermon
+/// aggregation of every operator-accepted Sermon Intelligence finding,
+/// spanning every service (not just the currently active one) and
+/// surviving a restart - unlike `harvest_sermon`, which reads the live
+/// in-memory finding queue for one sermon. Open to any operator - a
+/// read of already-accepted history is no more sensitive than
+/// `list_saved_content`.
+#[tauri::command]
+pub fn get_church_knowledge_base(
+    state: State<'_, AppState>,
+) -> Result<crate::sermon_knowledge_base::SermonKnowledgeBase, AppError> {
+    let db = state.db.lock().expect("db connection poisoned");
+    crate::sermon_knowledge_base::get_knowledge_base(&db)
+        .map_err(AppError::from)
+        .map_err(log_and_return)
 }
 
 // --- cross-domain intelligence (Phase 2.4, extended in Phase 2.8) -----------

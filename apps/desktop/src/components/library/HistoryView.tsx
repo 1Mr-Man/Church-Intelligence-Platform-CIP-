@@ -15,7 +15,16 @@
  * live - the historical item this button reads from is never touched.
  */
 import { useEffect, useState } from "react";
-import type { ContentCandidate, PresentationItem, ServiceReport, ServiceSession, Suggestion, TimelineEntry, TranscriptSegment } from "../../domain";
+import type {
+  ContentCandidate,
+  PresentationItem,
+  SermonKnowledgeBase,
+  ServiceReport,
+  ServiceSession,
+  Suggestion,
+  TimelineEntry,
+  TranscriptSegment,
+} from "../../domain";
 import * as commands from "../../lib/commands";
 import { formatClockTime } from "../../lib/format";
 import { presentationHeading } from "../../lib/libraryHelpers";
@@ -30,6 +39,7 @@ export function HistoryView() {
   const [presentations, setPresentations] = useState<PresentationItem[]>([]);
   const [savedContent, setSavedContent] = useState<ContentCandidate[]>([]);
   const [report, setReport] = useState<ServiceReport | null>(null);
+  const [knowledgeBase, setKnowledgeBase] = useState<SermonKnowledgeBase | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -38,6 +48,13 @@ export function HistoryView() {
     commands
       .listServiceHistory(20)
       .then(setServices)
+      .catch((e) => setError(String(e)));
+    // Church Knowledge Base (Phase 13) deliberately spans every service,
+    // not just the one an operator selects below - loaded once, not tied
+    // to `openService`.
+    commands
+      .getChurchKnowledgeBase()
+      .then(setKnowledgeBase)
       .catch((e) => setError(String(e)));
   }, []);
 
@@ -104,31 +121,93 @@ export function HistoryView() {
       {notice && <p className="library-page__notice">{notice}</p>}
 
       {!selected ? (
-        services.length === 0 ? (
-          <p className="library-page__empty">
-            No completed services yet. Your service history will appear here after the first completed service.
-          </p>
-        ) : (
-          <ul className="library-card-list">
-            {services.map((s) => (
-              <li key={s.id} className="library-card library-card--history">
-                <div className="library-card__header">
-                  <strong>{s.title}</strong>
-                  <span className="library-card__meta">{s.status}</span>
-                </div>
-                <p className="library-card__text">
-                  {formatClockTime(s.startedAt)}
-                  {s.endedAt ? ` – ${formatClockTime(s.endedAt)}` : ""}
-                </p>
-                <div className="library-card__actions">
-                  <button type="button" className="op-button--primary" onClick={() => openService(s)}>
-                    Open
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )
+        <>
+          <section className="library-panel">
+            <h2>Church Knowledge Base</h2>
+            <p className="live-brain__hint">
+              Themes, speakers, and findings an operator has explicitly accepted, gathered from every service - not just
+              the one you open below. See {knowledgeBase?.recentFindings.length ?? 0} accepted finding
+              {knowledgeBase?.recentFindings.length === 1 ? "" : "s"} so far.
+            </p>
+            {!knowledgeBase || (knowledgeBase.themeFrequency.length === 0 && knowledgeBase.sermonsBySpeaker.length === 0) ? (
+              <p className="library-page__empty">
+                Nothing here yet - accept a Sermon Intelligence finding during a service to start building this.
+              </p>
+            ) : (
+              <>
+                {knowledgeBase.themeFrequency.length > 0 && (
+                  <div>
+                    <h3>Most-preached themes</h3>
+                    <ul className="library-card-list">
+                      {knowledgeBase.themeFrequency.map((t) => (
+                        <li key={t.label} className="library-card library-card--bible">
+                          <div className="library-card__header">
+                            <strong>{t.label}</strong>
+                            <span className="library-card__meta">
+                              {t.occurrenceCount} mention{t.occurrenceCount === 1 ? "" : "s"} across {t.sermonCount} sermon
+                              {t.sermonCount === 1 ? "" : "s"}
+                            </span>
+                          </div>
+                          {t.sermons.length > 0 && (
+                            <p className="library-card__text">
+                              {t.sermons.map((s) => s.title ?? "Untitled sermon").join(" · ")}
+                            </p>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {knowledgeBase.sermonsBySpeaker.length > 0 && (
+                  <div>
+                    <h3>Sermons by speaker</h3>
+                    <ul className="library-card-list">
+                      {knowledgeBase.sermonsBySpeaker.map((sp) => (
+                        <li key={sp.speakerName} className="library-card library-card--bible">
+                          <div className="library-card__header">
+                            <strong>{sp.speakerName}</strong>
+                            <span className="library-card__meta">
+                              {sp.sermonCount} sermon{sp.sermonCount === 1 ? "" : "s"}
+                            </span>
+                          </div>
+                          <p className="library-card__text">
+                            {sp.sermons.map((s) => s.title ?? "Untitled sermon").join(" · ")}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+
+          {services.length === 0 ? (
+            <p className="library-page__empty">
+              No completed services yet. Your service history will appear here after the first completed service.
+            </p>
+          ) : (
+            <ul className="library-card-list">
+              {services.map((s) => (
+                <li key={s.id} className="library-card library-card--history">
+                  <div className="library-card__header">
+                    <strong>{s.title}</strong>
+                    <span className="library-card__meta">{s.status}</span>
+                  </div>
+                  <p className="library-card__text">
+                    {formatClockTime(s.startedAt)}
+                    {s.endedAt ? ` – ${formatClockTime(s.endedAt)}` : ""}
+                  </p>
+                  <div className="library-card__actions">
+                    <button type="button" className="op-button--primary" onClick={() => openService(s)}>
+                      Open
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       ) : (
         <>
           {report && (

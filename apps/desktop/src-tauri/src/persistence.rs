@@ -1614,6 +1614,98 @@ pub fn list_saved_content_candidates_for_service(
         .collect()
 }
 
+// --- saved sermon findings (Phase 13: Church Knowledge Base) --------------
+
+/// Persist an accepted Sermon Intelligence finding - see
+/// `0018_saved_sermon_findings.sql` and `docs/phase-13-audit.md` for why
+/// this exists and why it is only ever called from `accept_sermon_finding`,
+/// never from detection. `element_label` is derived by the caller (see
+/// `sermon_knowledge_base::element_label_for_summary`) so this function
+/// stays a plain, untested-by-itself write, exactly like
+/// `persist_saved_content_candidate`.
+pub fn persist_saved_sermon_finding(
+    conn: &Connection,
+    finding: &cip_core_intelligence::IntelligenceFinding,
+    element_label: &str,
+) -> Result<(), PersistError> {
+    let payload = serde_json::to_string(finding)?;
+    conn.execute(
+        "INSERT INTO saved_sermon_findings
+            (id, service_id, sermon_id, element_label, summary, payload, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            finding.id.to_string(),
+            finding.service_id.to_string(),
+            finding.sermon_id.map(|id| id.to_string()),
+            element_label,
+            finding.summary,
+            payload,
+            finding.created_at.to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
+/// Every saved sermon finding across every service, most recently saved
+/// first - the cross-sermon-analytics counterpart to
+/// `list_saved_content_candidates_for_service`, deliberately unscoped by
+/// service since a church knowledge base spans services by definition.
+/// Bounded by `limit`, generous enough to cover years of weekly services
+/// without being genuinely unbounded, for the same reason `harvest.rs`'s
+/// reads are bounded.
+pub fn list_all_saved_sermon_findings(
+    conn: &Connection,
+    limit: u32,
+) -> Result<Vec<cip_core_intelligence::IntelligenceFinding>, PersistError> {
+    let mut stmt = conn
+        .prepare("SELECT payload FROM saved_sermon_findings ORDER BY created_at DESC LIMIT ?1")?;
+    let rows = stmt
+        .query_map(params![limit], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.into_iter()
+        .map(|payload| serde_json::from_str(&payload).map_err(PersistError::from))
+        .collect()
+}
+
+/// Every sermon across every service, most recently created first - the
+/// cross-sermon-analytics counterpart to `list_sermons_for_service`.
+/// Bounded by `limit`, mirroring `list_all_saved_sermon_findings`.
+pub fn list_sermons(
+    conn: &Connection,
+    limit: u32,
+) -> Result<Vec<cip_core_sermon::foundation::Sermon>, PersistError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, service_id, title, speaker_id, speaker_name, speaker_role,
+                status, started_at, ended_at, created_at
+         FROM sermons ORDER BY created_at DESC LIMIT ?1",
+    )?;
+    let rows = stmt
+        .query_map(params![limit], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, String>(9)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    rows.into_iter()
+        .map(
+            |(id, sid, title, spid, spname, sprole, status, started, ended, created)| {
+                row_to_sermon(
+                    id, sid, title, spid, spname, sprole, status, started, ended, created,
+                )
+            },
+        )
+        .collect()
+}
+
 // --- display role assignments (Phase 3.10.2) -------------------------------
 
 /// Assigns `role` to `monitor_id`, replacing any prior assignment for

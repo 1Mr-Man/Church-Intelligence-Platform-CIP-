@@ -35,6 +35,7 @@ import {
   endSermon,
   enrollAcousticReference,
   getAppConfig,
+  getChurchKnowledgeBase,
   getCongregantCompanionStatus,
   getCurrentOperator,
   getIntelligenceCapabilities,
@@ -1061,6 +1062,29 @@ describe("commands.ts Tauri IPC guard", () => {
 
     await expect(getSpeechLanguageCapabilities()).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(setSpeechLanguage("en")).rejects.toBeInstanceOf(TauriUnavailableError);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  // --- Phase 13: Church Knowledge Base / cross-sermon analytics --------------
+
+  it("getChurchKnowledgeBase takes no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({
+      themeFrequency: [],
+      sermonsBySpeaker: [],
+      recentFindings: [],
+      generatedAt: "2026-01-01T00:00:00Z",
+    });
+
+    await getChurchKnowledgeBase();
+
+    expect(invokeMock).toHaveBeenCalledWith("get_church_knowledge_base", undefined);
+  });
+
+  it("rejects getChurchKnowledgeBase outside the Tauri runtime, without calling invoke()", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    await expect(getChurchKnowledgeBase()).rejects.toBeInstanceOf(TauriUnavailableError);
     expect(invokeMock).not.toHaveBeenCalled();
   });
 });

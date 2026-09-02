@@ -96,6 +96,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0017_operator_accounts",
         sql: include_str!("../migrations/0017_operator_accounts.sql"),
     },
+    Migration {
+        version: 18,
+        name: "0018_saved_sermon_findings",
+        sql: include_str!("../migrations/0018_saved_sermon_findings.sql"),
+    },
 ];
 
 /// A migration that was applied during this call to [`run_migrations`].

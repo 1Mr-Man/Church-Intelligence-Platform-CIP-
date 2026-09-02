@@ -50,6 +50,7 @@ import type {
   Sermon,
   SermonFoundationSummary,
   SermonHarvest,
+  SermonKnowledgeBase,
   SermonSection,
   SermonSegment,
   ServiceIntelligenceSummary,
@@ -758,6 +759,17 @@ export function getSermon(sermonId: string): Promise<Sermon> {
  * active-sermon-scoped command). */
 export function harvestSermon(): Promise<SermonHarvest> {
   return invokeCommand("harvest_sermon");
+}
+
+/** Phase 13 (Church Knowledge Base / cross-sermon analytics): reads the
+ * durable `saved_sermon_findings` table (an operator's explicitly
+ * accepted Sermon Intelligence findings) plus every persisted sermon,
+ * and returns theme frequency, per-speaker sermon history, and a recent-
+ * findings feed spanning every service, not just the currently active
+ * one - see `domain/sermon.ts`'s `SermonKnowledgeBase` docs. Open to any
+ * operator; never requires an active sermon or service. */
+export function getChurchKnowledgeBase(): Promise<SermonKnowledgeBase> {
+  return invokeCommand("get_church_knowledge_base");
 }
 
 // --- bible intelligence bridge (Phase 2.4) --------------------------------------

@@ -192,3 +192,54 @@ export interface SermonHarvest {
   timeline: TimelineEntry[];
   generatedAt: string; // ISO-8601
 }
+
+/** Phase 13 (Church Knowledge Base): a minimal, display-ready reference
+ * to one sermon - not the full `Sermon` record, since list entries only
+ * need enough to label themselves. */
+export interface SermonRef {
+  sermonId: string;
+  serviceId: string;
+  title: string | null;
+  speakerName: string | null;
+  startedAt: string | null; // ISO-8601
+}
+
+/** Phase 13: one distinct Theme label and every sermon it was attached
+ * to - "what have we preached about, and how often." `occurrenceCount`
+ * counts every accepted Theme finding with this label; `sermons`
+ * deduplicates by sermon (a theme mentioned twice in one sermon still
+ * counts as one sermon in this list). */
+export interface ThemeFrequencyEntry {
+  label: string;
+  occurrenceCount: number;
+  sermonCount: number;
+  sermons: SermonRef[];
+}
+
+/** Phase 13: one speaker (as recorded on the durable `sermons` table
+ * itself, not derived from findings) and the sermons they preached, most
+ * recent first. */
+export interface SpeakerHistoryEntry {
+  speakerName: string;
+  sermonCount: number;
+  sermons: SermonRef[];
+}
+
+/** Phase 13 (Church Knowledge Base / cross-sermon analytics): read-only
+ * aggregation of every operator-accepted Sermon Intelligence finding,
+ * spanning every service and surviving a restart - see
+ * `crate::sermon_knowledge_base`'s own module docs (Rust side) and
+ * `docs/phase-13-audit.md` for why this only ever includes findings an
+ * operator explicitly accepted, and why theme grouping is exact-label
+ * match only (no semantic similarity). */
+export interface SermonKnowledgeBase {
+  /** Most-mentioned theme first, then alphabetical for a deterministic
+   * tiebreak. */
+  themeFrequency: ThemeFrequencyEntry[];
+  /** Most sermons first, then alphabetical by speaker name. */
+  sermonsBySpeaker: SpeakerHistoryEntry[];
+  /** Every accepted sermon finding, newest first - a simple browsable
+   * feed, the same `IntelligenceFinding` shape used everywhere else. */
+  recentFindings: IntelligenceFinding[];
+  generatedAt: string; // ISO-8601
+}

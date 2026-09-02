@@ -25,6 +25,7 @@ mod production;
 mod segmentation;
 mod sermon;
 mod sermon_foundation;
+mod sermon_knowledge_base;
 mod service;
 mod service_report;
 mod state;
@@ -580,6 +581,7 @@ pub fn run() {
             commands::list_sermon_history,
             commands::get_sermon,
             commands::harvest_sermon,
+            commands::get_church_knowledge_base,
             commands::analyze_bible_transcript,
             commands::analyze_cross_domain,
             commands::list_cross_domain_correlations,

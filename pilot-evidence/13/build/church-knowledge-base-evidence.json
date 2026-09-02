@@ -1,0 +1,42 @@
+{
+  "phase": "13",
+  "summary": "Environment A evidence for the Church Knowledge Base / cross-sermon analytics - a new saved_sermon_findings table persisted only on explicit operator acceptance, and a read-only aggregation (theme frequency, sermons by speaker, recent findings) spanning every service and surviving a restart, closing the gap that IntelligenceFinding was never durable at all before this phase.",
+  "trigger": "The last remaining item from the user's own pasted advice list ('nothing aggregates it across services yet'), followed by the explicit instruction 'church knowledge base / cross-sermon analytics'. See docs/phase-13-audit.md.",
+  "premiseVerification": {
+    "claim1": "Confirmed IntelligenceFinding (every domain, Sermon included) is never persisted to any database table - apps/desktop/src-tauri/src/state.rs holds it only in AppState.intelligence_findings: Mutex<FindingQueue>, constructed once at startup (state.rs:433) and never cleared/reset anywhere in this codebase (grepped every FindingQueue::new() call site). apps/desktop/src-tauri/src/persistence.rs carries a literal comment confirming this is deliberate for now.",
+    "claim2": "Confirmed Sermon Harvest (Phase 3.9, harvest.rs) already documents its own inability to do cross-sermon work: its module docs explicitly say why it only ever harvests the currently active sermon.",
+    "claim3": "Confirmed IntelligenceFinding already carries sermon_id: Option<Uuid> (added Phase 2.6), set only from IntelligenceContext::active_sermon by sermon_adapter.rs - never guessed - so no new correlation logic was needed to attribute a finding to its sermon.",
+    "claim4": "Confirmed the summary.starts_with(...) text-prefix convention (e.g. 'Theme: ', 'Takeaway: ') is already used for logic branching elsewhere in this exact codebase (service.rs, sermon_foundation.rs, sermon.rs, pipeline.rs), not invented for this phase."
+  },
+  "designChoice": "New saved_sermon_findings table, written only inside accept_sermon_finding (mirrors Phase 2.7.1's saved_content_candidates/accept_content_candidate precedent exactly - explicit operator acceptance, never automatic). New sermon_knowledge_base.rs module (mirrors harvest.rs's discipline: no detection logic of its own, no invented titles/labels) aggregates theme frequency, sermons-by-speaker, and a recent-findings feed from the durable table plus every persisted sermon. Theme grouping is exact-label match only, no semantic similarity. Open to any operator (read-only, retrospective).",
+  "newCode": {
+    "migration": "database/migrations/0018_saved_sermon_findings.sql (version 18) - saved_sermon_findings table (id, service_id, sermon_id nullable, element_label, summary, payload JSON, created_at).",
+    "persistenceRs": "apps/desktop/src-tauri/src/persistence.rs: persist_saved_sermon_finding, list_all_saved_sermon_findings, list_sermons (all three new, unscoped-by-service where relevant).",
+    "sermonKnowledgeBaseRs": "apps/desktop/src-tauri/src/sermon_knowledge_base.rs (new module): SermonRef/ThemeFrequencyEntry/SpeakerHistoryEntry/SermonKnowledgeBase; element_label_for_summary (pure, never panics, falls back to 'Other'); build_knowledge_base (pure aggregation); get_knowledge_base (the only DB-touching function).",
+    "commandsRs": "apps/desktop/src-tauri/src/commands.rs: accept_sermon_finding now persists via persist_saved_sermon_finding immediately after accepting; new command get_church_knowledge_base.",
+    "libRs": "apps/desktop/src-tauri/src/lib.rs: mod sermon_knowledge_base; get_church_knowledge_base registered.",
+    "frontend": "domain/sermon.ts (SermonRef/ThemeFrequencyEntry/SpeakerHistoryEntry/SermonKnowledgeBase); lib/commands.ts (getChurchKnowledgeBase wrapper); components/library/HistoryView.tsx (new 'Church Knowledge Base' section, loaded once on mount, spanning every service)."
+  },
+  "newTests": {
+    "sermonKnowledgeBaseRsTestCount": 9,
+    "commandsTestTsTestCount": 2,
+    "testingBoundaryNote": "Every new Rust function is either a pure function (element_label_for_summary, build_knowledge_base) or a thin read composed of two already-tested persistence.rs functions (get_knowledge_base) - none of it depends on a Whisper model, audio, or any external dependency, so full coverage was possible with no testing-boundary carve-out (unlike most other phases in this project). Covered: every known element-label prefix, the 'Other' fallback (never panics), theme occurrence counting vs. sermon-count deduplication, a Theme finding with no sermon_id (counts as an occurrence but attributes to zero sermons), non-Theme findings never leaking into theme_frequency, per-speaker grouping/sorting excluding sermons with no recorded speaker, recent-findings ordering, a real-SQLite round trip through get_knowledge_base, and an empty database producing a valid empty result. Frontend: getChurchKnowledgeBase calls the right Tauri command with no arguments and rejects outside the Tauri runtime without calling invoke(), per this project's Phase 1.2.1 IPC-guard discipline.",
+    "command": "cargo test --workspace && cargo test --features whisper (apps/desktop/src-tauri) && npm run test -- --run",
+    "result": "cip-desktop: 350 passed (up from Phase 12's 341 - 9 new), workspace total ~1023 passed, 0 failed. cip-desktop --features whisper: 350 passed, matching default. Frontend: 287 passed (up from Phase 12's 285 - 2 new), 0 failed."
+  },
+  "fullRegression": {
+    "fmt": "cargo fmt --all -- --check: clean",
+    "clippy": "cargo clippy --workspace --all-targets -- -D warnings: clean, both feature configs (default and --features whisper)",
+    "check": "cargo check --workspace / --features whisper: clean",
+    "test": "see newTests.result above",
+    "frontend": "npm run typecheck/lint/test/build: all clean - same 5 pre-existing lint warnings, no new ones"
+  },
+  "architecturalSafetyNotes": [
+    "1 new Tauri command, zero new events, 1 new migration - justified per docs/phase-13-audit.md's 'Persistence justification' (a knowledge base that must survive restarts and span services cannot, by definition, be in-memory).",
+    "The only new write path is inside accept_sermon_finding, an already-explicit, already-audited operator action (spec section 36/47: 'no automatic actions') - Detected/Reviewed/Rejected findings are never persisted to saved_sermon_findings.",
+    "sermon_knowledge_base.rs contains no detection logic of its own and invents no title/label when one is absent, mirroring harvest.rs's own discipline exactly.",
+    "core/bible, core/service, core/presentation, core/music (every other domain contract crate) are entirely untouched."
+  ],
+  "honestLimitation": "Only operator-accepted findings appear in the knowledge base (deliberate, not an oversight) - Detected/Reviewed findings never enter saved_sermon_findings regardless of confidence. No retroactive backfill - findings from services before this phase shipped are gone, since they were never durable in the first place. Theme grouping is exact-label match only - no semantic similarity in this phase. A finding accepted with no active sermon context still counts as a Theme occurrence but is attributed to zero sermons.",
+  "environmentCStatus": "NOT YET VERIFIED for this exact artifact - the decisive pending gate is a real operator accepting a real Sermon Intelligence finding during a real service, restarting the application, and confirming the Church Knowledge Base still shows it correctly grouped by theme and speaker."
+}
