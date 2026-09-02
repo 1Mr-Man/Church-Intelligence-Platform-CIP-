@@ -52,6 +52,9 @@ pub enum AppError {
     /// Admin) was called without one - see `access::ensure_admin`.
     #[error("{0}")]
     Forbidden(String),
+    /// Phase 11: the companion HTTP server could not be started.
+    #[error(transparent)]
+    Companion(#[from] crate::companion::CompanionError),
 }
 
 impl AppError {
@@ -75,6 +78,7 @@ impl AppError {
             AppError::NoActiveSermon => LogCategory::App,
             AppError::InvalidInput(_) => LogCategory::App,
             AppError::Forbidden(_) => LogCategory::Security,
+            AppError::Companion(_) => LogCategory::Network,
         }
     }
 }

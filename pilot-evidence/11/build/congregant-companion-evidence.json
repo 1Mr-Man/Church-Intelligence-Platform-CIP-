@@ -1,0 +1,37 @@
+{
+  "phase": "11",
+  "summary": "Environment A evidence for the Local Congregant Companion View - a LAN-only, read-only HTTP server (off by default, Admin-gated to enable) that mirrors CIP's Stage display to a congregant's phone browser, with a personal notes textarea saved only on the phone itself.",
+  "trigger": "User's own item 11 from a pasted advice list ('a tiny local-network HTTP server broadcasting the current slide/verse to a phone browser... for follow along and save a note'), followed by the explicit instruction 'Keep going into the local congregant companion view next'. See docs/phase-11-audit.md.",
+  "designChoice": "Mirrors Stage's existing Active PresentationItem exactly, never a second content path. No congregant data ever reaches CIP - notes are localStorage-only on the phone, the server has no write endpoint. Admin-gated to enable (joining Phase 10's seven gated commands), not to view. Plain std::net::TcpListener, hand-rolled, no new dependency, mirroring Phase 8's own plain-http-for-LAN-local-protocol reasoning. Fixed port 49876. Best-effort LAN address detection via the dependency-free UdpSocket::connect routing-table trick, honestly returning no candidate address rather than fabricating one.",
+  "newCode": {
+    "companionRs": "apps/desktop/src-tauri/src/companion.rs: CompanionSnapshot, CompanionServerHandle, CompanionStatus, CompanionError, spawn_server/stop_server (real Tauri-agnostic TcpListener server with a genuine stop mechanism), enable/disable/status/update_snapshot, the served self-contained HTML page.",
+    "stateRs": "apps/desktop/src-tauri/src/state.rs: companion_snapshot (Arc<Mutex<Option<CompanionSnapshot>>>), companion_server (Mutex<Option<CompanionServerHandle>>, None by default).",
+    "errorsRs": "apps/desktop/src-tauri/src/errors.rs: new AppError::Companion variant, categorized under LogCategory::Network.",
+    "commandsRs": "apps/desktop/src-tauri/src/commands.rs: CompanionStatusDto; 3 new commands (enable_congregant_companion, disable_congregant_companion - Admin-gated; get_congregant_companion_status - open); companion::update_snapshot hooked into display_presentation and clear_active_presentation, the same two call sites production::push_to_configured_targets already uses.",
+    "frontend": "domain/companion.ts; 3 new commands.ts wrappers; new components/workspace/CongregantCompanionPanel.tsx (mirrors ProductionIntegrationPanel's shape); wired into LiveChurchBrain.tsx."
+  },
+  "newTests": {
+    "companionRsTestCount": 9,
+    "companionRsRealSocketTestCount": 5,
+    "frontendCommandsTestCount": 4,
+    "frontendContractTestCount": 2,
+    "testingBoundaryNote": "Unlike almost every other Tauri-command-backed feature in this codebase, companion.rs's core server logic is entirely Tauri-agnostic (operates on a plain Arc<Mutex<Option<CompanionSnapshot>>>, never an AppHandle/State), so 5 of its 9 tests bind a real TcpListener on an OS-assigned ephemeral port and make real TcpStream GET requests against it - not pure-function proxies for an untestable command. The Tauri command wrappers stay thin and untested directly, per this project's standing no-tauri::test-harness convention.",
+    "command": "cargo test --workspace && cargo test --features whisper (apps/desktop/src-tauri) && npm run test -- --run",
+    "result": "1010 passed (workspace default, +9 from Phase 10's 1001), 341 passed (desktop, --features whisper, +9 from Phase 10's 332), 280 passed (frontend, +6 from Phase 10's 274) - 0 failures across all three"
+  },
+  "fullRegression": {
+    "fmt": "cargo fmt --all -- --check: clean",
+    "clippy": "cargo clippy --workspace --all-targets -- -D warnings: clean, both feature configs",
+    "check": "cargo check --workspace / --features whisper: clean",
+    "test": "see newTests.result above",
+    "frontend": "npm run typecheck/lint/test/build: all clean - same 5 pre-existing lint warnings, no new ones"
+  },
+  "architecturalSafetyNotes": [
+    "3 new Tauri commands, zero new events, zero new migrations - no persistence at all, the snapshot is in-memory/session-scoped, identical precedent to production_integration_config/current_operator.",
+    "The two companion::update_snapshot call sites sit immediately beside production::push_to_configured_targets's own existing calls - neither call's existing behavior is touched, both are additive lines beside it.",
+    "core/bible, core/service, core/presentation (every domain contract crate) are entirely untouched - the companion server only ever reads the same RenderedSlide the display-window path already produces.",
+    "No new workspace dependency - spawn_server/stop_server use only std::net/std::sync/std::thread."
+  ],
+  "honestLimitation": "No authentication, no rate limiting, no connection cap on the companion server - a LAN-only, read-only, no-PII surface judged not to need either for this phase; anyone on the same LAN can open the page while it's running, the same thing anyone in the room can already see on the projector. No QR code / mDNS auto-discovery - the operator shares the address manually. No push/WebSocket - two-second polling. No history - only the current item. IPv4 only. Address detection can honestly return nothing on a machine with no configured network route.",
+  "environmentCStatus": "NOT YET VERIFIED for this exact artifact - the decisive pending gate is a real operator enabling the server and a real phone on the same LAN opening the page and seeing it track Stage live as items are displayed and cleared."
+}

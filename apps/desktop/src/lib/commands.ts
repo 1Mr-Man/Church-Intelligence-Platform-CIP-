@@ -22,6 +22,7 @@ import type {
   BibleSearchResult,
   BibleTranslation,
   SavedScripture,
+  CompanionStatus,
   ContentMetadata,
   ContentType,
   Display,
@@ -914,4 +915,21 @@ export function logout(): Promise<void> {
 
 export function getCurrentOperator(): Promise<OperatorAccountSummary | null> {
   return invokeCommand("get_current_operator");
+}
+
+// --- Phase 11: Local Congregant Companion View ---------------------------------
+
+/** Starts the LAN companion server - Admin-gated, idempotent. */
+export function enableCongregantCompanion(): Promise<CompanionStatus> {
+  return invokeCommand("enable_congregant_companion");
+}
+
+/** Stops the LAN companion server - Admin-gated, a safe no-op if it wasn't running. */
+export function disableCongregantCompanion(): Promise<CompanionStatus> {
+  return invokeCommand("disable_congregant_companion");
+}
+
+/** Current companion server status - available to any logged-in operator. */
+export function getCongregantCompanionStatus(): Promise<CompanionStatus> {
+  return invokeCommand("get_congregant_companion_status");
 }

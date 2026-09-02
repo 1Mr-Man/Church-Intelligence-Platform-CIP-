@@ -28,11 +28,14 @@ import {
   correctServicePhase,
   createManualPresentation,
   createOperatorAccount,
+  disableCongregantCompanion,
   displayPresentation,
   dismissCrossDomainCorrelation,
+  enableCongregantCompanion,
   endSermon,
   enrollAcousticReference,
   getAppConfig,
+  getCongregantCompanionStatus,
   getCurrentOperator,
   getIntelligenceCapabilities,
   getPresentationDisplayState,
@@ -982,6 +985,44 @@ describe("commands.ts Tauri IPC guard", () => {
     await expect(login("op-1", "1234")).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(logout()).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(getCurrentOperator()).rejects.toBeInstanceOf(TauriUnavailableError);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  // --- Phase 11: Local Congregant Companion View ------------------------------
+
+  it("enableCongregantCompanion takes no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({ running: true, port: 49876, urls: ["http://192.168.1.5:49876/"] });
+
+    await enableCongregantCompanion();
+
+    expect(invokeMock).toHaveBeenCalledWith("enable_congregant_companion", undefined);
+  });
+
+  it("disableCongregantCompanion takes no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({ running: false, port: 49876, urls: [] });
+
+    await disableCongregantCompanion();
+
+    expect(invokeMock).toHaveBeenCalledWith("disable_congregant_companion", undefined);
+  });
+
+  it("getCongregantCompanionStatus takes no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({ running: false, port: 49876, urls: [] });
+
+    await getCongregantCompanionStatus();
+
+    expect(invokeMock).toHaveBeenCalledWith("get_congregant_companion_status", undefined);
+  });
+
+  it("rejects enableCongregantCompanion/disableCongregantCompanion/getCongregantCompanionStatus outside the Tauri runtime, without calling invoke()", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    await expect(enableCongregantCompanion()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(disableCongregantCompanion()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(getCongregantCompanionStatus()).rejects.toBeInstanceOf(TauriUnavailableError);
     expect(invokeMock).not.toHaveBeenCalled();
   });
 });

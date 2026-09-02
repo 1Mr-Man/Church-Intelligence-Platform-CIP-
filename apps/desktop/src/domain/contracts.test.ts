@@ -60,6 +60,7 @@ import type {
 } from "./sermon";
 import type { ContentCandidate, ContentCandidateType } from "./contentIntelligence";
 import type { OperatorAccountSummary, Role } from "./access";
+import type { CompanionStatus } from "./companion";
 
 describe("domain contracts", () => {
   it("constructs a ScriptureReference and a matching BibleTranslation", () => {
@@ -1082,5 +1083,23 @@ describe("Phase 10: Church/User Roles & Permissions domain contracts", () => {
     const admin: Role = "admin";
     const operator: Role = "operator";
     expect([admin, operator]).toEqual(["admin", "operator"]);
+  });
+});
+
+describe("Phase 11: Local Congregant Companion View domain contracts", () => {
+  it("constructs a stopped CompanionStatus with an empty urls list", () => {
+    const status: CompanionStatus = { running: false, port: 49876, urls: [] };
+    expect(status.running).toBe(false);
+    expect(status.urls).toEqual([]);
+  });
+
+  it("constructs a running CompanionStatus carrying candidate LAN URLs", () => {
+    const status: CompanionStatus = {
+      running: true,
+      port: 49876,
+      urls: ["http://192.168.1.5:49876/"],
+    };
+    expect(status.running).toBe(true);
+    expect(status.urls).toHaveLength(1);
   });
 });

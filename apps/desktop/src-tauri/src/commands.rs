@@ -7,6 +7,7 @@
 
 use crate::access;
 use crate::acoustic;
+use crate::companion;
 use crate::config::AppConfig;
 use crate::content;
 use crate::display_registry;
@@ -249,6 +250,72 @@ pub fn get_current_operator(state: State<'_, AppState>) -> Option<OperatorAccoun
         .flatten()
         .as_ref()
         .map(OperatorAccountSummaryDto::from)
+}
+
+/// Phase 11 (Local Congregant Companion View): the operator-facing
+/// on/off/address status of the LAN companion server - see
+/// `companion.rs`'s own docs.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompanionStatusDto {
+    pub running: bool,
+    pub port: u16,
+    pub urls: Vec<String>,
+}
+
+impl From<companion::CompanionStatus> for CompanionStatusDto {
+    fn from(status: companion::CompanionStatus) -> Self {
+        Self {
+            running: status.running,
+            port: status.port,
+            urls: status.urls,
+        }
+    }
+}
+
+/// Starts the companion server - Admin-gated, joining the seven commands
+/// Phase 10 already gates: turning on a LAN-listening server is a
+/// configuration act, not day-to-day operation. Idempotent - calling it
+/// while already running just returns the current status unchanged.
+#[tauri::command]
+pub fn enable_congregant_companion(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<CompanionStatusDto, AppError> {
+    ensure_admin(&state)?;
+    let status = companion::enable(&app)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
+    log::info!(
+        target: LogCategory::Network.target(),
+        "congregant companion server enabled on port {}",
+        status.port
+    );
+    Ok(status.into())
+}
+
+/// Stops the companion server - Admin-gated. A safe no-op if it wasn't
+/// running.
+#[tauri::command]
+pub fn disable_congregant_companion(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<CompanionStatusDto, AppError> {
+    ensure_admin(&state)?;
+    let status = companion::disable(&app);
+    log::info!(
+        target: LogCategory::Network.target(),
+        "congregant companion server disabled"
+    );
+    Ok(status.into())
+}
+
+/// Current companion server status - available to any logged-in
+/// operator (read-only, no gate), matching `get_current_operator`'s own
+/// openness.
+#[tauri::command]
+pub fn get_congregant_companion_status(app: AppHandle) -> CompanionStatusDto {
+    companion::status(&app).into()
 }
 
 /// Record one service-timeline entry (Phase 1.3), logging - never
@@ -3843,6 +3910,10 @@ pub async fn display_presentation(
     // own worker thread - never blocks or delays the broadcast below, and
     // a push failure never affects CIP's own local display.
     production::push_to_configured_targets(&app, production::slide_push_text(&slide));
+    // Phase 11: update whatever the congregant companion server
+    // broadcasts, in lockstep with the OBS/vMix push above - a no-op if
+    // the server isn't running.
+    companion::update_snapshot(&app, Some(&slide));
     broadcast_to_live_screens(
         &app,
         &state,
@@ -3907,6 +3978,9 @@ pub(crate) fn clear_active_presentation(
         // Phase 8: blank any configured OBS/vMix target too - best-effort,
         // same discipline as the push in `display_presentation`.
         production::push_to_configured_targets(app, String::new());
+        // Phase 11: clear whatever the congregant companion server
+        // broadcasts too - same discipline, same lockstep timing.
+        companion::update_snapshot(app, None);
         broadcast_to_live_screens(app, &state, AppEvent::PresentationStopped, item.clone());
     }
     Ok(stopped)

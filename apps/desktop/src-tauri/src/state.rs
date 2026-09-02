@@ -372,6 +372,18 @@ pub struct AppState {
     /// precedent to `screen_route_modes`: a restart always requires
     /// logging in again.
     pub current_operator: Mutex<Option<crate::access::OperatorSession>>,
+    /// Phase 11 (Local Congregant Companion View): what the companion
+    /// HTTP server currently broadcasts to phones on the LAN - `Arc` so
+    /// the server's own accept-loop thread can hold a clone while
+    /// `AppState` keeps its own, updated in lockstep with Stage from the
+    /// same two call sites `production_integration_status` already
+    /// updates from (see `crate::companion::update_snapshot`).
+    pub companion_snapshot: crate::companion::SharedSnapshot,
+    /// The running companion server's stop handle, if enabled - `None`
+    /// by default (off unless an Admin turns it on), mirroring
+    /// `production_integration_config`'s own "in-memory/session-scoped,
+    /// disabled by default" precedent.
+    pub companion_server: Mutex<Option<crate::companion::CompanionServerHandle>>,
 }
 
 impl AppState {
@@ -438,6 +450,8 @@ impl AppState {
             ),
             operator_account_store,
             current_operator: Mutex::new(None),
+            companion_snapshot: std::sync::Arc::new(Mutex::new(None)),
+            companion_server: Mutex::new(None),
         }
     }
 }

@@ -1,6 +1,7 @@
 export * from "./access";
 export * from "./ai";
 export * from "./bible";
+export * from "./companion";
 export * from "./confidence";
 export * from "./content";
 export * from "./contentIntelligence";

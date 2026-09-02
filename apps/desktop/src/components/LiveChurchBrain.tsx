@@ -50,6 +50,7 @@ import { ServiceControlBar } from "./workspace/ServiceControlBar";
 import { SystemStatusStrip } from "./workspace/SystemStatusStrip";
 import { PresentationCard } from "./workspace/PresentationCard";
 import { DisplayRegistryPanel } from "./workspace/DisplayRegistryPanel";
+import { CongregantCompanionPanel } from "./workspace/CongregantCompanionPanel";
 import { ProductionIntegrationPanel } from "./workspace/ProductionIntegrationPanel";
 import { actionsFor, type UnifiedItemAction } from "./workspace/actions";
 import "./LiveChurchBrain.css";
@@ -939,6 +940,7 @@ export function LiveChurchBrain() {
 
       <DisplayRegistryPanel />
       <ProductionIntegrationPanel />
+      <CongregantCompanionPanel />
 
       {mode === "diagnostics" && <PilotDiagnosticsPanel />}
       {mode === "diagnostics" && <StatusBar status={status} />}

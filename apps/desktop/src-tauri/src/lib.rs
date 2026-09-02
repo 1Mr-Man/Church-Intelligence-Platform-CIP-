@@ -2,6 +2,7 @@ mod access;
 mod acoustic;
 mod bible_production_dataset;
 mod commands;
+mod companion;
 mod config;
 mod content;
 mod content_intelligence;
@@ -482,6 +483,9 @@ pub fn run() {
             commands::login,
             commands::logout,
             commands::get_current_operator,
+            commands::enable_congregant_companion,
+            commands::disable_congregant_companion,
+            commands::get_congregant_companion_status,
             commands::get_pilot_diagnostics,
             commands::install_whisper_model,
             commands::get_embedding_capabilities,
