@@ -1,0 +1,29 @@
+{
+  "phase": "5.4",
+  "summary": "Direct extraction and inspection of the rebuilt NSIS installer, confirming the Wrong-Verse Feedback Loop's find_rejected_suggestion_for_reference and record_rejection_echo functions are genuinely compiled into the shipped binary, alongside every prior phase's still-unaffected symbols.",
+  "buildCommand": "scripts/build-windows-whisper.sh, unchanged from Phase 5.3 (--features whisper,semantic-search) - no new native dependency was introduced this phase.",
+  "extractionMethod": "7z x \"Church Intelligence Platform_0.1.0_x64-setup.exe\"",
+  "installerChecksum": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "19f62376c71692633629a47d60eb10ca484f213b1a11fab8c989d4b6e553ea06",
+    "sizeBytes": 13749533,
+    "previousPhaseSha256": "fb68799ed4dd64d2d432f28046226d379f671948d503eb81039b69543ca620df",
+    "previousPhaseSizeBytes": 13731351,
+    "sizeChangeNote": "+18,182 bytes (~0.13% larger) - expected: this phase adds a new database column, two new persistence functions, one new Suggestion field, and one new SuggestionStats field, with zero new crate dependencies; a small size increase from the extra compiled code, no regression."
+  },
+  "cipDesktopExeVerification": {
+    "sizeBytes": 58757450,
+    "newSymbolsDirectProof": "x86_64-w64-mingw32-nm against the extracted cip-desktop.exe finds the mangled function symbols cip_desktop_lib::persistence::find_rejected_suggestion_for_reference and cip_desktop_lib::persistence::record_rejection_echo - direct proof this phase's code is genuinely compiled into this exact binary. x86_64-w64-mingw32-strings finds 5 occurrences of the literal string 'rejection_echo_count' (the new column name, appearing in the INSERT/UPDATE/SELECT SQL text embedded in the binary) and 1 occurrence of 'rejectionEchoCount' (the serde camelCase field name for the frontend-facing Suggestion type). handle_final_transcript_inner's dedup branch's new rejection-echo fallback was inlined into the caller's compiled body by the release-mode optimizer (single call site) and is instead verified via the regression suite's dedicated unit/acceptance tests.",
+    "priorPhaseSymbolsUnaffected": {
+      "silentWindowsSkipped": "1 occurrence of 'silentWindowsSkipped' - identical to the Phase 5.3 baseline.",
+      "confirmSuggestionAndFindPendingSuggestion": "2 occurrences total of confirm_suggestion/find_pending_suggestion_for_reference symbols (Phase 5.2) - unchanged, still present.",
+      "getServiceReport": "2 occurrences of 'get_service_report' - identical to the Phase 5.1/5.2/5.3 baseline.",
+      "whisperFullWithState": "96 occurrences of 'whisper_full_with_state' - identical count, confirming the whisper feature/model pipeline is untouched by this phase's changes.",
+      "finalizeBibleOnly": "1 occurrence of 'finalize_bible_only' (Phase 4.3's fast detection lane) - unchanged, still present.",
+      "getEmbeddingCapabilities": "2 occurrences of 'get_embedding_capabilities' - identical to the Phase 4.4/5.1/5.2/5.3 baseline."
+    }
+  },
+  "runtimeDllVerification": "scripts/build-windows-whisper.sh's own final step (7z-extraction DLL-presence check) passed unmodified on this build: 'confirmed: libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll are all present in the installer' - independently re-verified by this evidence pass's own extraction. This phase's changes use only rusqlite/chrono/serde, all already linked, so the runtime DLL set required is unchanged from every prior whisper-enabled build.",
+  "crossCompileVerification": "The Rust build (cargo build --target x86_64-pc-windows-gnu -p cip-desktop --features whisper,semantic-search --release) succeeded with the same two pre-existing whisper-rs-sys fixes (ggml lib-naming, posix-threads alternative) as every prior Windows rebuild - zero new fixes were needed for this phase's purely additive, dependency-free change.",
+  "automatedVerification": "Full pipeline (Rust cross-compile, frontend build via vite, NSIS packaging via makensis, DLL-presence check) completed via a single run of scripts/build-windows-whisper.sh with no manual intervention beyond the standard root/update-alternatives permission the script already documents needing."
+}
