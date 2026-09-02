@@ -14,6 +14,14 @@
  * discoverability hint the Diagnostics-mode Pending Suggestions panel
  * already has - without this, an operator had no way to know the
  * shortcuts existed at all for this queue.
+ *
+ * Phase 6.2 (Operator Ergonomics): `confirmingKey` is forwarded straight
+ * through to every `IntelligenceCard` so the one action currently armed
+ * by `handleUnifiedAction`'s two-click confirm guard - today only the
+ * Bible domain's "Display" action, the one action that immediately
+ * projects content to a real live screen - can swap its own label to
+ * "Confirm ...?" without this component needing to know which action
+ * that is.
  */
 import { IntelligenceCard } from "./IntelligenceCard";
 import { actionsFor, type UnifiedItemAction } from "./actions";
@@ -24,9 +32,12 @@ export interface AttentionQueueProps {
   items: UnifiedIntelligenceItem[];
   busy: string | null;
   onAction: (item: UnifiedIntelligenceItem, action: UnifiedItemAction) => void;
+  /** Phase 6.2 - forwarded straight through to each `IntelligenceCard`;
+   * see its own doc comment for what this key means. */
+  confirmingKey?: string | null;
 }
 
-export function AttentionQueue({ items, busy, onAction }: AttentionQueueProps) {
+export function AttentionQueue({ items, busy, onAction, confirmingKey }: AttentionQueueProps) {
   const legend = shortcutLegend(items);
   return (
     <section className="live-brain__panel workspace-attention">
@@ -44,6 +55,7 @@ export function AttentionQueue({ items, busy, onAction }: AttentionQueueProps) {
               actions={actionsFor(item.domain)}
               busy={busy}
               onAction={onAction}
+              confirmingKey={confirmingKey}
             />
           ))}
         </ul>

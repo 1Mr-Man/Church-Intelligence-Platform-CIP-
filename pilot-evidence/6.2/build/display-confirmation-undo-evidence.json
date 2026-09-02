@@ -1,0 +1,38 @@
+{
+  "phase": "6.2",
+  "summary": "Environment A evidence for adding a two-click confirm guard before, and a post-click Undo affordance after, the Needs Attention queue's one-click Bible 'Display' action - the second Phase 6 (Operator Ergonomics) slice, both halves chosen together by the operator ('Both').",
+  "auditFinding": "Display fires immediately on click, chaining approve_suggestion -> prepare_presentation -> display_presentation with no confirmation step - by the time the handler returns, content is already on the real projector. A manual Stop button (clear_presentation_display) already existed but only blanks the screen and isn't prompted right after a mistaken Display. No confirmation-dialog pattern existed anywhere else in this codebase. See docs/phase-6-2-audit.md.",
+  "designChoice": "Operator was offered confirm-before, undo-after, or both, with the tradeoff stated explicitly (confirm guards every click at the cost of Display's one-click speed; undo keeps every correct click free but can only blank the screen, not restore the prior item). Operator chose both.",
+  "newCode": {
+    "confirmGuardTs": "apps/desktop/src/lib/confirmGuard.ts: decideConfirmClick(key, pending, now) - a small, generic, pure two-click arm/fire guard, keyed by an arbitrary string so it isn't hardcoded to 'display'.",
+    "liveChurchBrainTsx": "handleUnifiedAction's bible/'display' branch now calls decideConfirmClick first (arms on click 1, fires the pre-existing three-command chain on a matching click 2 within CONFIRM_WINDOW_MS=4s); a new post-success Undo banner appears once display_presentation actually succeeds, visible for DISPLAY_UNDO_WINDOW_MS=8s or until activeDisplayItem no longer matches, calling the pre-existing clear_presentation_display command.",
+    "intelligenceCardTsx": "New confirmingKey prop - the one matching action button swaps its label to 'Confirm {label}?' with a warn style.",
+    "attentionQueueTsx": "Forwards confirmingKey straight through to IntelligenceCard, unchanged otherwise."
+  },
+  "newTests": {
+    "confirmGuardTestTs": [
+      "arms on the first click for a key with nothing pending",
+      "fires on a second click for the same key within the confirm window",
+      "re-arms instead of firing once the confirm window has elapsed",
+      "arms the new key instead of firing when a different key is currently armed",
+      "arms instead of firing when nothing is pending at all"
+    ],
+    "frontendTestCountBeforePhase": 231,
+    "frontendTestCountAfterPhase": 236,
+    "command": "npm run test -- --run",
+    "result": "236 passed"
+  },
+  "fullRegression": {
+    "typecheck": "npm run typecheck: clean",
+    "lint": "npm run lint: same pre-existing warnings as before this phase (1 only-export-components in main.tsx + 4 unrelated set-state-in-effect warnings) - no new warnings. The first draft of the Undo auto-dismiss effect DID trigger a new set-state-in-effect warning via a synchronous setState call in the effect body for an edge-case branch; fixed by moving that logic into the setTimeout callback (using Math.max(0, remaining) as the delay) instead of calling setState directly in the effect body, then re-verified clean.",
+    "build": "npm run build: succeeds",
+    "rustChanges": "None - zero Rust files touched this phase, confirmed via git status/diff, so no Rust regression re-run was needed."
+  },
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands, zero new events, zero new database schema changes.",
+    "Every unified action other than bible/'display' fires exactly as before - approve/reject/accept/acknowledge/review/dismiss are untouched.",
+    "decideConfirmClick never fires an action itself - it only gates the exact same call that already existed before this phase.",
+    "The confirm guard applies uniformly to mouse clicks and the 'A' keyboard shortcut, since both already dispatch through the single handleUnifiedAction function established in Phase 6.1 - no separate keyboard-specific logic was needed.",
+    "Undo calls the pre-existing clear_presentation_display command (the same one the Presentation card's own Stop button calls) - no new 'restore the previous item' capability was invented; the banner's visibility is derived entirely from state (activeDisplayItem) already tracked before this phase."
+  ]
+}

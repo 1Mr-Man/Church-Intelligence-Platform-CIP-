@@ -36,6 +36,7 @@ import { formatClockTime } from "../lib/format";
 import { describeTimelineEntry } from "../lib/timelineFormat";
 import { resolveUnifiedShortcutAction, shouldHandleShortcut } from "../lib/keyboardShortcuts";
 import { buildAttentionQueue } from "../lib/attentionQueue";
+import { CONFIRM_WINDOW_MS, decideConfirmClick, type PendingConfirm } from "../lib/confirmGuard";
 import { buildUnifiedFeed, type UnifiedIntelligenceItem } from "../lib/unifiedFeed";
 import { WorkspaceHeader } from "./workspace/WorkspaceHeader";
 import { PilotDiagnosticsPanel } from "./workspace/PilotDiagnosticsPanel";
@@ -54,6 +55,12 @@ const TRANSCRIPT_LIMIT = 20;
 const TIMELINE_LIMIT = 50;
 const RECENT_REFERENCES_LIMIT = 8;
 const AMBIGUOUS_LIMIT = 5;
+// Phase 6.2 (Operator Ergonomics: Display confirmation/undo) - how long
+// the post-Display "Undo (blank screen)" banner stays offered. Longer
+// than `CONFIRM_WINDOW_MS` (the pre-click guard) on purpose: undo is the
+// recovery path for a mistake already on the real screen, so it gets more
+// time than the arm-then-fire click guard does.
+const DISPLAY_UNDO_WINDOW_MS = 8000;
 
 function referenceDisplay(ref: ScriptureReference): string {
   return `${ref.book} ${ref.chapter}:${ref.verseStart}`;
@@ -235,6 +242,11 @@ export function LiveChurchBrain() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  // Phase 6.2 (Operator Ergonomics: Display confirmation/undo). See
+  // `handleUnifiedAction`'s bible/"display" branch and the undo banner
+  // near the top of this component's render for how both are used.
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
+  const [displayUndo, setDisplayUndo] = useState<{ presentationItemId: string; expiresAt: number } | null>(null);
   const [correctionBook, setCorrectionBook] = useState("");
   const [correctionChapter, setCorrectionChapter] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -550,7 +562,21 @@ export function LiveChurchBrain() {
       switch (item.domain) {
         case "bible":
           if (action === "approve") void withBusy(busyKey, async () => { await commands.approveSuggestion(item.id); });
-          else if (action === "display")
+          else if (action === "display") {
+            // Phase 6.2: Display is the one unified action that immediately
+            // projects content to a real, live screen, so it alone goes
+            // through `confirmGuard`'s two-click guard first - the first
+            // click/keypress only arms it (IntelligenceCard shows "Confirm
+            // Display?"); a second one on the *same* item within
+            // CONFIRM_WINDOW_MS is what actually fires it. Every other
+            // action here is unaffected and still fires on its first click,
+            // exactly as before this phase.
+            const decision = decideConfirmClick(busyKey, pendingConfirm, Date.now());
+            if (decision.kind === "arm") {
+              setPendingConfirm(decision.pending);
+              return;
+            }
+            setPendingConfirm(null);
             // Chains the exact same three commands the Presentation card's
             // own Approve -> Prepare -> Display buttons already call, in
             // one operator click - no new backend command. displayPresentation
@@ -559,9 +585,13 @@ export function LiveChurchBrain() {
             void withBusy(busyKey, async () => {
               await commands.approveSuggestion(item.id);
               const prepared = await commands.preparePresentation(item.id);
-              await commands.displayPresentation(prepared.id);
+              const displayed = await commands.displayPresentation(prepared.id);
+              // Only reached once display_presentation has actually
+              // succeeded - an earlier throw skips this line, so the Undo
+              // banner is never offered for a Display that didn't happen.
+              setDisplayUndo({ presentationItemId: displayed.id, expiresAt: Date.now() + DISPLAY_UNDO_WINDOW_MS });
             });
-          else if (action === "reject") void withBusy(busyKey, async () => { await commands.rejectSuggestion(item.id); });
+          } else if (action === "reject") void withBusy(busyKey, async () => { await commands.rejectSuggestion(item.id); });
           return;
         case "music":
           if (action === "accept") void withBusy(busyKey, async () => { await commands.acceptMusicFinding(item.id); });
@@ -584,8 +614,35 @@ export function LiveChurchBrain() {
           return;
       }
     },
-    [withBusy],
+    [withBusy, pendingConfirm],
   );
+
+  // Phase 6.2: whichever confirm-guard arm is currently pending
+  // auto-expires after CONFIRM_WINDOW_MS, so a stale "Confirm Display?"
+  // label never lingers on a button the operator has walked away from.
+  // The identity check guards against clearing a *newer* arm that
+  // replaced this one before the timeout fired.
+  useEffect(() => {
+    if (!pendingConfirm) return;
+    const armed = pendingConfirm;
+    const timer = setTimeout(() => {
+      setPendingConfirm((current) => (current === armed ? null : current));
+    }, CONFIRM_WINDOW_MS);
+    return () => clearTimeout(timer);
+  }, [pendingConfirm]);
+
+  // Phase 6.2: the post-Display "Undo (blank screen)" banner auto-dismisses
+  // once its window elapses, so it never becomes a stale, misleading
+  // affordance for a Display the operator has long since moved past.
+  useEffect(() => {
+    if (!displayUndo) return;
+    const armed = displayUndo;
+    const remainingMs = Math.max(0, displayUndo.expiresAt - Date.now());
+    const timer = setTimeout(() => {
+      setDisplayUndo((current) => (current === armed ? null : current));
+    }, remainingMs);
+    return () => clearTimeout(timer);
+  }, [displayUndo]);
 
   // Phase 1.3 keyboard shortcuts (section 31), extended by Phase 6.1
   // (Operator Ergonomics). In Diagnostics Mode, A/R/E/P act on the first
@@ -675,6 +732,32 @@ export function LiveChurchBrain() {
           {error}
         </p>
       )}
+      {displayUndo && activeDisplayItem?.id === displayUndo.presentationItemId && (
+        // Phase 6.2: the post-Display recovery path. Calls the exact same
+        // `clear_presentation_display` command the Presentation card's own
+        // Stop button already calls (see `onStopDisplay` below) - blanks
+        // the real screen, it does not restore whatever was showing
+        // before, matching what Stop has always done. Disappears on its
+        // own once `activeDisplayItem` no longer matches (Stop was
+        // clicked, or a different item became active) or the window
+        // elapses - never a stale prompt for a Display long since moved
+        // past.
+        <p className="live-brain__undo-banner" role="status">
+          Displayed.{" "}
+          <button
+            type="button"
+            disabled={busy === "undo-display"}
+            onClick={() =>
+              withBusy("undo-display", async () => {
+                await commands.clearPresentationDisplay();
+                setDisplayUndo(null);
+              })
+            }
+          >
+            Undo (blank screen)
+          </button>
+        </p>
+      )}
 
       <ServiceControlBar
         isActive={!!status?.service && status.serviceStatus !== "completed"}
@@ -716,7 +799,12 @@ export function LiveChurchBrain() {
       <WorkspaceHeader status={status} sermonFoundation={sermonFoundation} serviceIntel={serviceIntel} />
       <SystemStatusStrip status={status} deviceCount={devices.length} displayWindowOpen={anyScreenOpen} />
 
-      <AttentionQueue items={attentionQueue} busy={busy} onAction={handleUnifiedAction} />
+      <AttentionQueue
+        items={attentionQueue}
+        busy={busy}
+        onAction={handleUnifiedAction}
+        confirmingKey={pendingConfirm?.key ?? null}
+      />
       <IntelligenceFeed items={unifiedFeed} />
 
       <PresentationCard

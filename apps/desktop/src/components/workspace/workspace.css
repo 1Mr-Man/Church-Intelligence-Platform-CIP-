@@ -137,6 +137,19 @@
   margin-top: 0.5rem;
 }
 
+/* Phase 6.2 (Operator Ergonomics: Display confirmation/undo) - the one
+   action button currently armed by `confirmGuard`'s two-click guard
+   (today only Bible's "Display"). Reuses the existing warn tone so a
+   click that needs a second, deliberate click reads consistently with
+   every other "needs attention" signal in this app - never a new color
+   convention of its own. */
+.workspace-card__action--confirming {
+  border-color: var(--status-warn-border);
+  color: var(--status-warn);
+  background: var(--status-warn-bg);
+  font-weight: 700;
+}
+
 .workspace-feed__filters {
   display: flex;
   flex-wrap: wrap;

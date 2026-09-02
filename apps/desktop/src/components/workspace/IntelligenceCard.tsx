@@ -22,9 +22,17 @@ export interface IntelligenceCardProps {
   actions?: UnifiedItemAction[];
   busy: string | null;
   onAction?: (item: UnifiedIntelligenceItem, action: UnifiedItemAction) => void;
+  /** Phase 6.2 (Operator Ergonomics: Display confirmation/undo) - the
+   * `${domain}-${action}-${id}` key of an action currently armed by
+   * `confirmGuard`'s two-click guard (see `LiveChurchBrain.tsx`'s
+   * `handleUnifiedAction`), if any. That button alone swaps its label to
+   * "Confirm {label}?" so the operator sees the guard is live before their
+   * next click actually fires it - never a blocking dialog, since only
+   * the one armed button changes. */
+  confirmingKey?: string | null;
 }
 
-export function IntelligenceCard({ item, actions, busy, onAction }: IntelligenceCardProps) {
+export function IntelligenceCard({ item, actions, busy, onAction, confirmingKey }: IntelligenceCardProps) {
   const confidencePercent = Math.round(item.confidence.score * 100);
   return (
     <li className={`workspace-card workspace-card--${item.domain}`}>
@@ -42,16 +50,21 @@ export function IntelligenceCard({ item, actions, busy, onAction }: Intelligence
       {item.detailLine && <p className="workspace-card__detail">{item.detailLine}</p>}
       {actions && actions.length > 0 && onAction && (
         <div className="workspace-card__actions">
-          {actions.map((action) => (
-            <button
-              key={action}
-              type="button"
-              disabled={busy === `${item.domain}-${action}-${item.id}`}
-              onClick={() => onAction(item, action)}
-            >
-              {ACTION_LABELS[action]}
-            </button>
-          ))}
+          {actions.map((action) => {
+            const key = `${item.domain}-${action}-${item.id}`;
+            const isConfirming = confirmingKey === key;
+            return (
+              <button
+                key={action}
+                type="button"
+                className={isConfirming ? "workspace-card__action--confirming" : undefined}
+                disabled={busy === key}
+                onClick={() => onAction(item, action)}
+              >
+                {isConfirming ? `Confirm ${ACTION_LABELS[action]}?` : ACTION_LABELS[action]}
+              </button>
+            );
+          })}
         </div>
       )}
     </li>
