@@ -1,0 +1,45 @@
+{
+  "phase": "6.1",
+  "summary": "Environment A evidence for extending keyboard shortcuts (A/R) to Operator Mode's live Needs Attention queue, and fixing a real mismatch where they previously acted on a hidden, potentially-different item.",
+  "auditFinding": "Before this phase, LiveChurchBrain.tsx's keyboard-shortcut effect always acted on suggestions[0] (the raw Bible-only pending list) regardless of mode - including while the operator was looking at Operator Mode's Needs Attention queue (attentionQueue[0]), which has its own confidence-based ordering and spans six domains. A/R could silently fire on a different item than the one visually at the top of the screen.",
+  "designChoice": "Operator selected this gap (of 8 found in a broader ergonomics audit) as Phase 6's first slice, from a set of options that also included Display-action confirmation/undo and error visibility improvements.",
+  "newCode": {
+    "keyboardShortcutsTs": "apps/desktop/src/lib/keyboardShortcuts.ts: resolveUnifiedShortcutAction(key, actions) - pure mapping of 'a'/'r' to the primary/secondary UnifiedItemAction for a domain's action list.",
+    "attentionQueueTs": "apps/desktop/src/lib/attentionQueue.ts: shortcutLegend(queue) - pure description of what A/R will do to the queue's top item.",
+    "liveChurchBrainTsx": "apps/desktop/src/components/LiveChurchBrain.tsx: keyboard-shortcut effect relocated after handleUnifiedAction and rewritten to branch on mode - Operator Mode uses attentionQueue[0] + resolveUnifiedShortcutAction + handleUnifiedAction; Diagnostics Mode keeps its exact prior suggestions[0]-based A/R/E/P behavior unchanged.",
+    "attentionQueueTsx": "apps/desktop/src/components/workspace/AttentionQueue.tsx: 'Needs Attention' heading renders shortcutLegend's output as a discoverability hint, mirroring the diagnostics panel's existing hint."
+  },
+  "newTests": {
+    "keyboardShortcutsTestTs": [
+      "maps A to the domain's primary action",
+      "maps R to the domain's secondary action",
+      "resolves R to null for a domain with only a primary action",
+      "resolves both keys to null when the domain has no actions",
+      "ignores any key other than A/R"
+    ],
+    "attentionQueueTestTs": [
+      "describes both keys for a domain with two actions (bible: display/reject)",
+      "describes both keys for music/sermon/content's accept/reject",
+      "describes both keys for correlation's review/dismiss",
+      "describes only A for a domain with a single action (service: acknowledge only)",
+      "is based on the first item only, never a later one",
+      "returns null for an empty queue - never a stale or fabricated legend"
+    ],
+    "frontendTestCountBeforePhase": 220,
+    "frontendTestCountAfterPhase": 231,
+    "command": "npm run test -- --run",
+    "result": "231 passed"
+  },
+  "fullRegression": {
+    "typecheck": "npm run typecheck: clean",
+    "lint": "npm run lint: only the 4 pre-existing set-state-in-effect/only-export-components warnings present before this phase, in files this phase did not touch - no new warnings (verified after moving shortcutLegend out of the .tsx component file specifically to avoid a new react/only-export-components warning)",
+    "build": "npm run build: succeeds",
+    "rustChanges": "None - zero Rust files touched this phase, so no Rust regression re-run was needed."
+  },
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands, events, or database schema changes.",
+    "Diagnostics Mode's A/R/E/P behavior against suggestions[0] is byte-identical to before this phase.",
+    "resolveUnifiedShortcutAction only ever returns an action already present in actionsFor(domain) - it can never fire an action a button on screen wasn't already offering.",
+    "The Operator Mode shortcut path dispatches through the exact same handleUnifiedAction function every IntelligenceCard button already calls - never a second command-dispatch mechanism."
+  ]
+}

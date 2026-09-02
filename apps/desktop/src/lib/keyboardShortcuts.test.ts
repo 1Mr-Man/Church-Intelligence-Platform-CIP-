@@ -7,7 +7,7 @@
  * testable without one.
  */
 import { describe, expect, it } from "vitest";
-import { shouldHandleShortcut, type ShortcutEventLike } from "./keyboardShortcuts";
+import { resolveUnifiedShortcutAction, shouldHandleShortcut, type ShortcutEventLike } from "./keyboardShortcuts";
 
 function eventFrom(
   target: ShortcutEventLike["target"],
@@ -45,5 +45,32 @@ describe("shouldHandleShortcut", () => {
     expect(shouldHandleShortcut(eventFrom(null, { ctrlKey: true }))).toBe(false);
     expect(shouldHandleShortcut(eventFrom(null, { metaKey: true }))).toBe(false);
     expect(shouldHandleShortcut(eventFrom(null, { altKey: true }))).toBe(false);
+  });
+});
+
+describe("resolveUnifiedShortcutAction", () => {
+  it("maps A to the domain's primary action", () => {
+    expect(resolveUnifiedShortcutAction("a", ["display", "reject"])).toBe("display");
+    expect(resolveUnifiedShortcutAction("A", ["accept", "reject"])).toBe("accept");
+  });
+
+  it("maps R to the domain's secondary action", () => {
+    expect(resolveUnifiedShortcutAction("r", ["display", "reject"])).toBe("reject");
+    expect(resolveUnifiedShortcutAction("R", ["review", "dismiss"])).toBe("dismiss");
+  });
+
+  it("resolves R to null for a domain with only a primary action", () => {
+    expect(resolveUnifiedShortcutAction("r", ["acknowledge"])).toBeNull();
+  });
+
+  it("resolves both keys to null when the domain has no actions", () => {
+    expect(resolveUnifiedShortcutAction("a", [])).toBeNull();
+    expect(resolveUnifiedShortcutAction("r", [])).toBeNull();
+  });
+
+  it("ignores any key other than A/R", () => {
+    expect(resolveUnifiedShortcutAction("e", ["display", "reject"])).toBeNull();
+    expect(resolveUnifiedShortcutAction("p", ["display", "reject"])).toBeNull();
+    expect(resolveUnifiedShortcutAction("s", ["display", "reject"])).toBeNull();
   });
 });

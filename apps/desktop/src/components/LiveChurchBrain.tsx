@@ -34,7 +34,7 @@ import * as commands from "../lib/commands";
 import * as liveEvents from "../lib/liveEvents";
 import { formatClockTime } from "../lib/format";
 import { describeTimelineEntry } from "../lib/timelineFormat";
-import { shouldHandleShortcut } from "../lib/keyboardShortcuts";
+import { resolveUnifiedShortcutAction, shouldHandleShortcut } from "../lib/keyboardShortcuts";
 import { buildAttentionQueue } from "../lib/attentionQueue";
 import { buildUnifiedFeed, type UnifiedIntelligenceItem } from "../lib/unifiedFeed";
 import { WorkspaceHeader } from "./workspace/WorkspaceHeader";
@@ -45,7 +45,7 @@ import { ServiceControlBar } from "./workspace/ServiceControlBar";
 import { SystemStatusStrip } from "./workspace/SystemStatusStrip";
 import { PresentationCard } from "./workspace/PresentationCard";
 import { DisplayRegistryPanel } from "./workspace/DisplayRegistryPanel";
-import type { UnifiedItemAction } from "./workspace/actions";
+import { actionsFor, type UnifiedItemAction } from "./workspace/actions";
 import "./LiveChurchBrain.css";
 import "./workspace/workspace.css";
 
@@ -503,51 +503,6 @@ export function LiveChurchBrain() {
 
   const firstPending = suggestions[0];
 
-  // Phase 1.3 keyboard shortcuts (section 31): A/R/E act on the first
-  // pending suggestion, S focuses the search box. P previews it (Phase
-  // 1.4) - never prepares, since a still-pending suggestion is never
-  // approved yet and preparing requires approval (section 3/16). Guarded
-  // so typing in any input never accidentally triggers one - see
-  // `shouldHandleShortcut`.
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const eventLike = {
-        ctrlKey: event.ctrlKey,
-        metaKey: event.metaKey,
-        altKey: event.altKey,
-        target: target ? { tagName: target.tagName, isContentEditable: target.isContentEditable } : null,
-      };
-      if (!shouldHandleShortcut(eventLike)) return;
-      const key = event.key.toLowerCase();
-      if (key === "s") {
-        event.preventDefault();
-        searchInputRef.current?.focus();
-        return;
-      }
-      if (!firstPending || busy === `approve-${firstPending.id}` || busy === `reject-${firstPending.id}`) return;
-      if (key === "a") {
-        void withBusy(`approve-${firstPending.id}`, async () => {
-          await commands.approveSuggestion(firstPending.id);
-        });
-      } else if (key === "r") {
-        void withBusy(`reject-${firstPending.id}`, async () => {
-          await commands.rejectSuggestion(firstPending.id);
-        });
-      } else if (key === "e") {
-        setEditingId(firstPending.id);
-        setEditValue(firstPending.kind.type === "scripture" ? firstPending.kind.reference : "");
-      } else if (key === "p") {
-        void withBusy(`preview-${firstPending.id}`, async () => {
-          const preview = await commands.previewPresentation(firstPending.id);
-          setPreviews((prev) => ({ ...prev, [firstPending.id]: preview }));
-        });
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [firstPending, withBusy, busy]);
-
   const openHistory = () => {
     setHistoryOpen((open) => !open);
     if (!historyOpen && history.length === 0) {
@@ -631,6 +586,76 @@ export function LiveChurchBrain() {
     },
     [withBusy],
   );
+
+  // Phase 1.3 keyboard shortcuts (section 31), extended by Phase 6.1
+  // (Operator Ergonomics). In Diagnostics Mode, A/R/E/P act on the first
+  // raw Bible suggestion (`firstPending` = `suggestions[0]`) exactly as
+  // before - unchanged, since that panel's Edit/Preview tools have no
+  // equivalent in the domain-generic unified action model. In Operator
+  // Mode, A/R instead act on the top item of the *visible* Needs
+  // Attention queue (`attentionQueue[0]`), dispatched through the exact
+  // same `handleUnifiedAction` every card's own buttons already call.
+  //
+  // This fixes a real mismatch found during this phase's audit: before
+  // this change, A/R silently acted on `suggestions[0]` even while the
+  // operator was looking at Operator Mode's Needs Attention queue -
+  // `attentionQueue` has its own ordering and covers five other domains
+  // besides Bible, so the shortcut could fire on a completely different
+  // item than the one visually at the top of the screen. See
+  // `resolveUnifiedShortcutAction`'s own doc comment for the A/R mapping.
+  //
+  // S focuses the Diagnostics-mode manual search box in either mode (a
+  // harmless no-op when that box isn't rendered). Guarded so typing in
+  // any input never accidentally triggers one - see
+  // `shouldHandleShortcut`.
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const eventLike = {
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        altKey: event.altKey,
+        target: target ? { tagName: target.tagName, isContentEditable: target.isContentEditable } : null,
+      };
+      if (!shouldHandleShortcut(eventLike)) return;
+      const key = event.key.toLowerCase();
+      if (key === "s") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+      if (mode === "operator") {
+        const topItem = attentionQueue[0];
+        if (!topItem) return;
+        const action = resolveUnifiedShortcutAction(key, actionsFor(topItem.domain));
+        if (!action) return;
+        const busyKey = `${topItem.domain}-${action}-${topItem.id}`;
+        if (busy === busyKey) return;
+        handleUnifiedAction(topItem, action);
+        return;
+      }
+      if (!firstPending || busy === `approve-${firstPending.id}` || busy === `reject-${firstPending.id}`) return;
+      if (key === "a") {
+        void withBusy(`approve-${firstPending.id}`, async () => {
+          await commands.approveSuggestion(firstPending.id);
+        });
+      } else if (key === "r") {
+        void withBusy(`reject-${firstPending.id}`, async () => {
+          await commands.rejectSuggestion(firstPending.id);
+        });
+      } else if (key === "e") {
+        setEditingId(firstPending.id);
+        setEditValue(firstPending.kind.type === "scripture" ? firstPending.kind.reference : "");
+      } else if (key === "p") {
+        void withBusy(`preview-${firstPending.id}`, async () => {
+          const preview = await commands.previewPresentation(firstPending.id);
+          setPreviews((prev) => ({ ...prev, [firstPending.id]: preview }));
+        });
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [mode, attentionQueue, handleUnifiedAction, firstPending, withBusy, busy]);
 
   return (
     <div className="live-brain">

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ConfidenceResult } from "../domain";
-import { buildAttentionQueue, MAX_VISIBLE_ATTENTION_ITEMS } from "./attentionQueue";
+import { buildAttentionQueue, MAX_VISIBLE_ATTENTION_ITEMS, shortcutLegend } from "./attentionQueue";
 import type { UnifiedIntelligenceItem } from "./unifiedFeed";
 
 function confidence(score: number): ConfidenceResult {
@@ -67,5 +67,33 @@ describe("buildAttentionQueue", () => {
     const originalOrder = items.map((i) => i.id);
     buildAttentionQueue(items);
     expect(items.map((i) => i.id)).toEqual(originalOrder);
+  });
+});
+
+describe("shortcutLegend", () => {
+  it("describes both keys for a domain with two actions (bible: display/reject)", () => {
+    expect(shortcutLegend([item({ domain: "bible" })])).toBe("A = Display, R = Reject for the first item");
+  });
+
+  it("describes both keys for music/sermon/content's accept/reject", () => {
+    expect(shortcutLegend([item({ domain: "music" })])).toBe("A = Accept, R = Reject for the first item");
+  });
+
+  it("describes both keys for correlation's review/dismiss", () => {
+    expect(shortcutLegend([item({ domain: "correlation" })])).toBe("A = Review, R = Dismiss for the first item");
+  });
+
+  it("describes only A for a domain with a single action (service: acknowledge only)", () => {
+    expect(shortcutLegend([item({ domain: "service" })])).toBe("A = Acknowledge for the first item");
+  });
+
+  it("is based on the first item only, never a later one", () => {
+    expect(shortcutLegend([item({ domain: "service" }), item({ domain: "bible" })])).toBe(
+      "A = Acknowledge for the first item",
+    );
+  });
+
+  it("returns null for an empty queue - never a stale or fabricated legend", () => {
+    expect(shortcutLegend([])).toBeNull();
   });
 });

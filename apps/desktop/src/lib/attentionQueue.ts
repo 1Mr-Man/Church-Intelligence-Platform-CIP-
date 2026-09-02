@@ -9,6 +9,7 @@
  * (`UnifiedIntelligenceItem.needsAttention`); it never demotes anything
  * for being uninteresting.
  */
+import { ACTION_LABELS, actionsFor } from "../components/workspace/actions";
 import type { UnifiedIntelligenceItem } from "./unifiedFeed";
 
 /** Bound for the attention queue (spec rule 12) - deliberately smaller
@@ -40,4 +41,25 @@ export function buildAttentionQueue(feed: UnifiedIntelligenceItem[]): UnifiedInt
     .slice()
     .sort(compareByAttentionPriority)
     .slice(0, MAX_VISIBLE_ATTENTION_ITEMS);
+}
+
+/**
+ * Phase 6.1 (Operator Ergonomics): describes what the A/R keyboard
+ * shortcuts will do to the top item of an already-built attention queue -
+ * "A" for the domain's primary action (display/accept/acknowledge/review),
+ * "R" for its secondary/negative one (reject/dismiss), if the domain has
+ * one. Derived entirely from `actionsFor`/`ACTION_LABELS`
+ * (`components/workspace/actions.ts`) - the exact same list/labels
+ * `IntelligenceCard` already renders as buttons, so this legend can never
+ * describe an action a button on screen isn't already offering. `null`
+ * for an empty queue, never a stale or fabricated legend.
+ */
+export function shortcutLegend(queue: UnifiedIntelligenceItem[]): string | null {
+  const topItem = queue[0];
+  if (!topItem) return null;
+  const [primary, secondary] = actionsFor(topItem.domain);
+  if (!primary) return null;
+  return secondary
+    ? `A = ${ACTION_LABELS[primary]}, R = ${ACTION_LABELS[secondary]} for the first item`
+    : `A = ${ACTION_LABELS[primary]} for the first item`;
 }
