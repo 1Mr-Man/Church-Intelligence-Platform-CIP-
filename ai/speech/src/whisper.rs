@@ -24,6 +24,19 @@
 //! `is_final: true` segments. It does **not** fabricate interim segments -
 //! see `docs/live-speech.md`'s "Interim vs. final" section for what a
 //! future engine with true streaming support would change.
+//!
+//! ## Language (Phase 12)
+//!
+//! Defaults to `"en"`, preserving this engine's exact pre-Phase-12
+//! behavior (whisper.cpp's own C-level default) for any caller that
+//! never touches [`SpeechEngine::set_language`]. See
+//! `cip_ai_speech::SUPPORTED_LANGUAGES` for the real, verified set of
+//! languages CIP offers (and why Igbo is deliberately not among them)
+//! and `docs/phase-12-audit.md` for the full evidence. Every real
+//! inference pass reads back the language whisper.cpp actually used via
+//! `full_lang_id_from_state`, so `TranscriptSegment.language` is always
+//! an honest report of what happened, never a blind echo of the request -
+//! this matters most for `"auto"`, where the two can genuinely differ.
 
 use cip_core_ai::{SpeechEngine, SpeechEngineError, TranscriptSegment};
 use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
@@ -84,7 +97,13 @@ pub struct WhisperSpeechEngine {
     buffer: Vec<i16>,
     sequence: u64,
     elapsed_ms: u64,
-    language: Option<String>,
+    /// Phase 12: the language code (`"en"`/`"yo"`/`"ha"`/`"auto"` - see
+    /// `cip_ai_speech::SUPPORTED_LANGUAGES`) the *next* inference pass
+    /// should condition on - set via [`SpeechEngine::set_language`].
+    /// Defaults to `"en"`, preserving this engine's exact pre-Phase-12
+    /// behavior (whisper.cpp's own C-level default) for any caller that
+    /// never touches the new setting.
+    requested_language: String,
     /// Phase 3.8.7.3: whether the most recent `feed_audio` call actually
     /// ran `run_inference` - see `SpeechEngine::last_feed_triggered_inference`'s
     /// own docs for why a caller needs this.
@@ -119,10 +138,23 @@ impl WhisperSpeechEngine {
             buffer: Vec::with_capacity(CHUNK_SAMPLES),
             sequence: 0,
             elapsed_ms: 0,
-            language: None,
+            requested_language: "en".to_string(),
             last_feed_triggered_inference: false,
             last_feed_was_silence: false,
         })
+    }
+
+    /// Whether the loaded model's vocabulary includes language tokens at
+    /// all - `false` for an English-only (`ggml-*.en.bin`) model, which
+    /// cannot honor any language selection other than English regardless
+    /// of [`SpeechEngine::set_language`] (Phase 12). A thin wrapper over
+    /// `whisper-rs`'s own `WhisperContext::is_multilingual`, called once
+    /// at load time by `apps/desktop/src-tauri`'s `create_speech_engine`
+    /// and surfaced honestly via `SpeechDiagnostics::model_is_multilingual`
+    /// rather than letting an operator believe a language switch worked
+    /// when the loaded model architecturally cannot do it.
+    pub fn is_multilingual(&self) -> bool {
+        self.ctx.is_multilingual()
     }
 
     fn run_inference(&mut self) -> Result<Vec<TranscriptSegment>, SpeechEngineError> {
@@ -183,10 +215,27 @@ impl WhisperSpeechEngine {
             .unwrap_or(4)
             .min(8) as std::ffi::c_int;
         params.set_n_threads(n_threads);
+        // Phase 12: condition this pass on the currently-selected
+        // language - `"auto"` is `whisper-rs`'s own documented literal
+        // for auto-detection (equivalent to passing `None`), so no
+        // special-casing is needed here.
+        params.set_language(Some(&self.requested_language));
 
         state
             .full(params, &audio_f32)
             .map_err(|e| SpeechEngineError::TranscriptionFailed(e.to_string()))?;
+
+        // Phase 12: read back the language whisper.cpp *actually* used
+        // for this pass - correct whether it was forced or auto-detected -
+        // rather than blindly echoing the requested setting, so an
+        // Auto-detect selection produces an honest, real answer instead
+        // of the literal string "auto".
+        let detected_language = state
+            .full_lang_id_from_state()
+            .ok()
+            .and_then(whisper_rs::get_lang_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| self.requested_language.clone());
 
         let num_segments = state
             .full_n_segments()
@@ -218,7 +267,7 @@ impl WhisperSpeechEngine {
             ),
             start_ms,
             end_ms: self.elapsed_ms,
-            language: self.language.clone(),
+            language: Some(detected_language),
             speaker_id: None,
         };
         self.sequence += 1;
@@ -260,6 +309,10 @@ impl SpeechEngine for WhisperSpeechEngine {
 
     fn discard_buffered_audio(&mut self) {
         self.buffer.clear();
+    }
+
+    fn set_language(&mut self, language: &str) {
+        self.requested_language = language.to_string();
     }
 }
 

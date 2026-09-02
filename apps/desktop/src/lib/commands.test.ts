@@ -45,6 +45,7 @@ import {
   getSermon,
   getSermonFoundationState,
   getSermonState,
+  getSpeechLanguageCapabilities,
   importBibleDataset,
   importMusicDataset,
   linkTranscriptSegmentToSermon,
@@ -79,6 +80,7 @@ import {
   setContentEnabled,
   setProductionIntegrationConfig,
   setSermonTitle,
+  setSpeechLanguage,
   startSermon,
   TauriUnavailableError,
   testObsConnection,
@@ -1023,6 +1025,42 @@ describe("commands.ts Tauri IPC guard", () => {
     await expect(enableCongregantCompanion()).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(disableCongregantCompanion()).rejects.toBeInstanceOf(TauriUnavailableError);
     await expect(getCongregantCompanionStatus()).rejects.toBeInstanceOf(TauriUnavailableError);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  // --- Phase 12: multi-language Whisper ---------------------------------------
+
+  it("getSpeechLanguageCapabilities takes no arguments", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({
+      currentLanguage: "en",
+      supportedLanguages: [{ code: "en", name: "English" }],
+      modelIsMultilingual: null,
+    });
+
+    await getSpeechLanguageCapabilities();
+
+    expect(invokeMock).toHaveBeenCalledWith("get_speech_language_capabilities", undefined);
+  });
+
+  it("setSpeechLanguage forwards language as-is", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({
+      currentLanguage: "yo",
+      supportedLanguages: [{ code: "en", name: "English" }],
+      modelIsMultilingual: true,
+    });
+
+    await setSpeechLanguage("yo");
+
+    expect(invokeMock).toHaveBeenCalledWith("set_speech_language", { language: "yo" });
+  });
+
+  it("rejects getSpeechLanguageCapabilities/setSpeechLanguage outside the Tauri runtime, without calling invoke()", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    await expect(getSpeechLanguageCapabilities()).rejects.toBeInstanceOf(TauriUnavailableError);
+    await expect(setSpeechLanguage("en")).rejects.toBeInstanceOf(TauriUnavailableError);
     expect(invokeMock).not.toHaveBeenCalled();
   });
 });

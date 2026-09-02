@@ -26,6 +26,38 @@ pub use whisper::WhisperSpeechEngine;
 
 use cip_core_ai::{SpeechEngine, SpeechEngineError, TranscriptSegment};
 
+/// The transcription languages CIP actually offers, deliberately
+/// unconditional on the `whisper` Cargo feature (so command-layer input
+/// validation compiles and behaves identically in every build) even
+/// though only `WhisperSpeechEngine` (behind that feature) ever honors
+/// a non-default selection.
+///
+/// Every code here is a real, verified entry in `whisper.cpp`'s own
+/// 100-language vocabulary table (`g_lang` in
+/// `whisper-rs-sys`'s vendored `whisper.cpp/src/whisper.cpp`) - not a
+/// guess. Yoruba (`yo`) and Hausa (`ha`) are both real, trained Whisper
+/// languages. **Igbo is deliberately absent**: `whisper.cpp`'s
+/// vocabulary has no Igbo entry at all (checked directly against the
+/// vendored source, not assumed), so no CIP-side configuration could
+/// make a Whisper model correctly condition on it - see
+/// `docs/phase-12-audit.md`'s "Verifying the premise before building
+/// anything" for the full evidence. `"auto"` is `whisper-rs`'s own
+/// documented literal for language auto-detection (equivalent to
+/// passing `None`).
+pub const SUPPORTED_LANGUAGES: &[(&str, &str)] = &[
+    ("en", "English"),
+    ("yo", "Yoruba"),
+    ("ha", "Hausa"),
+    ("auto", "Auto-detect"),
+];
+
+/// Whether `code` is one of [`SUPPORTED_LANGUAGES`]'s entries - the
+/// single validation point `apps/desktop/src-tauri`'s `set_speech_language`
+/// command uses, so the allow-list is never duplicated.
+pub fn is_supported_language(code: &str) -> bool {
+    SUPPORTED_LANGUAGES.iter().any(|(c, _)| *c == code)
+}
+
 #[derive(Default)]
 pub struct NullSpeechEngine;
 
@@ -64,5 +96,36 @@ mod tests {
     fn null_engine_satisfies_the_trait_object_contract() {
         let engine: Box<dyn SpeechEngine> = Box::new(NullSpeechEngine);
         assert!(!engine.is_ready());
+    }
+
+    // --- Phase 12: multi-language Whisper - the allow-list itself ---------
+
+    #[test]
+    fn supported_languages_are_exactly_english_yoruba_hausa_and_auto() {
+        let codes: Vec<&str> = SUPPORTED_LANGUAGES.iter().map(|(c, _)| *c).collect();
+        assert_eq!(codes, vec!["en", "yo", "ha", "auto"]);
+    }
+
+    #[test]
+    fn igbo_is_never_offered_as_a_supported_language() {
+        // See SUPPORTED_LANGUAGES's own docs: whisper.cpp's vocabulary has
+        // no Igbo entry at all, verified against its vendored source -
+        // this is a hard model limitation, not an oversight, and this
+        // test guards against it being silently added back without that
+        // same verification.
+        assert!(!is_supported_language("ig"));
+    }
+
+    #[test]
+    fn is_supported_language_accepts_every_listed_code() {
+        for (code, _) in SUPPORTED_LANGUAGES {
+            assert!(is_supported_language(code), "{code} should be supported");
+        }
+    }
+
+    #[test]
+    fn is_supported_language_rejects_an_unknown_code() {
+        assert!(!is_supported_language("xx"));
+        assert!(!is_supported_language(""));
     }
 }

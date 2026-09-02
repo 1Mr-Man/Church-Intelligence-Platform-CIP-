@@ -60,6 +60,13 @@ pub struct SpeechDiagnostics {
     pub model_loaded: bool,
     /// The real error text from a failed load attempt, if any.
     pub model_load_error: Option<String>,
+    /// Phase 12: whether the loaded model's vocabulary includes language
+    /// tokens at all (`WhisperSpeechEngine::is_multilingual`) - `None`
+    /// until a model has actually loaded (`model_loaded == false`), never
+    /// guessed. `Some(false)` means the loaded model is English-only
+    /// (a `ggml-*.en.bin`) and cannot honor any language selection other
+    /// than English regardless of `set_speech_language`.
+    pub model_is_multilingual: Option<bool>,
     /// Total `AudioChunk`s delivered to the speech engine so far this
     /// process (across every `start_listening` call, not just the
     /// current one - a simple running counter, not per-session).
@@ -384,6 +391,15 @@ pub struct AppState {
     /// `production_integration_config`'s own "in-memory/session-scoped,
     /// disabled by default" precedent.
     pub companion_server: Mutex<Option<crate::companion::CompanionServerHandle>>,
+    /// Phase 12 (Multi-language Whisper): the currently-selected speech
+    /// transcription language code (see `cip_ai_speech::SUPPORTED_LANGUAGES`) -
+    /// defaults to `"en"`, preserving pre-Phase-12 behavior. In-memory/
+    /// session-scoped, identical precedent to `screen_route_modes`/
+    /// `current_operator`. The source of truth for what
+    /// `get_speech_language_capabilities` reports; `set_speech_language`
+    /// updates this and forwards the change into `speech_engine` via
+    /// `SpeechEngine::set_language` in the same call.
+    pub speech_language: Mutex<String>,
 }
 
 impl AppState {
@@ -452,6 +468,7 @@ impl AppState {
             current_operator: Mutex::new(None),
             companion_snapshot: std::sync::Arc::new(Mutex::new(None)),
             companion_server: Mutex::new(None),
+            speech_language: Mutex::new("en".to_string()),
         }
     }
 }

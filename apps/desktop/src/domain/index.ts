@@ -13,3 +13,4 @@ export * from "./production";
 export * from "./search";
 export * from "./sermon";
 export * from "./service";
+export * from "./speech";

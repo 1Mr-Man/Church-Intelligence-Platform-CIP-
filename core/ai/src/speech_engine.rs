@@ -129,6 +129,19 @@ pub trait SpeechEngine: Send + Sync {
     /// buffered samples in whatever the engine's next real inference
     /// window turns out to be.
     fn discard_buffered_audio(&mut self) {}
+
+    /// Sets the language `language` (a short code such as `"en"`, or
+    /// `"auto"` for auto-detection) this engine should condition its
+    /// *next* inference pass on. A no-op by default - only an engine that
+    /// actually performs language-conditioned decoding
+    /// (`WhisperSpeechEngine`, Phase 12) overrides this.
+    ///
+    /// Phase 12: applies starting with the next inference window only -
+    /// audio already buffered-but-not-yet-inferred finishes on whatever
+    /// language was in effect when it started buffering, the same
+    /// "never distort in-flight state" discipline
+    /// `discard_buffered_audio`/the VAD gate already follow.
+    fn set_language(&mut self, _language: &str) {}
 }
 
 #[cfg(test)]

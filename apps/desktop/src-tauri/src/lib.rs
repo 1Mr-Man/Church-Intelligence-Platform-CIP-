@@ -59,6 +59,7 @@ fn create_speech_engine(config: &AppConfig) -> (Box<dyn SpeechEngine>, state::Sp
         match cip_ai_speech::WhisperSpeechEngine::load(model_path) {
             Ok(engine) => {
                 log::info!(target: LogCategory::Speech.target(), "loaded local speech model from {}", model_path.display());
+                let model_is_multilingual = engine.is_multilingual();
                 (
                     Box::new(engine),
                     state::SpeechDiagnostics {
@@ -66,6 +67,7 @@ fn create_speech_engine(config: &AppConfig) -> (Box<dyn SpeechEngine>, state::Sp
                         model_load_attempted: true,
                         model_loaded: true,
                         model_load_error: None,
+                        model_is_multilingual: Some(model_is_multilingual),
                         ..Default::default()
                     },
                 )
@@ -488,6 +490,8 @@ pub fn run() {
             commands::get_congregant_companion_status,
             commands::get_pilot_diagnostics,
             commands::install_whisper_model,
+            commands::get_speech_language_capabilities,
+            commands::set_speech_language,
             commands::get_embedding_capabilities,
             commands::install_embedding_model_file,
             commands::install_embedding_tokenizer_file,

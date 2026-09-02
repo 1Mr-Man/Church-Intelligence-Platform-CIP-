@@ -27,6 +27,7 @@ import type {
   ServiceSession,
   SermonStateSnapshot,
   SongRecognitionCandidate,
+  SpeechLanguageCapabilities,
   Suggestion,
   TimelineEntry,
   TranscriptSegment,
@@ -173,6 +174,11 @@ export function LiveChurchBrain() {
   // guess. `getAppConfig` already existed (Phase 1) but no panel called it.
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const [selectedDevice, setSelectedDevice] = useState("");
+  // Multi-language Whisper (Phase 12) - not service-scoped, loads once on
+  // mount like `intelligenceCapabilities` above; `setSpeechLanguage`
+  // refreshes it in place after a successful change.
+  const [speechLanguage, setSpeechLanguageState] = useState<SpeechLanguageCapabilities | null>(null);
+  const [speechLanguageMessage, setSpeechLanguageMessage] = useState<string | null>(null);
   const [manualText, setManualText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<BibleSearchResult[]>([]);
@@ -292,6 +298,18 @@ export function LiveChurchBrain() {
   useEffect(() => {
     commands.listAudioDevices().then(setDevices).catch(() => {});
   }, [status?.audioStatus]);
+
+  useEffect(() => {
+    commands.getSpeechLanguageCapabilities().then(setSpeechLanguageState).catch(() => {});
+  }, []);
+
+  const handleSpeechLanguageChange = useCallback((language: string) => {
+    setSpeechLanguageMessage(null);
+    commands
+      .setSpeechLanguage(language)
+      .then(setSpeechLanguageState)
+      .catch((e) => setSpeechLanguageMessage(`Could not change language: ${String(e)}`));
+  }, []);
 
   // Enabled Bible translations (Phase 1.5) - populates the search
   // translation selector. Disabled content is already excluded by the
@@ -986,6 +1004,19 @@ export function LiveChurchBrain() {
               </option>
             ))}
           </select>
+          {speechLanguage && (
+            <select
+              value={speechLanguage.currentLanguage}
+              onChange={(e) => handleSpeechLanguageChange(e.target.value)}
+              aria-label="Transcription language"
+            >
+              {speechLanguage.supportedLanguages.map((l) => (
+                <option key={l.code} value={l.code}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          )}
           {status?.audioStatus === "listening" ? (
             <button
               type="button"
@@ -1024,6 +1055,13 @@ export function LiveChurchBrain() {
             {status.speechStatus === "ready" ? " — transcription active" : " — transcription unavailable, audio capture only"}
           </p>
         )}
+        {speechLanguage?.modelIsMultilingual === false && speechLanguage.currentLanguage !== "en" && (
+          <p className="live-brain__notice">
+            The installed Whisper model is English-only and cannot honor the selected language -
+            transcription will still run in English regardless of this selection.
+          </p>
+        )}
+        {speechLanguageMessage && <p className="live-brain__hint">{speechLanguageMessage}</p>}
 
         <details className="live-brain__manual-entry">
           <summary>Manual / test transcript entry</summary>

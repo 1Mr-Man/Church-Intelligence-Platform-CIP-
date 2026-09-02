@@ -1,0 +1,40 @@
+{
+  "phase": "12",
+  "summary": "Environment A evidence for Multi-language Whisper - real, verified English/Yoruba/Hausa/Auto-detect transcription-language selection (live-editable, no restart), honest per-model multilingual detection, and an honest post-inference language readback replacing the previously permanently-null TranscriptSegment.language field.",
+  "trigger": "User's own item 9 from a pasted advice list ('Multi-language Whisper - currently pinned to en...'), followed by the explicit instruction 'Keep going into multi-language Whisper next'. See docs/phase-12-audit.md.",
+  "premiseVerification": {
+    "claim1": "Confirmed 'currently pinned to en': ai/speech/src/whisper.rs's run_inference never called FullParams::set_language before this phase - whisper-rs's own default is en (whisper_full_default_params()), so every transcription was implicitly English-only.",
+    "claim2": "Checked directly against whisper-rs-sys-0.13.1's vendored whisper.cpp/src/whisper.cpp g_lang table (the real 100-language vocabulary baked into every multilingual model's tokenizer): Yoruba (yo, id 66) and Hausa (ha, id 95) are both real, trained entries. Igbo has no entry at all, under any code - a hard model-architecture limitation, not a missing CIP config option."
+  },
+  "designChoice": "English (default), Yoruba, Hausa, and Auto-detect offered - all four verified real Whisper languages. Igbo deliberately excluded with the evidence above. Live-editable via new SpeechEngine::set_language trait method (default no-op), applied starting with the next inference window. Every real inference pass reads back the language whisper.cpp actually used via full_lang_id_from_state + get_lang_str, replacing the permanently-None TranscriptSegment.language field. WhisperContext::is_multilingual() detected once at load time and surfaced honestly. Not Admin-gated - a live-workflow choice like translation/audio-device selection, not a Phase-10-style configuration item.",
+  "newCode": {
+    "coreAi": "core/ai/src/speech_engine.rs: new SpeechEngine::set_language trait method, default no-op.",
+    "aiSpeechLib": "ai/speech/src/lib.rs: SUPPORTED_LANGUAGES (en/yo/ha/auto, feature-unconditional), is_supported_language.",
+    "aiSpeechWhisper": "ai/speech/src/whisper.rs: requested_language field (replaces the dead language: Option<String>), is_multilingual(), run_inference sets language before decoding and reads back the real used/detected language after, set_language trait impl.",
+    "stateRs": "apps/desktop/src-tauri/src/state.rs: AppState.speech_language (Mutex<String>, default en), SpeechDiagnostics.model_is_multilingual (Option<bool>).",
+    "libRs": "apps/desktop/src-tauri/src/lib.rs: create_speech_engine calls engine.is_multilingual() before boxing.",
+    "commandsRs": "apps/desktop/src-tauri/src/commands.rs: SpeechLanguageOptionDto/SpeechLanguageCapabilitiesDto; get_speech_language_capabilities (open) and set_speech_language (validates + applies immediately).",
+    "frontend": "domain/speech.ts; 2 new commands.ts wrappers; language <select> in LiveChurchBrain.tsx plus an honest English-only-model notice."
+  },
+  "newTests": {
+    "aiSpeechLibTestCount": 4,
+    "testingBoundaryNote": "Everything requiring a real loaded multilingual model is untestable in this environment for the same documented reason every other Whisper-model test in this codebase already is (model host blocked). SUPPORTED_LANGUAGES's exact contents and is_supported_language's validation logic are pure functions, directly tested - including an explicit igbo_is_never_offered_as_a_supported_language regression guard.",
+    "command": "cargo test --workspace && cargo test -p cip-ai-speech --features whisper && npm run test -- --run",
+    "result": "1014 passed (workspace default, +4 from Phase 11's 1010), 15 passed (cip-ai-speech, --features whisper, up from 11 pre-Phase-12), 285 passed (frontend, +5 from Phase 11's 280) - 0 failures across all three"
+  },
+  "fullRegression": {
+    "fmt": "cargo fmt --all -- --check: clean",
+    "clippy": "cargo clippy --workspace --all-targets -- -D warnings: clean, both feature configs",
+    "check": "cargo check --workspace / --features whisper: clean",
+    "test": "see newTests.result above",
+    "frontend": "npm run typecheck/lint/test/build: all clean - same 5 pre-existing lint warnings, no new ones"
+  },
+  "architecturalSafetyNotes": [
+    "2 new Tauri commands, zero new events, zero new migrations - no persistence, in-memory/session-scoped selection.",
+    "SpeechEngine::set_language's default no-op means NullSpeechEngine/ScriptedSpeechEngine are completely unaffected.",
+    "WhisperSpeechEngine's pre-Phase-12 default behavior is preserved exactly for any caller that never touches the new setting - requested_language defaults to en, the same value whisper.cpp would have used anyway.",
+    "core/bible, core/service, core/presentation (every domain contract crate) are entirely untouched."
+  ],
+  "honestLimitation": "No Igbo support - a hard Whisper model-architecture limitation, verified against the vendored source, not a missing CIP config option. No per-service language history or mid-service auto-switching. No translation (whisper.cpp's own translate flag untouched). No language-specific Bible-reference detection tuning - core/bible remains English-text-oriented regardless of transcription language.",
+  "environmentCStatus": "NOT YET VERIFIED for this exact artifact - the decisive pending gate is a real operator selecting Yoruba or Hausa with a real multilingual model installed, speaking in that language, and confirming both the transcript and its reported language field are correct; and separately confirming an English-only model honestly reports modelIsMultilingual: false and still transcribes in English regardless of the selection."
+}

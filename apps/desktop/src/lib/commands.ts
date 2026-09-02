@@ -57,6 +57,7 @@ import type {
   ServiceSession,
   SermonStateSnapshot,
   SongRecognitionCandidate,
+  SpeechLanguageCapabilities,
   Suggestion,
   SuggestionStatus,
   TimelineEntry,
@@ -116,6 +117,25 @@ export function getPilotDiagnostics(): Promise<PilotDiagnostics> {
  */
 export function installWhisperModel(sourcePath: string): Promise<WhisperModelDiagnostic> {
   return invokeCommand("install_whisper_model", { sourcePath });
+}
+
+/**
+ * Phase 12 (multi-language Whisper): current transcription-language
+ * selection and what CIP actually supports - available without being
+ * logged in as Admin (a live-workflow control, not configuration).
+ */
+export function getSpeechLanguageCapabilities(): Promise<SpeechLanguageCapabilities> {
+  return invokeCommand("get_speech_language_capabilities");
+}
+
+/**
+ * Selects the language the speech engine's next inference pass should
+ * condition on - takes effect immediately, no restart. Rejects with a
+ * human-readable message for any code outside
+ * `getSpeechLanguageCapabilities().supportedLanguages`.
+ */
+export function setSpeechLanguage(language: string): Promise<SpeechLanguageCapabilities> {
+  return invokeCommand("set_speech_language", { language });
 }
 
 /**

@@ -584,6 +584,97 @@ pub fn install_whisper_model(_source_path: String) -> Result<WhisperModelDiagnos
     )
 }
 
+// --- Phase 12: multi-language Whisper ---------------------------------------
+//
+// Which language a service is being preached in is a live-workflow choice
+// (like selecting a Bible translation or the audio input device), not a
+// system-configuration item - unlike Phase 10's seven Admin-gated commands,
+// these are available to any logged-in operator. See `docs/phase-12-audit.md`
+// for the full design record, including why Igbo is deliberately not offered.
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeechLanguageOptionDto {
+    pub code: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeechLanguageCapabilitiesDto {
+    pub current_language: String,
+    pub supported_languages: Vec<SpeechLanguageOptionDto>,
+    /// `None` until a model has actually loaded - see
+    /// `state::SpeechDiagnostics::model_is_multilingual`'s own docs.
+    pub model_is_multilingual: Option<bool>,
+}
+
+fn speech_language_capabilities(state: &State<'_, AppState>) -> SpeechLanguageCapabilitiesDto {
+    let current_language = state
+        .speech_language
+        .lock()
+        .expect("speech_language mutex poisoned")
+        .clone();
+    let model_is_multilingual = state
+        .speech_diagnostics
+        .lock()
+        .expect("speech_diagnostics mutex poisoned")
+        .model_is_multilingual;
+    SpeechLanguageCapabilitiesDto {
+        current_language,
+        supported_languages: cip_ai_speech::SUPPORTED_LANGUAGES
+            .iter()
+            .map(|(code, name)| SpeechLanguageOptionDto {
+                code: code.to_string(),
+                name: name.to_string(),
+            })
+            .collect(),
+        model_is_multilingual,
+    }
+}
+
+/// Current speech-language selection and what CIP actually supports -
+/// available without being logged in as Admin, matching this command
+/// family's own "live-workflow, not configuration" reasoning above.
+#[tauri::command]
+pub fn get_speech_language_capabilities(
+    state: State<'_, AppState>,
+) -> SpeechLanguageCapabilitiesDto {
+    speech_language_capabilities(&state)
+}
+
+/// Selects the language the speech engine's *next* inference pass should
+/// condition on - takes effect immediately (no restart), applied via
+/// `SpeechEngine::set_language`. Rejects any code outside
+/// `cip_ai_speech::SUPPORTED_LANGUAGES` rather than silently ignoring or
+/// passing through an unverified one.
+#[tauri::command]
+pub fn set_speech_language(
+    language: String,
+    state: State<'_, AppState>,
+) -> Result<SpeechLanguageCapabilitiesDto, AppError> {
+    if !cip_ai_speech::is_supported_language(&language) {
+        return Err(log_and_return(AppError::InvalidInput(format!(
+            "unsupported speech language \"{language}\" - see get_speech_language_capabilities \
+             for the supported set"
+        ))));
+    }
+    *state
+        .speech_language
+        .lock()
+        .expect("speech_language mutex poisoned") = language.clone();
+    state
+        .speech_engine
+        .lock()
+        .expect("speech_engine mutex poisoned")
+        .set_language(&language);
+    log::info!(
+        target: LogCategory::Speech.target(),
+        "speech transcription language set to \"{language}\""
+    );
+    Ok(speech_language_capabilities(&state))
+}
+
 // --- Phase 4.4: semantic (embedding-based) Bible search --------------------
 //
 // Mirrors the Whisper model-provisioning pattern immediately above exactly:

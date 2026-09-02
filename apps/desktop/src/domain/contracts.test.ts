@@ -61,6 +61,7 @@ import type {
 import type { ContentCandidate, ContentCandidateType } from "./contentIntelligence";
 import type { OperatorAccountSummary, Role } from "./access";
 import type { CompanionStatus } from "./companion";
+import type { SpeechLanguageCapabilities } from "./speech";
 
 describe("domain contracts", () => {
   it("constructs a ScriptureReference and a matching BibleTranslation", () => {
@@ -1101,5 +1102,32 @@ describe("Phase 11: Local Congregant Companion View domain contracts", () => {
     };
     expect(status.running).toBe(true);
     expect(status.urls).toHaveLength(1);
+  });
+});
+
+describe("Phase 12: multi-language Whisper domain contracts", () => {
+  it("constructs SpeechLanguageCapabilities with English/Yoruba/Hausa/Auto, never Igbo", () => {
+    const capabilities: SpeechLanguageCapabilities = {
+      currentLanguage: "en",
+      supportedLanguages: [
+        { code: "en", name: "English" },
+        { code: "yo", name: "Yoruba" },
+        { code: "ha", name: "Hausa" },
+        { code: "auto", name: "Auto-detect" },
+      ],
+      modelIsMultilingual: null,
+    };
+    const codes = capabilities.supportedLanguages.map((l) => l.code);
+    expect(codes).toEqual(["en", "yo", "ha", "auto"]);
+    expect(codes).not.toContain("ig");
+  });
+
+  it("modelIsMultilingual is null until a model has actually loaded", () => {
+    const capabilities: SpeechLanguageCapabilities = {
+      currentLanguage: "en",
+      supportedLanguages: [],
+      modelIsMultilingual: null,
+    };
+    expect(capabilities.modelIsMultilingual).toBeNull();
   });
 });
