@@ -86,6 +86,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0015_suggestion_rejection_echo",
         sql: include_str!("../migrations/0015_suggestion_rejection_echo.sql"),
     },
+    Migration {
+        version: 16,
+        name: "0016_translation_usage_permissions",
+        sql: include_str!("../migrations/0016_translation_usage_permissions.sql"),
+    },
 ];
 
 /// A migration that was applied during this call to [`run_migrations`].

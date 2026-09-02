@@ -11,6 +11,18 @@
   "underlying_text_rights_statement": "\"The Berean Bible and Majority Bible texts are officially placed into the public domain as of April 30, 2023 ... Licensing is not required for any use.\" (quoted in the source repository's README, citing berean.bible/licensing.htm)",
   "licensing_status": "verified_public_domain",
   "license": "Public Domain",
+  "usage_permissions": {
+    "note": "Phase 9 (cip_core_content::UsagePermissions) - every permission below is true because BSB is a genuine CC0 1.0 public-domain dedication; see underlying_text_rights_statement above. Recorded on database/datasets/bsb/bsb.json's translation.usage and threaded into content_registry at import time.",
+    "rights_holder": "Public Domain (CC0 1.0)",
+    "distribution_allowed": true,
+    "offline_storage_allowed": true,
+    "projection_allowed": true,
+    "api_allowed": true,
+    "commercial_allowed": true,
+    "ai_processing_allowed": true,
+    "llm_prompt_allowed": true,
+    "training_allowed": null
+  },
   "dataset_version": "bsb-1.0",
   "checksum": "d4335582ff26a3ac",
   "checksum_algorithm": "FNV-1a 64-bit over translation_id + every (book, chapter, verse, text) row, sorted, joined with '|' and newline-separated - see cip_integrations_bible::importer::compute_checksum",

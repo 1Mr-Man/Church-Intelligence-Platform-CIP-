@@ -59,6 +59,7 @@ pub fn register_dev_seed_content_if_missing(
         checksum: None,
         status: ContentStatus::Enabled,
         licensing_status: cip_core_content::LicensingStatus::Unknown,
+        usage: cip_core_content::UsagePermissions::default(),
     })
 }
 
@@ -100,6 +101,7 @@ pub fn import_and_register(
         checksum: Some(report.checksum.clone()),
         status,
         licensing_status: report.licensing_status,
+        usage: dataset.translation.usage.clone(),
     })?;
 
     Ok(report)
@@ -162,6 +164,10 @@ mod tests {
                 distribution: Some("public domain".to_string()),
                 dataset_version: "1.0".to_string(),
                 licensing_status: "verified_public_domain".to_string(),
+                usage: cip_core_content::UsagePermissions {
+                    ai_processing_allowed: Some(true),
+                    ..Default::default()
+                },
             },
             verses: vec![VerseInput {
                 book: "Romans".to_string(),
@@ -190,6 +196,11 @@ mod tests {
         assert_eq!(
             metadata.licensing_status,
             cip_core_content::LicensingStatus::VerifiedPublicDomain
+        );
+        assert!(
+            metadata.usage.permits_ai_processing(),
+            "usage permissions declared on the dataset's TranslationInput must flow through \
+             into the registered ContentMetadata, not be dropped"
         );
     }
 

@@ -99,6 +99,95 @@ impl LicensingStatus {
     }
 }
 
+/// Per-use-case licensing permissions for one content item - a finer
+/// grain than [`LicensingStatus`], which only governs whether a dataset
+/// may be bulk-imported at all. Once a translation has cleared that
+/// coarse admission gate, `UsagePermissions` governs what CIP is actually
+/// allowed to *do* with it: a real license can permit projection and
+/// offline storage while forbidding AI/ML processing, or permit
+/// non-commercial use only - distinctions `LicensingStatus` alone cannot
+/// express (see `docs/bible-translation-registry.md` and
+/// `docs/bible-translation-licensing-roadmap.md`).
+///
+/// Every field defaults to `None` - "not yet determined" - via
+/// `#[derive(Default)]`. `None` must never be treated as permissive by
+/// any caller: the `permits_*` helpers below all read `Some(true)` as the
+/// only "yes," identical to `LicensingStatus`'s own "never assume
+/// permissive" doctrine. `Some(false)` records an explicit denial,
+/// distinct from "unknown."
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsagePermissions {
+    /// The actual rights holder/publisher of record (e.g. "Biblica",
+    /// "Thomas Nelson / HarperCollins Christian Publishing") - distinct
+    /// from `ContentMetadata::publisher`, which may record a distributor
+    /// rather than the underlying rights holder.
+    pub rights_holder: Option<String>,
+    /// Which platform/route this content was (or will be) obtained
+    /// through (e.g. "direct publisher license", "API.Bible", "YouVersion
+    /// Platform", "public domain dataset").
+    pub source_provider: Option<String>,
+    pub source_url: Option<String>,
+    /// The exact attribution text a license requires CIP to display, if
+    /// any - `None` means no requirement is known, never "none required."
+    pub attribution_text: Option<String>,
+    pub license_start: Option<DateTime<Utc>>,
+    pub license_expiry: Option<DateTime<Utc>>,
+    pub distribution_allowed: Option<bool>,
+    pub offline_storage_allowed: Option<bool>,
+    pub projection_allowed: Option<bool>,
+    pub api_allowed: Option<bool>,
+    pub commercial_allowed: Option<bool>,
+    /// Whether this content's text may be processed by any local AI/ML
+    /// model (e.g. embedding generation) - the one permission this phase
+    /// actually enforces (see `commands::ensure_ai_processing_permitted`).
+    pub ai_processing_allowed: Option<bool>,
+    /// Whether this content's text may be sent into an LLM prompt
+    /// specifically (a stricter sub-case some real licenses distinguish
+    /// from AI/ML processing in general, e.g. embedding vs. generative
+    /// use) - recorded for future enforcement; nothing in this codebase
+    /// sends Bible text into an LLM prompt today.
+    pub llm_prompt_allowed: Option<bool>,
+    /// Whether this content's text may be used to train or fine-tune a
+    /// model - recorded for future enforcement; CIP does no model
+    /// training today.
+    pub training_allowed: Option<bool>,
+}
+
+impl UsagePermissions {
+    pub fn permits_distribution(&self) -> bool {
+        self.distribution_allowed == Some(true)
+    }
+
+    pub fn permits_offline_storage(&self) -> bool {
+        self.offline_storage_allowed == Some(true)
+    }
+
+    pub fn permits_projection(&self) -> bool {
+        self.projection_allowed == Some(true)
+    }
+
+    pub fn permits_api(&self) -> bool {
+        self.api_allowed == Some(true)
+    }
+
+    pub fn permits_commercial_use(&self) -> bool {
+        self.commercial_allowed == Some(true)
+    }
+
+    pub fn permits_ai_processing(&self) -> bool {
+        self.ai_processing_allowed == Some(true)
+    }
+
+    pub fn permits_llm_prompt(&self) -> bool {
+        self.llm_prompt_allowed == Some(true)
+    }
+
+    pub fn permits_training(&self) -> bool {
+        self.training_allowed == Some(true)
+    }
+}
+
 /// Provenance/licensing metadata for one locally-installed content item.
 ///
 /// Every field that describes a real-world fact CIP cannot independently
@@ -143,6 +232,13 @@ pub struct ContentMetadata {
     /// above (which only records what a source *said*, not what CIP has
     /// verified).
     pub licensing_status: LicensingStatus,
+    /// Fine-grained, per-use-case licensing permissions - see
+    /// [`UsagePermissions`]'s own docs. Defaults to
+    /// `UsagePermissions::default()` (every field `None`, i.e. "not yet
+    /// determined") at every call site with no real evidence, matching
+    /// `licensing_status`'s own honesty discipline.
+    #[serde(default)]
+    pub usage: UsagePermissions,
 }
 
 #[derive(Debug, Error)]
@@ -252,7 +348,43 @@ mod tests {
             checksum: None,
             status: ContentStatus::Enabled,
             licensing_status: LicensingStatus::Unknown,
+            usage: UsagePermissions::default(),
         }
+    }
+
+    #[test]
+    fn usage_permissions_default_to_unknown_and_permit_nothing() {
+        let usage = UsagePermissions::default();
+        assert!(!usage.permits_distribution());
+        assert!(!usage.permits_offline_storage());
+        assert!(!usage.permits_projection());
+        assert!(!usage.permits_api());
+        assert!(!usage.permits_commercial_use());
+        assert!(!usage.permits_ai_processing());
+        assert!(!usage.permits_llm_prompt());
+        assert!(!usage.permits_training());
+    }
+
+    #[test]
+    fn usage_permissions_explicit_false_is_distinct_from_unknown_but_still_denies() {
+        let usage = UsagePermissions {
+            ai_processing_allowed: Some(false),
+            ..Default::default()
+        };
+        assert!(!usage.permits_ai_processing());
+        assert_eq!(usage.ai_processing_allowed, Some(false));
+    }
+
+    #[test]
+    fn usage_permissions_only_explicit_true_permits() {
+        let usage = UsagePermissions {
+            ai_processing_allowed: Some(true),
+            offline_storage_allowed: Some(true),
+            ..Default::default()
+        };
+        assert!(usage.permits_ai_processing());
+        assert!(usage.permits_offline_storage());
+        assert!(!usage.permits_commercial_use());
     }
 
     #[test]

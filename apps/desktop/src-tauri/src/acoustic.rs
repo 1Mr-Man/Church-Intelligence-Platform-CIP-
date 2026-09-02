@@ -273,6 +273,7 @@ mod tests {
             checksum: None,
             status: ContentStatus::Enabled,
             licensing_status: cip_core_content::LicensingStatus::Unknown,
+            usage: cip_core_content::UsagePermissions::default(),
         }
     }
 

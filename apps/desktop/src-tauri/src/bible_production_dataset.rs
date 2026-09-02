@@ -58,4 +58,25 @@ mod tests {
         );
         assert!(!dataset.verses.is_empty());
     }
+
+    /// Phase 9: BSB is public domain, so every usage permission is
+    /// genuinely `true` (except `training_allowed`, deliberately left
+    /// unset - CIP does no model training, and the CC0 dedication was
+    /// never evaluated against that specific use case). This is the real
+    /// evidence that satisfies `commands::ensure_ai_processing_permitted`
+    /// for the one translation this codebase actually embeds - proving
+    /// the Phase 9 gate is real, not merely passing a synthetic fixture.
+    #[test]
+    fn the_embedded_asset_declares_real_usage_permissions_including_ai_processing() {
+        let dataset = bsb_dataset();
+        assert_eq!(
+            dataset.translation.usage.rights_holder.as_deref(),
+            Some("Public Domain (CC0 1.0)")
+        );
+        assert!(dataset.translation.usage.permits_ai_processing());
+        assert!(dataset.translation.usage.permits_distribution());
+        assert!(dataset.translation.usage.permits_offline_storage());
+        assert!(dataset.translation.usage.permits_projection());
+        assert!(dataset.translation.usage.permits_commercial_use());
+    }
 }

@@ -16,3 +16,4 @@ thiserror.workspace = true
 
 [dev-dependencies]
 cip-database.workspace = true
+serde_json.workspace = true

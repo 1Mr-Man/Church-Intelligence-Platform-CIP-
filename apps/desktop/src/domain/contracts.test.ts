@@ -15,7 +15,7 @@ import type {
 } from "./bible";
 import type { ConfidenceResult } from "./confidence";
 import type { ProcessedSegment, ScriptureDetection, Suggestion, TranscriptSegment } from "./ai";
-import type { ContentMetadata, ImportReport, IntegrityReport } from "./content";
+import type { ContentMetadata, ImportReport, IntegrityReport, UsagePermissions } from "./content";
 import type {
   DomainCapabilityReport,
   FindingStatus,
@@ -355,6 +355,23 @@ describe("domain contracts", () => {
     expect(entry.payload?.kind).toEqual({ reference: "ROM 8:28" });
   });
 
+  const unknownUsage: UsagePermissions = {
+    rightsHolder: null,
+    sourceProvider: null,
+    sourceUrl: null,
+    attributionText: null,
+    licenseStart: null,
+    licenseExpiry: null,
+    distributionAllowed: null,
+    offlineStorageAllowed: null,
+    projectionAllowed: null,
+    apiAllowed: null,
+    commercialAllowed: null,
+    aiProcessingAllowed: null,
+    llmPromptAllowed: null,
+    trainingAllowed: null,
+  };
+
   it("constructs a ContentMetadata with unknown licensing fields left null (Phase 1.5)", () => {
     const metadata: ContentMetadata = {
       id: "bible:KJV",
@@ -371,10 +388,12 @@ describe("domain contracts", () => {
       checksum: null,
       status: "enabled",
       licensingStatus: "unknown",
+      usage: unknownUsage,
     };
     expect(metadata.publisher).toBeNull();
     expect(metadata.status).toBe("enabled");
     expect(metadata.licensingStatus).toBe("unknown");
+    expect(metadata.usage.aiProcessingAllowed).toBeNull();
   });
 
   it("constructs a ContentMetadata for a verified-public-domain production dataset (real Bible dataset milestone)", () => {
@@ -393,8 +412,14 @@ describe("domain contracts", () => {
       checksum: "abc123",
       status: "enabled",
       licensingStatus: "verified_public_domain",
+      usage: {
+        ...unknownUsage,
+        rightsHolder: "Public Domain (CC0 1.0)",
+        aiProcessingAllowed: true,
+      },
     };
     expect(metadata.licensingStatus).toBe("verified_public_domain");
+    expect(metadata.usage.aiProcessingAllowed).toBe(true);
   });
 
   it("constructs an ImportReport reflecting an actual dataset import", () => {

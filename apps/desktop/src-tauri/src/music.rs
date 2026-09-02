@@ -75,6 +75,7 @@ pub fn register_dev_seed_music_content_if_missing(
             checksum: None,
             status,
             licensing_status: cip_core_content::LicensingStatus::Unknown,
+            usage: cip_core_content::UsagePermissions::default(),
         })?;
     }
     Ok(())
@@ -115,6 +116,7 @@ pub fn import_and_register_music(
         checksum: Some(report.checksum.clone()),
         status,
         licensing_status,
+        usage: cip_core_content::UsagePermissions::default(),
     })?;
 
     Ok(report)

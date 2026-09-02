@@ -1,0 +1,45 @@
+{
+  "phase": "9",
+  "summary": "Environment A evidence for Bible Translation Registry v2 - fine-grained UsagePermissions on ContentMetadata/content_registry, with a real fail-closed enforcement point gating CIP's embedding pipeline on ai_processing_allowed.",
+  "trigger": "User-supplied licensing-strategy research (YouVersion Platform vs. API.Bible vs. direct publisher licensing) with instruction to consider it and keep going. See docs/phase-9-audit.md.",
+  "gapFound": "generate_verse_embeddings sent every verse of a translation's text into a local AI embedding model with zero licensing check - safe only by accident (BSB, the only translation ever embedded, happens to be public domain).",
+  "designChoice": "UsagePermissions lives alongside LicensingStatus on ContentMetadata/content_registry (same home, different axis: admission vs. use-case permission). Every field defaults to None/unknown, never permissive. Only ai_processing_allowed is enforced this phase, fail-closed (opposite default from ensure_translation_selectable's fail-open, deliberately).",
+  "preExistingBugFixed": "generate_verse_embeddings and get_embedding_capabilities both hardcoded the literal DEFAULT_TRANSLATION_ID (\"KJV\", a dev-fixture id never registered in a real production build) instead of resolve_default_translation_id - fixed as part of touching these exact call sites for the licensing gate.",
+  "newCode": {
+    "coreContent": "core/content/src/lib.rs: UsagePermissions (14 fields, 8 permits_* helpers), ContentMetadata.usage field.",
+    "migration": "database/migrations/0016_translation_usage_permissions.sql: 14 new nullable columns on content_registry.",
+    "integrationsContent": "integrations/content/src/lib.rs: SqliteContentRegistry reads/writes every new column.",
+    "integrationsBible": "integrations/bible/src/importer.rs: TranslationInput.usage (optional, #[serde(default)]).",
+    "content_rs": "apps/desktop/src-tauri/src/content.rs: import_and_register threads dataset.translation.usage through to the registered ContentMetadata.",
+    "commands_rs": "apps/desktop/src-tauri/src/commands.rs: ensure_ai_processing_permitted (pure, fail-closed), wired into generate_verse_embeddings; both that command and get_embedding_capabilities now resolve the real default translation.",
+    "bsbDataset": "database/datasets/bsb/bsb.json + docs/data/bible/BSB/manifest.json: BSB's real usage permissions recorded as evidence (every flag true except training_allowed, left null).",
+    "frontend": "domain/content.ts: UsagePermissions, ContentMetadata.usage, BibleDatasetTranslationInput.usage?.",
+    "roadmapDoc": "docs/bible-translation-licensing-roadmap.md: the supplied research reframed as a named, actionable roadmap, cross-linked from docs/bible-translation-registry.md."
+  },
+  "newTests": {
+    "coreContentTestCount": 3,
+    "integrationsContentTestCount": 2,
+    "integrationsBibleTestCount": 2,
+    "contentRsTestCount": 1,
+    "commandsRsTestCount": 3,
+    "bibleProductionDatasetTestCount": 1,
+    "frontendTestsExtended": 2,
+    "testingBoundaryNote": "ensure_ai_processing_permitted is a pure function tested against a real in-memory SQLite registry (SqliteContentRegistry + cip_database::run_migrations), no tauri::test harness - the same split this codebase already uses for resolve_default_translation_id_from_registry.",
+    "command": "cargo test --workspace && cargo test --features whisper (apps/desktop/src-tauri) && npm run test -- --run",
+    "result": "977 passed (workspace default), 320 passed (desktop, --features whisper), 266 passed (frontend) - 0 failures across all three"
+  },
+  "fullRegression": {
+    "fmt": "cargo fmt --all -- --check: clean",
+    "clippy": "cargo clippy --workspace --all-targets -- -D warnings: clean, both feature configs",
+    "check": "cargo check --workspace / --features whisper: clean",
+    "test": "see newTests.result above",
+    "frontend": "npm run typecheck/lint/test/build: all clean - same 5 pre-existing lint warnings, no new ones"
+  },
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands, zero new events - generate_verse_embeddings and get_embedding_capabilities are the only two existing command bodies changed.",
+    "core/bible and core/service (Bible detection) are entirely untouched - licensing lives only in ContentMetadata/content_registry, never in the detection or provider-serving path, per this phase's own explicit design choice.",
+    "Every prior ContentMetadata construction site (8 files, 11 literals) updated to populate the new field explicitly - reviewed individually, none silently defaulted.",
+    "Migration 0016 is purely additive (14 nullable ALTER TABLE ADD COLUMN statements) - no existing row's data changes shape or is rewritten."
+  ],
+  "honestLimitation": "Only ai_processing_allowed is actually enforced; the other seven UsagePermissions fields are recorded and queryable but gate nothing yet, since no other call path in this codebase currently needs to restrict them. No operator-facing UI to view/edit UsagePermissions after import. No YouVersion/API.Bible network client code, no new Bible text, no Bible Society of Nigeria contact - see docs/bible-translation-licensing-roadmap.md's Phase B/C, both out of this session's reach (no real API keys or legal authority)."
+}

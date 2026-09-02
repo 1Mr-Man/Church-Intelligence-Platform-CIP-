@@ -24,6 +24,35 @@ export type LicensingStatus =
   | "restricted";
 
 /**
+ * Fine-grained, per-use-case licensing permissions (Phase 9). Mirrors
+ * `cip_core_content::UsagePermissions`. Every field is `null` by default -
+ * "not yet determined" - and must never be treated as permissive; only an
+ * explicit `true` permits anything. Distinct from `LicensingStatus` above,
+ * which only governs whether a dataset may be bulk-imported at all - this
+ * governs what CIP is allowed to *do* with a translation once admitted.
+ * See `docs/bible-translation-registry.md`.
+ */
+export interface UsagePermissions {
+  rightsHolder: string | null;
+  sourceProvider: string | null;
+  sourceUrl: string | null;
+  attributionText: string | null;
+  licenseStart: string | null; // ISO-8601
+  licenseExpiry: string | null; // ISO-8601
+  distributionAllowed: boolean | null;
+  offlineStorageAllowed: boolean | null;
+  projectionAllowed: boolean | null;
+  apiAllowed: boolean | null;
+  commercialAllowed: boolean | null;
+  /** The one permission CIP's own embedding pipeline actually enforces
+   * (`commands::ensure_ai_processing_permitted`) - `generate_verse_embeddings`
+   * refuses to run unless this is explicitly `true`. */
+  aiProcessingAllowed: boolean | null;
+  llmPromptAllowed: boolean | null;
+  trainingAllowed: boolean | null;
+}
+
+/**
  * Provenance/licensing metadata for one locally-installed content item.
  * Every field describing a real-world fact CIP cannot independently
  * verify is `string | null` - `null` means *unknown*, recorded honestly
@@ -44,6 +73,7 @@ export interface ContentMetadata {
   checksum: string | null;
   status: ContentStatus;
   licensingStatus: LicensingStatus;
+  usage: UsagePermissions;
 }
 
 /** A deterministic report of one dataset import call - every number is
@@ -99,6 +129,10 @@ export interface BibleDatasetTranslationInput {
    * (writing nothing) unless this is `"verified_public_domain"`,
    * `"verified_redistributable"`, or `"licensed_for_cip"`. */
   licensingStatus: LicensingStatus;
+  /** Optional (Phase 9) - a dataset file predating this field, or one
+   * that simply omits it, still imports fine; every permission defaults
+   * to `null` ("not yet determined"). */
+  usage?: UsagePermissions;
 }
 
 export interface BibleDatasetVerseInput {

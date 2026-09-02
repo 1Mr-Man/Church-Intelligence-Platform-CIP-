@@ -49,6 +49,16 @@ pub struct TranslationInput {
     /// this parses to a status [`LicensingStatus::permits_bulk_import`]
     /// accepts.
     pub licensing_status: String,
+    /// Fine-grained, per-use-case licensing permissions (Phase 9:
+    /// `cip_core_content::UsagePermissions`) - optional, defaulting to
+    /// every field `None` ("not yet determined") so no existing dataset
+    /// JSON (which predates this field) fails to deserialize. Distinct
+    /// from `licensing_status` above: this dataset must already clear
+    /// that coarse admission gate before it can be imported at all;
+    /// `usage` then governs what CIP is allowed to *do* with the text
+    /// once admitted (see `docs/bible-translation-registry.md`).
+    #[serde(default)]
+    pub usage: cip_core_content::UsagePermissions,
 }
 
 fn parse_licensing_status(value: &str) -> Option<LicensingStatus> {
@@ -373,6 +383,7 @@ mod tests {
                 distribution: Some("public domain".to_string()),
                 dataset_version: "1.0".to_string(),
                 licensing_status: "verified_public_domain".to_string(),
+                usage: cip_core_content::UsagePermissions::default(),
             },
             verses: vec![
                 VerseInput {
@@ -640,5 +651,44 @@ mod tests {
             )
             .unwrap();
         assert_eq!(rom_books, 1);
+    }
+
+    #[test]
+    fn translation_input_deserializes_from_json_with_usage_omitted_entirely() {
+        // Phase 9 adds `usage` as a new optional field - every dataset
+        // JSON written before this phase (and any future one that simply
+        // doesn't bother) must still parse, with `usage` defaulting to
+        // every field unset rather than failing to deserialize at all.
+        let json = r#"{
+            "id": "TEST",
+            "name": "Test Translation",
+            "abbreviation": "TST",
+            "language": "en",
+            "datasetVersion": "1.0",
+            "licensingStatus": "verified_public_domain"
+        }"#;
+        let parsed: TranslationInput = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.usage.ai_processing_allowed, None);
+        assert!(!parsed.usage.permits_ai_processing());
+    }
+
+    #[test]
+    fn translation_input_deserializes_explicit_usage_permissions() {
+        let json = r#"{
+            "id": "TEST",
+            "name": "Test Translation",
+            "abbreviation": "TST",
+            "language": "en",
+            "datasetVersion": "1.0",
+            "licensingStatus": "verified_public_domain",
+            "usage": {
+                "aiProcessingAllowed": true,
+                "commercialAllowed": true
+            }
+        }"#;
+        let parsed: TranslationInput = serde_json::from_str(json).unwrap();
+        assert!(parsed.usage.permits_ai_processing());
+        assert!(parsed.usage.permits_commercial_use());
+        assert_eq!(parsed.usage.offline_storage_allowed, None);
     }
 }

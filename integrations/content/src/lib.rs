@@ -5,6 +5,7 @@
 use chrono::{DateTime, Utc};
 use cip_core_content::{
     ContentMetadata, ContentRegistry, ContentRegistryError, ContentStatus, LicensingStatus,
+    UsagePermissions,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use std::sync::Mutex;
@@ -75,13 +76,40 @@ fn licensing_status_from_str(value: &str) -> LicensingStatus {
 }
 
 const ROW_COLUMNS: &str = "id, content_type, name, version, language, source, publisher, \
-     copyright, license, distribution, imported_at, checksum, status, licensing_status";
+     copyright, license, distribution, imported_at, checksum, status, licensing_status, \
+     rights_holder, source_provider, source_url, attribution_text, license_start, \
+     license_expiry, distribution_allowed, offline_storage_allowed, projection_allowed, \
+     api_allowed, commercial_allowed, ai_processing_allowed, llm_prompt_allowed, training_allowed";
+
+fn parse_optional_datetime(raw: Option<String>) -> Option<DateTime<Utc>> {
+    raw.and_then(|s| {
+        DateTime::parse_from_rfc3339(&s)
+            .map(|dt| dt.with_timezone(&Utc))
+            .ok()
+    })
+}
 
 fn row_to_metadata(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContentMetadata> {
     let content_type_raw: String = row.get(1)?;
     let status_raw: String = row.get(12)?;
     let licensing_status_raw: String = row.get(13)?;
     let imported_at_raw: String = row.get(10)?;
+    let usage = UsagePermissions {
+        rights_holder: row.get(14)?,
+        source_provider: row.get(15)?,
+        source_url: row.get(16)?,
+        attribution_text: row.get(17)?,
+        license_start: parse_optional_datetime(row.get(18)?),
+        license_expiry: parse_optional_datetime(row.get(19)?),
+        distribution_allowed: row.get(20)?,
+        offline_storage_allowed: row.get(21)?,
+        projection_allowed: row.get(22)?,
+        api_allowed: row.get(23)?,
+        commercial_allowed: row.get(24)?,
+        ai_processing_allowed: row.get(25)?,
+        llm_prompt_allowed: row.get(26)?,
+        training_allowed: row.get(27)?,
+    };
     Ok(ContentMetadata {
         id: row.get(0)?,
         content_type: content_type_from_str(&content_type_raw)
@@ -104,6 +132,7 @@ fn row_to_metadata(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContentMetadata>
             ContentStatus::Enabled
         },
         licensing_status: licensing_status_from_str(&licensing_status_raw),
+        usage,
     })
 }
 
@@ -158,8 +187,13 @@ impl ContentRegistry for SqliteContentRegistry {
         conn.execute(
             "INSERT INTO content_registry
                 (id, content_type, name, version, language, source, publisher, copyright,
-                 license, distribution, imported_at, checksum, status, licensing_status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                 license, distribution, imported_at, checksum, status, licensing_status,
+                 rights_holder, source_provider, source_url, attribution_text, license_start,
+                 license_expiry, distribution_allowed, offline_storage_allowed,
+                 projection_allowed, api_allowed, commercial_allowed, ai_processing_allowed,
+                 llm_prompt_allowed, training_allowed)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                     ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)
              ON CONFLICT(id) DO UPDATE SET
                 content_type = excluded.content_type,
                 name = excluded.name,
@@ -173,7 +207,21 @@ impl ContentRegistry for SqliteContentRegistry {
                 imported_at = excluded.imported_at,
                 checksum = excluded.checksum,
                 status = excluded.status,
-                licensing_status = excluded.licensing_status",
+                licensing_status = excluded.licensing_status,
+                rights_holder = excluded.rights_holder,
+                source_provider = excluded.source_provider,
+                source_url = excluded.source_url,
+                attribution_text = excluded.attribution_text,
+                license_start = excluded.license_start,
+                license_expiry = excluded.license_expiry,
+                distribution_allowed = excluded.distribution_allowed,
+                offline_storage_allowed = excluded.offline_storage_allowed,
+                projection_allowed = excluded.projection_allowed,
+                api_allowed = excluded.api_allowed,
+                commercial_allowed = excluded.commercial_allowed,
+                ai_processing_allowed = excluded.ai_processing_allowed,
+                llm_prompt_allowed = excluded.llm_prompt_allowed,
+                training_allowed = excluded.training_allowed",
             params![
                 metadata.id,
                 content_type_str(metadata.content_type),
@@ -189,6 +237,20 @@ impl ContentRegistry for SqliteContentRegistry {
                 metadata.checksum,
                 status_str(metadata.status),
                 licensing_status_str(metadata.licensing_status),
+                metadata.usage.rights_holder,
+                metadata.usage.source_provider,
+                metadata.usage.source_url,
+                metadata.usage.attribution_text,
+                metadata.usage.license_start.map(|dt| dt.to_rfc3339()),
+                metadata.usage.license_expiry.map(|dt| dt.to_rfc3339()),
+                metadata.usage.distribution_allowed,
+                metadata.usage.offline_storage_allowed,
+                metadata.usage.projection_allowed,
+                metadata.usage.api_allowed,
+                metadata.usage.commercial_allowed,
+                metadata.usage.ai_processing_allowed,
+                metadata.usage.llm_prompt_allowed,
+                metadata.usage.training_allowed,
             ],
         )
         .map_err(|e| ContentRegistryError::Storage(e.to_string()))?;
@@ -247,7 +309,53 @@ mod tests {
             checksum: None,
             status: ContentStatus::Enabled,
             licensing_status: LicensingStatus::Unknown,
+            usage: cip_core_content::UsagePermissions::default(),
         }
+    }
+
+    #[test]
+    fn usage_permissions_round_trip_through_sqlite_including_unset_fields() {
+        let registry = migrated_registry();
+        let mut metadata = unknown_kjv();
+        metadata.id = "bible:BSB".to_string();
+        metadata.usage = cip_core_content::UsagePermissions {
+            rights_holder: Some("Public Domain (CC0 1.0)".to_string()),
+            source_provider: Some("public domain dataset".to_string()),
+            source_url: Some("https://github.com/lyteword/bsb".to_string()),
+            attribution_text: None,
+            license_start: None,
+            license_expiry: None,
+            distribution_allowed: Some(true),
+            offline_storage_allowed: Some(true),
+            projection_allowed: Some(true),
+            api_allowed: Some(true),
+            commercial_allowed: Some(true),
+            ai_processing_allowed: Some(true),
+            llm_prompt_allowed: Some(true),
+            training_allowed: Some(false),
+        };
+        registry.register(&metadata).unwrap();
+
+        let loaded = registry.get("bible:BSB").unwrap().unwrap();
+        assert_eq!(
+            loaded.usage.rights_holder.as_deref(),
+            Some("Public Domain (CC0 1.0)")
+        );
+        assert!(loaded.usage.permits_ai_processing());
+        assert!(loaded.usage.permits_distribution());
+        assert_eq!(loaded.usage.training_allowed, Some(false));
+        assert!(!loaded.usage.permits_training());
+        assert_eq!(loaded.usage.attribution_text, None);
+    }
+
+    #[test]
+    fn usage_permissions_default_to_unknown_when_never_set() {
+        let registry = migrated_registry();
+        registry.register(&unknown_kjv()).unwrap();
+
+        let loaded = registry.get("bible:KJV").unwrap().unwrap();
+        assert_eq!(loaded.usage.ai_processing_allowed, None);
+        assert!(!loaded.usage.permits_ai_processing());
     }
 
     #[test]

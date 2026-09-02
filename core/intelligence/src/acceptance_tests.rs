@@ -458,6 +458,7 @@ fn enabled_music_content() -> ContentMetadata {
         checksum: None,
         status: ContentStatus::Enabled,
         licensing_status: cip_core_content::LicensingStatus::Unknown,
+        usage: cip_core_content::UsagePermissions::default(),
     }
 }
 

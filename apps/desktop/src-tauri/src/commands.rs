@@ -409,7 +409,12 @@ pub fn get_embedding_capabilities(
             .connection()
             .lock()
             .expect("verse embedding store connection poisoned");
-        crate::embeddings::embedding_coverage(&conn, DEFAULT_TRANSLATION_ID, engine.model_id()).ok()
+        crate::embeddings::embedding_coverage(
+            &conn,
+            &resolve_default_translation_id(&state),
+            engine.model_id(),
+        )
+        .ok()
     } else {
         None
     };
@@ -823,6 +828,19 @@ pub fn test_vmix_connection(target: VmixTargetConfig) -> Result<(), AppError> {
 /// freeze while this runs, but the frontend has no progress signal until
 /// it completes; a future phase could add progress events if this proves
 /// too opaque in practice.
+///
+/// Resolves the real default translation the same way twelve other
+/// commands already do (`resolve_default_translation_id` - real BSB
+/// production id first, the KJV dev-fixture id only as a fallback), fixing
+/// a Phase 9 finding: this command previously hardcoded the literal
+/// `DEFAULT_TRANSLATION_ID`, which is never registered in a real
+/// production build, silently making this command a no-op against BSB.
+///
+/// Phase 9's licensing gate: refuses to run unless the resolved
+/// translation's Content Registry record explicitly grants
+/// `ai_processing_allowed` (see `ensure_ai_processing_permitted`'s docs) -
+/// the real enforcement point the Bible Translation Registry's usage
+/// permissions exist to protect.
 #[tauri::command]
 pub fn generate_verse_embeddings(
     state: State<'_, AppState>,
@@ -834,6 +852,8 @@ pub fn generate_verse_embeddings(
                 .to_string(),
         );
     }
+    let translation_id = resolve_default_translation_id(&state);
+    ensure_ai_processing_permitted(state.content_registry.as_ref(), &translation_id)?;
     let engine = state
         .embedding_engine
         .lock()
@@ -841,9 +861,50 @@ pub fn generate_verse_embeddings(
     crate::embeddings::generate_verse_embeddings_for_translation(
         state.verse_embedding_store.connection(),
         engine.as_ref(),
-        DEFAULT_TRANSLATION_ID,
+        &translation_id,
     )
     .map_err(|e| e.to_string())
+}
+
+/// Refuses to run AI/embedding processing over a translation's Bible text
+/// unless its Content Registry record explicitly grants
+/// `ai_processing_allowed` (`cip_core_content::UsagePermissions`) - the
+/// real enforcement point the Bible Translation Registry's licensing
+/// metadata exists to protect (see docs/bible-translation-registry.md and
+/// docs/phase-9-audit.md).
+///
+/// Deliberately the OPPOSITE default from `ensure_translation_selectable`,
+/// on purpose: a missing/unknown registration there still lets an
+/// operator browse/search/display a translation (failing open protects
+/// against blocking legitimate content by a bookkeeping gap that has
+/// nothing to do with rights), but sending a translation's text into an
+/// AI model is exactly the class of action `LicensingStatus`'s own "never
+/// assume permissive" doctrine exists for - so this fails CLOSED: no
+/// registry entry, or a registry entry that never explicitly recorded
+/// `ai_processing_allowed = true`, is refused, never silently allowed
+/// through. Split out as a pure function (real in-memory SQLite registry,
+/// no `State`) for the same reason `resolve_default_translation_id_from_registry`
+/// is: this project has no `tauri::test` harness.
+fn ensure_ai_processing_permitted(
+    registry: &dyn cip_core_content::ContentRegistry,
+    translation_id: &str,
+) -> Result<(), String> {
+    let metadata = registry
+        .get(&content::bible_content_id(translation_id))
+        .map_err(|e| format!("content registry error: {e}"))?;
+    match metadata {
+        Some(m) if m.usage.permits_ai_processing() => Ok(()),
+        Some(_) => Err(format!(
+            "translation {translation_id:?} has not been explicitly marked \
+             ai_processing_allowed in the Bible Translation Registry - refusing to generate \
+             embeddings from its text until that permission is recorded (see \
+             docs/bible-translation-registry.md)"
+        )),
+        None => Err(format!(
+            "translation {translation_id:?} is not registered in the Content Registry - \
+             refusing to generate embeddings from its text"
+        )),
+    }
 }
 
 /// One physical (or virtual, e.g. Xvfb) display this process can detect -
@@ -7103,6 +7164,7 @@ mod tests {
             checksum: None,
             status: ContentStatus::Enabled,
             licensing_status: cip_core_content::LicensingStatus::Unknown,
+            usage: cip_core_content::UsagePermissions::default(),
         };
         assert!(is_translation_selectable(Ok(Some(&enabled))));
 
@@ -7148,6 +7210,7 @@ mod tests {
                 checksum: None,
                 status: ContentStatus::Enabled,
                 licensing_status: cip_core_content::LicensingStatus::VerifiedPublicDomain,
+                usage: cip_core_content::UsagePermissions::default(),
             })
             .unwrap();
 
@@ -7181,6 +7244,92 @@ mod tests {
             DEFAULT_TRANSLATION_ID,
             "with no BSB registration at all, the default must still fall back to the dev fixture id, matching every existing dev/test workflow"
         );
+    }
+
+    #[test]
+    fn ensure_ai_processing_permitted_refuses_when_translation_is_not_registered_at_all() {
+        use cip_database::{open_in_memory, run_migrations};
+        use cip_integrations_content::SqliteContentRegistry;
+
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        let registry = SqliteContentRegistry::new(conn);
+
+        assert!(
+            ensure_ai_processing_permitted(&registry, "BSB").is_err(),
+            "an unregistered translation must never be allowed through the AI-processing gate"
+        );
+    }
+
+    #[test]
+    fn ensure_ai_processing_permitted_refuses_when_registered_but_permission_never_recorded() {
+        use cip_core_content::ContentRegistry as _;
+        use cip_database::{open_in_memory, run_migrations};
+        use cip_integrations_content::SqliteContentRegistry;
+
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        let registry = SqliteContentRegistry::new(conn);
+        registry
+            .register(&ContentMetadata {
+                id: content::bible_content_id("BSB"),
+                content_type: ContentType::Bible,
+                name: "Berean Standard Bible".to_string(),
+                version: "bsb-1.0".to_string(),
+                language: "en".to_string(),
+                source: "production".to_string(),
+                publisher: None,
+                copyright: None,
+                license: None,
+                distribution: None,
+                imported_at: chrono::Utc::now(),
+                checksum: None,
+                status: ContentStatus::Enabled,
+                licensing_status: cip_core_content::LicensingStatus::VerifiedPublicDomain,
+                usage: cip_core_content::UsagePermissions::default(),
+            })
+            .unwrap();
+
+        assert!(
+            ensure_ai_processing_permitted(&registry, "BSB").is_err(),
+            "VerifiedPublicDomain licensing alone must not imply ai_processing_allowed - only \
+             an explicit usage permission does"
+        );
+    }
+
+    #[test]
+    fn ensure_ai_processing_permitted_succeeds_only_once_explicitly_granted() {
+        use cip_core_content::ContentRegistry as _;
+        use cip_database::{open_in_memory, run_migrations};
+        use cip_integrations_content::SqliteContentRegistry;
+
+        let mut conn = open_in_memory().unwrap();
+        run_migrations(&mut conn).unwrap();
+        let registry = SqliteContentRegistry::new(conn);
+        registry
+            .register(&ContentMetadata {
+                id: content::bible_content_id("BSB"),
+                content_type: ContentType::Bible,
+                name: "Berean Standard Bible".to_string(),
+                version: "bsb-1.0".to_string(),
+                language: "en".to_string(),
+                source: "production".to_string(),
+                publisher: None,
+                copyright: None,
+                license: None,
+                distribution: None,
+                imported_at: chrono::Utc::now(),
+                checksum: None,
+                status: ContentStatus::Enabled,
+                licensing_status: cip_core_content::LicensingStatus::VerifiedPublicDomain,
+                usage: cip_core_content::UsagePermissions {
+                    ai_processing_allowed: Some(true),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+
+        assert!(ensure_ai_processing_permitted(&registry, "BSB").is_ok());
     }
 
     #[test]

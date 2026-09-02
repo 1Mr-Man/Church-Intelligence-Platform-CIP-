@@ -124,3 +124,13 @@ shared infrastructure, not something specific to Bible text.
   partially closes for the licensing-discipline half of that gap; multi-
   translation *breadth* (adding KJV/NIV/ESV/etc. themselves) remains
   future work, gated by this same playbook.
+- [`docs/phase-9-audit.md`](phase-9-audit.md) and
+  [`docs/bible-translation-licensing-roadmap.md`](bible-translation-licensing-roadmap.md) -
+  Phase 9 extends this registry with fine-grained, per-use-case
+  `UsagePermissions` (distribution/offline/projection/API/commercial/
+  AI-processing/LLM-prompt/training, distinct from the admission gate
+  above) and a real enforcement point gating CIP's embedding pipeline;
+  the roadmap document names the specific licensing routes (YouVersion
+  Platform, API.Bible, direct publisher licensing, the Bible Society of
+  Nigeria) a future phase would need to actually pursue for each Tier 1/
+  Tier 2 translation in this document's playbook.
