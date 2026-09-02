@@ -1,0 +1,43 @@
+{
+  "phase": "6.6",
+  "summary": "Environment A evidence for a first-launch workflow walkthrough and a Diagnostics-Mode-actionable setup notice - the sixth and last-scoped Phase 6 (Operator Ergonomics) audit gap.",
+  "auditFinding": "App.tsx had zero first-run affordance of any kind - no localStorage/first-run flag anywhere, every launch identical. Two genuinely different things 'onboarding' could mean (a workflow walkthrough vs. a setup-readiness checklist) were put to the operator, who chose both. While scoping the checklist half, found SystemStatusStrip already renders Bible/Speech/Display readiness in Operator Mode - what was actually missing was a path from that status to the Diagnostics Mode controls that fix it. See docs/phase-6-6-audit.md.",
+  "designChoice": "AskUserQuestion: workflow walkthrough vs. setup checklist vs. both. Operator chose both.",
+  "newCode": {
+    "onboardingTs": "apps/desktop/src/lib/onboarding.ts: shouldShowWalkthrough(storedValue) - pure first-run-flag decision, separated from the actual localStorage read/write in the component.",
+    "onboardingWalkthroughTsx": "apps/desktop/src/components/OnboardingWalkthrough.tsx: dismissible first-launch overlay explaining the Start Service -> Needs Attention -> Approve/Reject -> Display workflow, rendered from App.tsx.",
+    "setupGapsTs": "apps/desktop/src/lib/setupGaps.ts: computeSetupGaps(bibleInstalled, speechStatus) - pure decision of which of two operator-actionable setup items remain, from LiveStatus fields already fetched for SystemStatusStrip.",
+    "liveChurchBrainTsx": "New Operator-Mode-only banner, visible only while setupGaps.length > 0, naming outstanding items with an 'Open Diagnostics Mode' button that calls the exact same setMode('diagnostics') the header's own toggle already uses."
+  },
+  "newTests": {
+    "onboardingTestTs": [
+      "shows the walkthrough when nothing has been stored yet",
+      "shows the walkthrough for an empty stored value",
+      "shows the walkthrough for any value other than the exact seen marker",
+      "does not show the walkthrough once the seen marker is stored"
+    ],
+    "setupGapsTestTs": [
+      "reports no gaps when the Bible dataset is installed and speech is ready",
+      "reports the Bible gap when no dataset is installed",
+      "reports the speech gap when speech is unavailable",
+      "reports both gaps, Bible first, when neither is ready",
+      "does not report a speech gap for a live error - that's already surfaced elsewhere"
+    ],
+    "frontendTestCountBeforePhase": 248,
+    "frontendTestCountAfterPhase": 257,
+    "command": "npm run test -- --run",
+    "result": "257 passed"
+  },
+  "fullRegression": {
+    "typecheck": "npm run typecheck: clean",
+    "lint": "npm run lint: same 5 pre-existing warnings as before this phase - no new ones",
+    "build": "npm run build: succeeds",
+    "rustChanges": "None - zero Rust files touched this phase, confirmed via git status, so no Rust regression re-run was needed. Third Phase 6.x frontend-only slice, after 6.2/6.3."
+  },
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands, zero new events, zero new database schema changes.",
+    "The walkthrough is dismissible with one click and never blocks any control underneath it.",
+    "The setup notice's one button calls the exact same setMode('diagnostics') the header's own toggle already uses - no new navigation mechanism.",
+    "computeSetupGaps is read-only derived state - it triggers no fetch, no command, no state write of its own."
+  ]
+}

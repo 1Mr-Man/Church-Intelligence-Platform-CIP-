@@ -85,6 +85,34 @@
   padding: 0.3rem 0.75rem;
 }
 
+/* Phase 6.6 (Operator Ergonomics: onboarding) - a pointer to the existing
+   Diagnostics Mode setup controls, not a new setup mechanism of its own.
+   Same warn-tone family as `.live-brain__undo-banner`; disappears on its
+   own once `computeSetupGaps` returns nothing left to do. */
+.live-brain__setup-notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.6rem;
+  border: 1px solid var(--status-warn-border);
+  background: var(--status-warn-bg);
+  color: var(--status-warn);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  font-weight: 600;
+  margin: 0.5rem 0;
+}
+
+.live-brain__setup-notice button {
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: 0.3rem 0.75rem;
+  margin-left: auto;
+}
+
 /* Phase 3.5: Operator/Diagnostics mode switch - the single control that
    separates "what a church operator needs mid-service" from "what a
    volunteer tech lead needs for setup/support" (spec section 8). Large

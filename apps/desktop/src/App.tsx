@@ -5,6 +5,7 @@ import type { AppConfig } from "./config/appConfig";
 import type { BibleTranslation } from "./domain";
 import { appHealthCheck, getAppConfig, listBibleTranslations, type HealthReport } from "./lib/commands";
 import { LiveChurchBrain } from "./components/LiveChurchBrain";
+import { OnboardingWalkthrough } from "./components/OnboardingWalkthrough";
 import { BibleLibrary } from "./components/library/BibleLibrary";
 import { MusicLibrary } from "./components/library/MusicLibrary";
 import { HistoryView } from "./components/library/HistoryView";
@@ -68,6 +69,7 @@ function App() {
 
   return (
     <>
+      <OnboardingWalkthrough />
       <nav className="app-nav" role="tablist" aria-label="CIP sections">
         {SECTIONS.map((s) => (
           <button key={s.id} type="button" aria-pressed={section === s.id} onClick={() => setSection(s.id)}>

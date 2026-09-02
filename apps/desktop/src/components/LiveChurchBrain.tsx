@@ -38,6 +38,7 @@ import { resolveUnifiedShortcutAction, shouldHandleShortcut } from "../lib/keybo
 import { buildAttentionQueue } from "../lib/attentionQueue";
 import { CONFIRM_WINDOW_MS, decideConfirmClick, type PendingConfirm } from "../lib/confirmGuard";
 import { humanizeBusyKey } from "../lib/errorContext";
+import { computeSetupGaps } from "../lib/setupGaps";
 import { buildUnifiedFeed, type UnifiedIntelligenceItem } from "../lib/unifiedFeed";
 import { WorkspaceHeader } from "./workspace/WorkspaceHeader";
 import { PilotDiagnosticsPanel } from "./workspace/PilotDiagnosticsPanel";
@@ -558,6 +559,11 @@ export function LiveChurchBrain() {
     [suggestions, musicFindings, sermonFindings, serviceTransitions, serviceAnomalies, contentCandidates, crossDomainCorrelations],
   );
   const attentionQueue = useMemo(() => buildAttentionQueue(unifiedFeed), [unifiedFeed]);
+  // Phase 6.6 (Operator Ergonomics: onboarding): computed from LiveStatus
+  // fields SystemStatusStrip already fetches and displays - no new
+  // command, no new fetch. `null` until the first status poll resolves,
+  // so this never flashes a false-positive gap before real data arrives.
+  const setupGaps = useMemo(() => (status ? computeSetupGaps(!!status.bible, status.speechStatus) : []), [status]);
 
   // Every action here calls exactly the same command the matching
   // per-domain panel below already calls - this dispatcher only decides
@@ -812,6 +818,28 @@ export function LiveChurchBrain() {
 
       <WorkspaceHeader status={status} sermonFoundation={sermonFoundation} serviceIntel={serviceIntel} />
       <SystemStatusStrip status={status} deviceCount={devices.length} displayWindowOpen={anyScreenOpen} />
+
+      {mode === "operator" && setupGaps.length > 0 && (
+        // Phase 6.6: SystemStatusStrip already names these as "Not
+        // configured"/"Not installed" above, but an operator seeing that
+        // has no in-Operator-Mode path to actually fix it - the controls
+        // that do (install a Bible dataset, install a Whisper model) live
+        // in Diagnostics Mode, a mode a first-time operator has no reason
+        // to know exists. This is purely a pointer to that existing UI,
+        // not a new setup mechanism of its own.
+        <div className="live-brain__setup-notice" role="status">
+          <span>Setup remaining: </span>
+          {setupGaps.map((gap, i) => (
+            <span key={gap.id}>
+              {i > 0 && " · "}
+              {gap.message}
+            </span>
+          ))}
+          <button type="button" onClick={() => setMode("diagnostics")}>
+            Open Diagnostics Mode
+          </button>
+        </div>
+      )}
 
       <AttentionQueue
         items={attentionQueue}
