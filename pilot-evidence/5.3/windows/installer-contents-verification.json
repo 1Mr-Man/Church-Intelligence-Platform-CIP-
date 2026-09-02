@@ -1,0 +1,28 @@
+{
+  "phase": "5.3",
+  "summary": "Direct extraction and inspection of the rebuilt NSIS installer, confirming Voice Activity Detection's new trait impl and diagnostics field are genuinely compiled/serialized into the shipped binary, alongside every prior phase's still-unaffected symbols.",
+  "buildCommand": "scripts/build-windows-whisper.sh, unchanged from Phase 5.2 (--features whisper,semantic-search) - no new native dependency was introduced this phase.",
+  "extractionMethod": "7z x \"Church Intelligence Platform_0.1.0_x64-setup.exe\"",
+  "installerChecksum": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "fb68799ed4dd64d2d432f28046226d379f671948d503eb81039b69543ca620df",
+    "sizeBytes": 13731351,
+    "previousPhaseSha256": "b06ba51af70681e66a3e6c9aa978acaf2a0fbc290779298f1dd650c3178d0eec",
+    "previousPhaseSizeBytes": 13742758,
+    "sizeChangeNote": "-11,407 bytes (~0.08% smaller) - within normal build-to-build variance for a small, purely additive code change (a new pure-arithmetic classification function, one new struct field, one new trait method with a single-line default); release-mode optimization/inlining decisions for such small changes can shift the final binary size in either direction without indicating a problem. No new dependency was introduced."
+  },
+  "cipDesktopExeVerification": {
+    "sizeBytes": 58736702,
+    "newSymbolsDirectProof": "x86_64-w64-mingw32-nm against the extracted cip-desktop.exe finds the mangled trait-impl symbol for WhisperSpeechEngine's SpeechEngine::last_feed_was_silence, alongside the pre-existing last_feed_triggered_inference/discard_buffered_audio/required_sample_rate_hz/flush/is_ready/feed_audio impls and the run_inference/load functions (run_inference is where the VAD gate and rms_level/is_silence calls live - those two pure functions were inlined by the release-mode optimizer, as expected for small, single-call-site private functions, and are instead verified via the 4 dedicated unit tests in ai/speech/src/whisper.rs's test module, run separately under cargo test -p cip-ai-speech --features whisper). x86_64-w64-mingw32-strings finds 1 occurrence of 'silentWindowsSkipped' (the new SpeechRuntimeDiagnostics field's serde camelCase name, embedded in the binary's JSON-serialization machinery) - direct proof the new diagnostics field is genuinely compiled into this exact binary.",
+    "priorPhaseSymbolsUnaffected": {
+      "confirmSuggestionAndFindPendingSuggestion": "2 occurrences total of confirm_suggestion/find_pending_suggestion_for_reference symbols (Phase 5.2) - unchanged, still present.",
+      "getServiceReport": "2 occurrences of 'get_service_report' - identical to the Phase 5.1/5.2 baseline.",
+      "whisperFullWithState": "96 occurrences of 'whisper_full_with_state' - identical count, confirming the whisper feature/model pipeline is untouched by this phase's changes.",
+      "finalizeBibleOnly": "1 occurrence of 'finalize_bible_only' (Phase 4.3's fast detection lane) - unchanged, still present.",
+      "getEmbeddingCapabilities": "2 occurrences of 'get_embedding_capabilities' - identical to the Phase 4.4/5.1/5.2 baseline."
+    }
+  },
+  "runtimeDllVerification": "scripts/build-windows-whisper.sh's own final step (7z-extraction DLL-presence check) passed unmodified on this build: 'confirmed: libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll are all present in the installer' - independently re-verified by this evidence pass's own extraction. This phase's changes use only std/serde (already linked), so the runtime DLL set required is unchanged from every prior whisper-enabled build.",
+  "crossCompileVerification": "The Rust build (cargo build --target x86_64-pc-windows-gnu -p cip-desktop --features whisper,semantic-search --release) succeeded with the same two pre-existing whisper-rs-sys fixes (ggml lib-naming, posix-threads alternative) as every prior Windows rebuild - zero new fixes were needed for this phase's purely additive, dependency-free change.",
+  "automatedVerification": "Full pipeline (Rust cross-compile, frontend build via vite, NSIS packaging via makensis, DLL-presence check) completed via a single run of scripts/build-windows-whisper.sh with no manual intervention beyond the standard root/update-alternatives permission the script already documents needing."
+}
