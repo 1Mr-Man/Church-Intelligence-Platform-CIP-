@@ -1,0 +1,44 @@
+{
+  "phase": "6.7",
+  "summary": "Environment A direct-binary verification for the Phase 6.7 Windows rebuild (Diagnostics Mode density: 9 panels made collapsible) - the seventh Phase 6 (Operator Ergonomics) slice, and the fourth frontend-only rebuild after 6.2/6.3/6.6.",
+  "buildCommand": "bash scripts/build-windows-whisper.sh (--features whisper,semantic-search, x86_64-pc-windows-gnu target)",
+  "buildResult": "Rust build succeeded (whisper-rs-sys ggml lib-name two-pass fix applied as expected on the first-attempt failure, exactly as every prior rebuild); pnpm build (tsc -b && vite build) succeeded producing a fresh dist/assets bundle; NSIS packaging finished with the three runtime DLLs confirmed present by the script's own built-in check.",
+  "installer": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "fileSizeBytes": 13745498,
+    "sha256": "8c57a9929c8efec8effc47c3749bd22513ba9c2609f7711c954da5604bfb5857",
+    "priorPhaseFileSizeBytes": 13750296,
+    "priorPhaseSha256": "65ad448fee8411ec354c35224ecd1568f04b7ad68c452d95e0f116ef74f80341",
+    "sha256Changed": true,
+    "fileSizeChanged": true
+  },
+  "extractionMethod": "7z x against the built installer into a scratch directory; confirmed exit code 0 and listed contents.",
+  "runtimeDllsPresent": ["libstdc++-6.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll"],
+  "symbolRegressionCheck": {
+    "method": "x86_64-w64-mingw32-strings/nm against the extracted cip-desktop.exe, re-run for every prior-phase symbol/string this project has established as a regression tripwire. This phase touched zero Rust files (confirmed via git status before the rebuild), so every count below is expected to be byte-for-byte unchanged from the Phase 6.6 baseline - no new symbols expected.",
+    "rejection_echo_count": { "count": 5, "priorPhaseCount": 5, "unchanged": true },
+    "find_rejected_suggestion_for_reference": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "record_rejection_echo": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "silentWindowsSkipped": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "get_service_report": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "audioErrorText": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "speechErrorText": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "whisper_full_with_state": { "count": 93, "priorPhaseCount": 93, "unchanged": true, "note": "Stable at 93 for a sixth consecutive rebuild (Phase 6.2 through 6.7), further confirming the Phase 6.2 96->93 drift was one-time compiler-generated auxiliary-symbol non-determinism, not anything phase-specific - the one real exported T symbol has been 1 and unchanged throughout." },
+    "conclusion": "Every prior-phase Rust-side symbol/string count is exactly unchanged. Zero Rust regression, consistent with this phase touching no Rust files."
+  },
+  "frontendTextSearch": {
+    "method": "x86_64-w64-mingw32-strings against the extracted cip-desktop.exe.",
+    "note": "Unlike Phase 6.2-6.6, this phase introduced no genuinely new frontend strings - the 9 converted panels keep their exact same heading text (e.g. 'Cross-Domain Intelligence', 'Sermon Harvest'), only their surrounding element changed from <section>/<h2> to <details>/<summary>. Searching for those pre-existing headings and the standard control string ('Needs Attention') both return 0 matches, reproducing the established Tauri-frontend-bundle tooling limitation - it says nothing about correctness either way here, since there is no new text to distinguish a real hit from a control miss.",
+    "controlStringSearched": "Needs Attention",
+    "controlStringMatches": 0,
+    "existingHeadingsSearched": ["Cross-Domain Intelligence", "Sermon Harvest"],
+    "existingHeadingsMatches": 0,
+    "conclusion": "Correctness for this phase's structural, string-identical frontend change rests entirely on npm run typecheck's success (the authoritative proof every <details>/<section> tag pair in the ~1,260-line block balances correctly), the fresh Vite build producing a new asset bundle hash, and the installer's SHA-256 changing from the Phase 6.6 baseline - see pilot-evidence/6.7/build/diagnostics-mode-density-evidence.json for the full regression record."
+  },
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands, zero new events, zero new database schema changes - confirmed by this phase touching no Rust files.",
+    "No panel's content changed - only the outer wrapper element (section -> details) and default visibility changed, verified structurally via typecheck rather than a binary string search.",
+    "Service History's Show/Hide button gained stopPropagation - a pure client-side event-handling change with no binary-verifiable surface."
+  ],
+  "environmentCStatus": "NOT YET VERIFIED for this exact artifact - the decisive pending gate is the operator's own real-hardware test: open Diagnostics Mode and confirm Pending Suggestions and Service Timeline are visible immediately while the other 9 panels start collapsed; click each summary and confirm it expands/collapses correctly; on Service History, confirm Show/Hide toggles the history list without also collapsing the panel."
+}
