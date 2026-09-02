@@ -1,0 +1,56 @@
+{
+  "phase": "7.2",
+  "summary": "Environment A direct-binary verification for the Phase 7.2 Windows rebuild (in-app enrollment workflow for real audio fingerprinting) - like Phase 7.1, this phase changes Rust code compiled into the desktop binary, so a genuine rebuild with direct binary proof is required.",
+  "buildCommand": "bash scripts/build-windows-whisper.sh (--features whisper,semantic-search, x86_64-pc-windows-gnu target)",
+  "buildResult": "Rust build succeeded (whisper-rs-sys ggml lib-name two-pass fix applied as expected on the first-attempt failure, unrelated to this phase's own changes); pnpm build (tsc -b && vite build) succeeded producing a fresh dist/assets bundle; NSIS packaging finished with the three runtime DLLs confirmed present by the script's own built-in check.",
+  "installer": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "fileSizeBytes": 14037845,
+    "sha256": "47712c815da2461c39be92876bfd8264549ab3a152edfce232cdd6a77396622b",
+    "priorPhaseFileSizeBytes": 14040318,
+    "priorPhaseSha256": "39a9fe76d3bc26f3cda4b46d6dc7be68fcdd8518a7d4157246362b8912fa76a5",
+    "sha256Changed": true,
+    "fileSizeChanged": true,
+    "fileSizeDeltaBytes": -2473,
+    "fileSizeDeltaNote": "A small net decrease, not a red flag - this phase adds two new commands and a manifest-editing frontend UI but also refactors existing WAV-decode logic into a shared function (removing duplication), and release-mode symbol/section layout is not linearly additive; the installer's SHA-256 changing at all, plus the newSymbolsThisPhase entries below, are the decisive proof this rebuild reflects this phase's real code."
+  },
+  "extractionMethod": "7z x against the built installer into a scratch directory; confirmed exit code 0 and listed contents.",
+  "runtimeDllsPresent": ["libstdc++-6.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll"],
+  "symbolRegressionCheck": {
+    "method": "x86_64-w64-mingw32-strings/nm against the extracted cip-desktop.exe, re-run for every prior-phase symbol/string this project has established as a regression tripwire.",
+    "rejection_echo_count": { "count": 5, "priorPhaseCount": 5, "unchanged": true },
+    "find_rejected_suggestion_for_reference": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "record_rejection_echo": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "silentWindowsSkipped": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "audioErrorText": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "speechErrorText": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "whisper_full_with_state": { "count": 93, "priorPhaseCount": 93, "unchanged": true, "note": "Stable at 93 for a ninth consecutive rebuild (Phase 6.2 through 7.2)." },
+    "conclusion": "Every prior-phase Rust-side symbol/string count is exactly unchanged. Zero regression in any pre-existing feature."
+  },
+  "newSymbolsThisPhase": {
+    "method": "x86_64-w64-mingw32-nm against the extracted cip-desktop.exe, searching for this phase's own new function names - direct proof the real enrollment code actually compiled into this exact binary.",
+    "symbolsFound": [
+      "cip_desktop_lib::commands::enroll_acoustic_reference",
+      "cip_desktop_lib::commands::list_acoustic_enrollments",
+      "cip_integrations_music_acoustic::local::read_manifest_entries",
+      "cip_integrations_music_acoustic::local::validate_reference_wav",
+      "cip_integrations_music_acoustic::local::write_manifest_entries"
+    ],
+    "conclusion": "All 5 expected new symbols present with real, distinct addresses - direct proof this phase's implementation is compiled into this exact packaged .exe."
+  },
+  "frontendTextSearch": {
+    "method": "x86_64-w64-mingw32-strings against the extracted cip-desktop.exe.",
+    "controlStringSearched": "Needs Attention",
+    "controlStringMatches": 0,
+    "newStringsSearched": ["Reference recordings for real audio fingerprinting", "Select audio file"],
+    "newStringsMatches": [0, 0],
+    "conclusion": "Reproduces the established Tauri-frontend-bundle tooling limitation (documented since Phase 6.1) a ninth time - the control string itself returns 0 matches, so the 0 matches for this phase's own new UI text say nothing about correctness either way. Correctness for the frontend surface rests on npm run typecheck's success, the fresh Vite build producing a new asset bundle hash, and the full 261/261 frontend test pass already recorded in pilot-evidence/7.2/build/enrollment-workflow-evidence.json."
+  },
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands beyond enroll_acoustic_reference/list_acoustic_enrollments, zero new events, zero new database schema.",
+    "core/music (the domain contract crate) has zero symbol-level changes.",
+    "NullAcousticMusicRecognizer/ScriptedAcousticMusicRecognizer's compiled symbols are unchanged from the Phase 7.1 baseline.",
+    "No new Tauri command names appear anywhere except the two new ones, confirmed by the symbol table itself listing exactly enroll_acoustic_reference/list_acoustic_enrollments as new."
+  ],
+  "environmentCStatus": "NOT YET VERIFIED for this exact artifact - the decisive pending gate is the same as Phase 7.1's, now with an in-app path to reach it: the operator must search for a real song, select it, pick a real WAV reference recording via the native file picker, confirm it appears in the enrolled list, restart CIP, confirm Diagnostics Mode's acoustic status reports Available, then play that song live and confirm it is correctly recognized."
+}
