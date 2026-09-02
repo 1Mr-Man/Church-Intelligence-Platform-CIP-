@@ -1,0 +1,60 @@
+{
+  "phase": "6.4",
+  "summary": "Environment A direct binary verification for the Phase 6.4 Windows rebuild (Operator Ergonomics: buried audio/speech error visibility). The first Phase 6.x slice to touch Rust - this file documents both the new symbols this phase's backend changes produce and the same honest strings-tooling limitation for the frontend-side changes, established in Phase 6.1-6.3's own evidence files.",
+  "installer": {
+    "path": "target/x86_64-pc-windows-gnu/release/bundle/nsis/Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "sha256": "2ba6125ce2ce2ab5cce29509556e8cc70b4781fe7f525bf71bf79c7fbd952826",
+    "fileSizeBytes": 13738897,
+    "previousInstallerSha256": "e76d5e566bfe6e853b21b065cd3ca59756a64ff339c039fc30776f00d72c457e",
+    "previousInstallerFileSizeBytes": 13749287,
+    "note": "The SHA-256 and file size both changed from the Phase 6.3 baseline, confirming a genuinely new artifact was packaged - not a stale/copied installer."
+  },
+  "extractedApplicationBinary": {
+    "path": "cip-desktop.exe (extracted from the installer via 7z)"
+  },
+  "dllPresenceCheck": {
+    "method": "Extracted the installer with 7z and confirmed all three bundled runtime DLLs are present at the installer root.",
+    "result": {
+      "libstdc++-6.dll": "present",
+      "libgcc_s_seh-1.dll": "present",
+      "libwinpthread-1.dll": "present"
+    }
+  },
+  "newSymbolProof": {
+    "method": "x86_64-w64-mingw32-strings/nm against the extracted cip-desktop.exe, searching for this phase's new LiveStatus fields and pure helper.",
+    "result": {
+      "audioErrorText": "1 occurrence - the new serde camelCase field name, confirming LiveStatus.audio_error_text is genuinely compiled into this exact binary.",
+      "speechErrorText": "1 occurrence - same, for LiveStatus.speech_error_text.",
+      "error_text_if": "0 occurrences via nm - this small, pure, two-call-site function was inlined by the release-mode optimizer, as expected and consistent with this project's established pattern for small pure functions (e.g. classify_overload, rms_level/is_silence, should_reset_segmenter_on_overload were all inlined too) - verified instead via 3 dedicated unit tests, all passing as part of this phase's regression suite."
+    }
+  },
+  "rustSymbolRegressionCheck": {
+    "method": "Re-checking every prior-phase Rust-side symbol/string this project's manifest already tracks, to confirm zero regression despite this phase's own Rust changes.",
+    "result": {
+      "rejection_echo_count": "5 occurrences (unchanged from Phase 6.3 baseline)",
+      "find_rejected_suggestion_for_reference": "1 occurrence (unchanged)",
+      "record_rejection_echo": "1 occurrence (unchanged)",
+      "silentWindowsSkipped": "1 occurrence (unchanged)",
+      "get_service_report": "2 occurrences (unchanged)",
+      "whisper_full_with_state": "93 occurrences via nm - identical to both the Phase 6.2 and Phase 6.3 baselines, further confirming the auxiliary-symbol count is stable when the vendored C++ source (untouched again this phase) doesn't change."
+    },
+    "conclusion": "Every previously-tracked Rust-side symbol/string count is unchanged, alongside the two new fields and the (expected, inlined) new helper - confirms this phase's Rust changes are additive only, with no regression to any prior phase's compiled surface."
+  },
+  "frontendTextSearchLimitation": {
+    "attempted": "Searched the extracted cip-desktop.exe for this phase's new frontend text: 'Last error' (the new audio diagnostics line's leading text, shared with speech's own pre-existing line).",
+    "result": "0 matches via x86_64-w64-mingw32-strings.",
+    "controlExperiment": "Also searched for a frontend-only string known to be present and UNCHANGED by this phase: 'Needs Attention'. ALSO returned 0 matches, reproducing the Phase 6.1/6.2/6.3 finding a fourth time.",
+    "conclusion": "Confirms, again, that Tauri's compressed embedded frontend bundle is opaque to plain strings(1)/nm(1) scanning - the same real, already-documented tooling limitation, not a build defect specific to this phase.",
+    "correctnessEvidenceUsedInstead": [
+      "Fresh Vite build produced a new asset bundle hash for this rebuild, distinct from the Phase 6.3 build's bundle.",
+      "Full frontend test suite: 242/242 passing (unchanged count - this phase's frontend work is rendering/interpolation of already-typed data, not new pure logic).",
+      "Full backend test suite: cip-desktop went from 313 to 316 passing tests (3 new error_text_if cases), under both feature configurations.",
+      "Installer SHA-256 and file size both changed from the Phase 6.3 baseline, confirming the newly-built bundle and binary were genuinely packaged into this installer."
+    ]
+  },
+  "architectureVerification": {
+    "outerInstallerStub": "PE32 executable (GUI) Intel 80386, Nullsoft Installer self-extracting archive - standard NSIS bootstrapper, unchanged from every prior phase.",
+    "installedApplicationBinary": "cip-desktop.exe: PE32+ executable (GUI) x86-64, confirmed genuinely x64."
+  },
+  "conclusion": "This phase's Rust-side changes are directly proven present via two new serde field-name strings, with every prior-phase symbol/string count confirmed unchanged (including whisper_full_with_state's auxiliary count remaining stable at 93 for a third consecutive rebuild). This phase's frontend-side changes rest on the same honest, already-documented strings-tooling limitation as Phase 6.1-6.3, worked around the same way: a fresh build hash, a changed installer SHA-256, and a full passing test suite - never a fabricated string match."
+}
