@@ -4,35 +4,79 @@
 //! `Unavailable`/`Error` report when nothing usable is configured -
 //! never fabricated recognition.
 //!
-//! ## Why this never reports `Available` in this phase
+//! ## Phase 7.1: a real backend, at last
 //!
-//! Unlike `WhisperSpeechEngine` (which has a real, working inference
-//! backend - whisper.cpp via `whisper-rs` - and is only blocked by the
-//! *absence of a downloadable model file* in this environment), Phase
-//! 2.2 does not choose or implement a specific acoustic fingerprint/
-//! embedding model architecture: doing so without genuinely verifying it
-//! against real audio would risk exactly the "fake it" outcome section 7
-//! of the Phase 2.2 spec forbids. This struct is therefore the real,
-//! compiling, testable *boundary* - configuration, status resolution,
-//! the trait implementation itself - with a clearly documented seam
-//! (`recognize()`'s `RecognitionFailed` branch) where a future phase
-//! plugs in a real backend the same way the `whisper` Cargo feature was
-//! added to `ai/speech` once whisper-rs was chosen. See
-//! `docs/acoustic-music.md`'s "PROVEN vs NOT AVAILABLE" section.
+//! Phase 2.2 deliberately left this always `Unavailable` - see this
+//! module's git history and `docs/acoustic-music.md`'s "PROVEN vs NOT
+//! AVAILABLE" section for why (no fingerprint/embedding algorithm had
+//! been chosen or implemented yet). Phase 7.1 fills that seam with a
+//! genuine spectral landmark (constellation) hashing recognizer - see
+//! `crate::fingerprint` for the algorithm itself. This struct's job is
+//! narrower: read a manifest describing which reference audio file
+//! belongs to which song/dataset, enroll each one into a
+//! `FingerprintIndex` at construction time (mirroring
+//! `WhisperSpeechEngine::load`'s "fail/succeed at load time, not per
+//! call" design), and answer `recognize()` calls from that index.
+//!
+//! ## What is, and is not, proven by this phase
+//!
+//! The algorithm itself is proven correct against synthetic audio (see
+//! `crate::fingerprint`'s test suite: self-match, cross-song rejection,
+//! time-shift invariance, noise tolerance) - this container has no real
+//! recorded music to enroll or test against (the same "Music Library is
+//! legitimately empty in a production build" constraint recorded since
+//! Phase 2.7.1). This module has therefore never been exercised against
+//! a real hymn/worship recording captured by a real microphone in a real
+//! room - that remains the decisive Environment C gate, exactly like
+//! every other model-shaped capability this project has shipped (Whisper,
+//! the semantic Bible search embedding model).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
 
 use cip_core_music::{
     AcousticMusicRecognizer, AcousticRecognitionCandidate, AcousticRecognitionError,
     AcousticRecognitionMethod, AcousticRecognitionStatus, AudioSegment,
 };
 
+use crate::fingerprint::FingerprintIndex;
+
 /// The manifest filename a configured model directory is expected to
-/// contain - not yet a real model file format (no backend reads it in
-/// this phase), only a documented placeholder so "is something
-/// genuinely configured" is a real, checkable file-system fact rather
-/// than "does this directory contain anything at all."
+/// contain. Its schema (see [`Manifest`]) names one or more reference
+/// audio files (WAV, any sample rate/channel count - resampled to match
+/// each other and the query audio at enrollment/query time) and the
+/// song/dataset each belongs to.
 pub const MODEL_MANIFEST_FILENAME: &str = "acoustic-model.json";
+
+/// Minimum landmark-hash votes (see `crate::fingerprint::FingerprintMatch`)
+/// a song needs to be reported as a candidate at all - filters out the
+/// small number of coincidental single-hash collisions any two clips of
+/// real audio will occasionally share, which is expected background
+/// noise for this algorithm, not a sign of a real match. Chosen
+/// conservatively (favoring silence over a false positive), matching this
+/// project's "never fabricate a match" discipline; a future phase could
+/// make this operator-tunable if real-world testing shows it needs
+/// adjustment.
+pub const MIN_VOTES: usize = 8;
+
+/// One entry in the manifest: which reference audio file to enroll, and
+/// which song/dataset it belongs to.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ManifestSong {
+    song_id: String,
+    content_id: String,
+    /// Relative (to the manifest's own directory) or absolute path to a
+    /// WAV file of this song, used only at enrollment time - never read
+    /// again per-`recognize()` call.
+    audio_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct Manifest {
+    songs: Vec<ManifestSong>,
+}
 
 #[derive(Debug, Clone)]
 pub struct LocalAcousticConfig {
@@ -55,32 +99,56 @@ impl Default for LocalAcousticConfig {
 pub struct LocalAcousticMusicRecognizer {
     status: AcousticRecognitionStatus,
     reason: String,
+    /// Maps an enrolled `song_id` (the manifest's own identifier, e.g. a
+    /// hymn number) to the `content_id` (dataset) it belongs to, so
+    /// `recognize()` can honor its `content_ids` scoping the same way
+    /// every other recognizer does - the fingerprint index itself has no
+    /// concept of datasets, only song ids.
+    song_content: std::collections::HashMap<String, String>,
+    index: FingerprintIndex,
 }
 
 impl LocalAcousticMusicRecognizer {
-    /// Resolves status once, at construction, from real file-system
-    /// facts - never re-checked per `recognize()` call (mirroring
-    /// `WhisperSpeechEngine::load`'s "fail at load time, not per call"
-    /// design). A caller that wants to react to a model appearing/
-    /// disappearing mid-service reconstructs this type; nothing here
-    /// polls the file system in the background.
+    /// Resolves status and, when a valid manifest with at least one
+    /// successfully-enrolled reference recording is found, builds a real
+    /// `FingerprintIndex` - all done once, at construction, never
+    /// re-checked per `recognize()` call (mirroring
+    /// `WhisperSpeechEngine::load`). A caller that wants to react to a
+    /// manifest changing mid-service reconstructs this type; nothing
+    /// here polls the file system in the background.
     pub fn configure(config: LocalAcousticConfig) -> Self {
-        let (status, reason) = resolve_status(&config);
-        Self { status, reason }
+        let (status, reason, song_content, index) = resolve(&config);
+        Self {
+            status,
+            reason,
+            song_content,
+            index,
+        }
     }
 }
 
-fn resolve_status(config: &LocalAcousticConfig) -> (AcousticRecognitionStatus, String) {
+type ResolveOutcome = (
+    AcousticRecognitionStatus,
+    String,
+    std::collections::HashMap<String, String>,
+    FingerprintIndex,
+);
+
+fn resolve(config: &LocalAcousticConfig) -> ResolveOutcome {
     if !config.enabled {
         return (
             AcousticRecognitionStatus::Disabled,
             "acoustic recognition explicitly disabled".to_string(),
+            std::collections::HashMap::new(),
+            FingerprintIndex::new(),
         );
     }
     let Some(dir) = &config.model_dir else {
         return (
             AcousticRecognitionStatus::Unavailable,
             "no acoustic model directory configured".to_string(),
+            std::collections::HashMap::new(),
+            FingerprintIndex::new(),
         );
     };
     if !dir.is_dir() {
@@ -90,22 +158,168 @@ fn resolve_status(config: &LocalAcousticConfig) -> (AcousticRecognitionStatus, S
                 "configured model directory does not exist: {}",
                 dir.display()
             ),
+            std::collections::HashMap::new(),
+            FingerprintIndex::new(),
         );
     }
-    let manifest = dir.join(MODEL_MANIFEST_FILENAME);
-    match std::fs::read(&manifest) {
-        Err(_) => (
+    let manifest_path = dir.join(MODEL_MANIFEST_FILENAME);
+    let bytes = match std::fs::read(&manifest_path) {
+        Err(_) => {
+            return (
+                AcousticRecognitionStatus::Unavailable,
+                format!("no model manifest found at {}", manifest_path.display()),
+                std::collections::HashMap::new(),
+                FingerprintIndex::new(),
+            )
+        }
+        Ok(bytes) if bytes.is_empty() => {
+            return (
+                AcousticRecognitionStatus::Error,
+                format!(
+                    "model manifest is empty (malformed): {}",
+                    manifest_path.display()
+                ),
+                std::collections::HashMap::new(),
+                FingerprintIndex::new(),
+            )
+        }
+        Ok(bytes) => bytes,
+    };
+    let manifest: Manifest = match serde_json::from_slice(&bytes) {
+        Ok(m) => m,
+        Err(e) => {
+            return (
+                AcousticRecognitionStatus::Error,
+                format!(
+                    "model manifest at {} is malformed JSON: {e}",
+                    manifest_path.display()
+                ),
+                std::collections::HashMap::new(),
+                FingerprintIndex::new(),
+            )
+        }
+    };
+    if manifest.songs.is_empty() {
+        return (
             AcousticRecognitionStatus::Unavailable,
-            format!("no model manifest found at {}", manifest.display()),
-        ),
-        Ok(bytes) if bytes.is_empty() => (
+            format!(
+                "model manifest at {} lists zero songs to enroll",
+                manifest_path.display()
+            ),
+            std::collections::HashMap::new(),
+            FingerprintIndex::new(),
+        );
+    }
+
+    let mut song_content = std::collections::HashMap::new();
+    let mut index = FingerprintIndex::new();
+    let mut enrolled = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+    for entry in &manifest.songs {
+        match enroll_one(dir, entry, &mut index) {
+            Ok(()) => {
+                song_content.insert(entry.song_id.clone(), entry.content_id.clone());
+                enrolled += 1;
+            }
+            Err(reason) => failures.push(format!("{}: {reason}", entry.song_id)),
+        }
+    }
+
+    if enrolled == 0 {
+        return (
             AcousticRecognitionStatus::Error,
-            format!("model manifest is empty (malformed): {}", manifest.display()),
-        ),
-        Ok(_) => (
-            AcousticRecognitionStatus::Unavailable,
-            "a model manifest is present, but no acoustic inference backend is implemented in this build - see docs/acoustic-music.md".to_string(),
-        ),
+            format!(
+                "manifest at {} named {} song(s) but none could be enrolled: {}",
+                manifest_path.display(),
+                manifest.songs.len(),
+                failures.join("; ")
+            ),
+            std::collections::HashMap::new(),
+            FingerprintIndex::new(),
+        );
+    }
+
+    let reason = if failures.is_empty() {
+        format!(
+            "{enrolled} reference recording(s) enrolled from {}",
+            manifest_path.display()
+        )
+    } else {
+        format!(
+            "{enrolled} of {} reference recording(s) enrolled from {} ({} failed: {})",
+            manifest.songs.len(),
+            manifest_path.display(),
+            failures.len(),
+            failures.join("; ")
+        )
+    };
+    (
+        AcousticRecognitionStatus::Available,
+        reason,
+        song_content,
+        index,
+    )
+}
+
+/// Read and decode one manifest entry's WAV file, downmix to mono if
+/// necessary (averaging channels - the same normalization
+/// `cip_core_service::AudioChunk` already guarantees for live capture, so
+/// enrolled reference audio and live query audio are on equal footing),
+/// and enroll it into `index`. Never panics on a malformed file - any
+/// failure is reported as `Err` and skipped, honoring "one bad reference
+/// file must not take down every other song's recognition."
+fn enroll_one(
+    manifest_dir: &Path,
+    entry: &ManifestSong,
+    index: &mut FingerprintIndex,
+) -> Result<(), String> {
+    let audio_path = resolve_audio_path(manifest_dir, &entry.audio_path);
+    let mut reader = hound::WavReader::open(&audio_path)
+        .map_err(|e| format!("could not open {}: {e}", audio_path.display()))?;
+    let spec = reader.spec();
+    if spec.sample_format != hound::SampleFormat::Int || spec.bits_per_sample != 16 {
+        return Err(format!(
+            "{} is not 16-bit PCM WAV ({:?}, {} bits)",
+            audio_path.display(),
+            spec.sample_format,
+            spec.bits_per_sample
+        ));
+    }
+    let channels = spec.channels as usize;
+    if channels == 0 {
+        return Err(format!("{} declares zero channels", audio_path.display()));
+    }
+    let samples: Vec<i16> = reader
+        .samples::<i16>()
+        .collect::<Result<Vec<i16>, _>>()
+        .map_err(|e| format!("could not decode {}: {e}", audio_path.display()))?;
+    let mono: Vec<i16> = if channels == 1 {
+        samples
+    } else {
+        samples
+            .chunks(channels)
+            .map(|frame| {
+                let sum: i32 = frame.iter().map(|&s| i32::from(s)).sum();
+                (sum / frame.len() as i32) as i16
+            })
+            .collect()
+    };
+    if mono.is_empty() {
+        return Err(format!(
+            "{} contains no audio samples",
+            audio_path.display()
+        ));
+    }
+    index.enroll(&entry.song_id, &mono);
+    Ok(())
+}
+
+fn resolve_audio_path(manifest_dir: &Path, audio_path: &str) -> PathBuf {
+    let candidate = PathBuf::from(audio_path);
+    if candidate.is_absolute() {
+        candidate
+    } else {
+        manifest_dir.join(candidate)
     }
 }
 
@@ -124,38 +338,107 @@ impl AcousticMusicRecognizer for LocalAcousticMusicRecognizer {
 
     fn recognize(
         &mut self,
-        _segment: &AudioSegment,
-        _content_ids: &[String],
+        segment: &AudioSegment,
+        content_ids: &[String],
     ) -> Result<Vec<AcousticRecognitionCandidate>, AcousticRecognitionError> {
         match self.status {
-            AcousticRecognitionStatus::Disabled => Err(AcousticRecognitionError::Disabled),
-            AcousticRecognitionStatus::Error => Err(AcousticRecognitionError::RecognitionFailed(
-                self.reason.clone(),
-            )),
-            AcousticRecognitionStatus::Unavailable => {
-                Err(AcousticRecognitionError::Unavailable(self.reason.clone()))
-            }
-            AcousticRecognitionStatus::Available => {
-                // Structurally unreachable in this phase - `resolve_status`
-                // never returns `Available` (see this module's docs) - but
-                // handled explicitly, honestly, and without panicking
-                // rather than silently falling through, in case a future
-                // change to `resolve_status` starts returning it before
-                // `recognize()` is updated to match.
-                Err(AcousticRecognitionError::RecognitionFailed(
-                    "no acoustic inference backend is implemented in this build".to_string(),
+            AcousticRecognitionStatus::Disabled => return Err(AcousticRecognitionError::Disabled),
+            AcousticRecognitionStatus::Error => {
+                return Err(AcousticRecognitionError::RecognitionFailed(
+                    self.reason.clone(),
                 ))
             }
+            AcousticRecognitionStatus::Unavailable => {
+                return Err(AcousticRecognitionError::Unavailable(self.reason.clone()))
+            }
+            AcousticRecognitionStatus::Available => {}
         }
+
+        let matches = self.index.query(&segment.samples, MIN_VOTES);
+        let candidates = matches
+            .into_iter()
+            .filter_map(|m| {
+                let content_id = self.song_content.get(&m.song_id)?;
+                if !content_ids.iter().any(|id| id == content_id) {
+                    return None;
+                }
+                // Votes-to-confidence: a deliberately conservative,
+                // saturating mapping - `total_query_landmarks` varies
+                // with clip length/loudness, so votes are normalized
+                // against it rather than compared to a fixed constant.
+                // Capped at 0.97 (never 1.0): acoustic fingerprinting is
+                // never proof beyond all doubt the same way an exact
+                // scripture-reference match is - see
+                // `docs/phase-7-1-real-audio-fingerprinting.md`.
+                let ratio = if m.total_query_landmarks == 0 {
+                    0.0
+                } else {
+                    m.votes as f32 / m.total_query_landmarks as f32
+                };
+                let confidence_value = (ratio * 2.0).min(0.97);
+                Some(AcousticRecognitionCandidate {
+                    song_id: m.song_id.clone(),
+                    content_id: content_id.clone(),
+                    confidence: cip_core_confidence::ConfidenceResult::new(
+                        confidence_value,
+                        cip_core_confidence::ConfidenceSource::Model,
+                        None,
+                    ),
+                    method: AcousticRecognitionMethod::LocalModel,
+                    segment_id: segment.id,
+                    duration_ms: segment.duration_ms,
+                    evidence: vec![format!(
+                        "{} landmark hash(es) agreed on one alignment offset (of {} in this segment)",
+                        m.votes, m.total_query_landmarks
+                    )],
+                })
+            })
+            .collect();
+        Ok(candidates)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::f32::consts::PI;
 
     fn segment() -> AudioSegment {
         AudioSegment::new(vec![1; 16_000], 16_000, 0)
+    }
+
+    fn synth_tone(
+        freqs_hz: &[f32],
+        sample_rate: u32,
+        duration_ms: u64,
+        amplitude: f32,
+    ) -> Vec<i16> {
+        let n = (u64::from(sample_rate) * duration_ms / 1000) as usize;
+        (0..n)
+            .map(|i| {
+                let t = i as f32 / sample_rate as f32;
+                let sum: f32 = freqs_hz
+                    .iter()
+                    .map(|&f| (2.0 * PI * f * t).sin())
+                    .sum::<f32>()
+                    / freqs_hz.len() as f32;
+                (sum * amplitude) as i16
+            })
+            .collect()
+    }
+
+    fn write_wav(path: &Path, samples: &[i16], sample_rate: u32) {
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(path, spec).unwrap();
+        for &s in samples {
+            writer.write_sample(s).unwrap();
+        }
+        writer.finalize().unwrap();
     }
 
     #[test]
@@ -209,21 +492,180 @@ mod tests {
     }
 
     #[test]
-    fn a_present_manifest_is_honestly_unavailable_never_fake_recognition() {
+    fn invalid_json_manifest_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(MODEL_MANIFEST_FILENAME), b"{}").unwrap();
+        std::fs::write(dir.path().join(MODEL_MANIFEST_FILENAME), b"not json").unwrap();
+        let recognizer = LocalAcousticMusicRecognizer::configure(LocalAcousticConfig {
+            model_dir: Some(dir.path().to_path_buf()),
+            enabled: true,
+        });
+        assert_eq!(recognizer.status(), AcousticRecognitionStatus::Error);
+        assert!(recognizer
+            .status_reason()
+            .unwrap()
+            .contains("malformed JSON"));
+    }
+
+    #[test]
+    fn a_manifest_with_zero_songs_is_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(MODEL_MANIFEST_FILENAME),
+            br#"{"songs": []}"#,
+        )
+        .unwrap();
+        let recognizer = LocalAcousticMusicRecognizer::configure(LocalAcousticConfig {
+            model_dir: Some(dir.path().to_path_buf()),
+            enabled: true,
+        });
+        assert_eq!(recognizer.status(), AcousticRecognitionStatus::Unavailable);
+        assert!(recognizer.status_reason().unwrap().contains("zero songs"));
+    }
+
+    #[test]
+    fn a_manifest_naming_a_missing_audio_file_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = serde_json::json!({
+            "songs": [
+                {"songId": "s1", "contentId": "music:dev", "audioPath": "missing.wav"}
+            ]
+        });
+        std::fs::write(
+            dir.path().join(MODEL_MANIFEST_FILENAME),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        let recognizer = LocalAcousticMusicRecognizer::configure(LocalAcousticConfig {
+            model_dir: Some(dir.path().to_path_buf()),
+            enabled: true,
+        });
+        assert_eq!(recognizer.status(), AcousticRecognitionStatus::Error);
+        assert!(recognizer
+            .status_reason()
+            .unwrap()
+            .contains("none could be enrolled"));
+    }
+
+    #[test]
+    fn a_valid_manifest_with_real_reference_audio_becomes_available_and_recognizes_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let song = synth_tone(&[440.0, 880.0, 1_320.0], 16_000, 5_000, 12_000.0);
+        write_wav(&dir.path().join("song1.wav"), &song, 16_000);
+
+        let manifest = serde_json::json!({
+            "songs": [
+                {"songId": "hymn-1", "contentId": "music:dev-hymnbook", "audioPath": "song1.wav"}
+            ]
+        });
+        std::fs::write(
+            dir.path().join(MODEL_MANIFEST_FILENAME),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+
         let mut recognizer = LocalAcousticMusicRecognizer::configure(LocalAcousticConfig {
             model_dir: Some(dir.path().to_path_buf()),
             enabled: true,
         });
-        // A present, non-empty manifest is still never enough to claim
-        // `Available` - no inference backend exists to honor it (see
-        // this module's docs).
-        assert_eq!(recognizer.status(), AcousticRecognitionStatus::Unavailable);
-        assert!(matches!(
-            recognizer.recognize(&segment(), &["music:dev".to_string()]),
-            Err(AcousticRecognitionError::Unavailable(_))
-        ));
+        assert_eq!(recognizer.status(), AcousticRecognitionStatus::Available);
+
+        // A 4-second excerpt of the enrolled song, as a live "query"
+        // segment - proves the whole enrollment -> recognize() path
+        // genuinely round-trips through real WAV I/O and the real
+        // fingerprint index, not a fake/stubbed result.
+        let excerpt = AudioSegment::new(song[8_000..8_000 + 64_000].to_vec(), 16_000, 0);
+        let candidates = recognizer
+            .recognize(&excerpt, &["music:dev-hymnbook".to_string()])
+            .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].song_id, "hymn-1");
+        assert_eq!(candidates[0].content_id, "music:dev-hymnbook");
+        assert_eq!(candidates[0].method, AcousticRecognitionMethod::LocalModel);
+    }
+
+    #[test]
+    fn recognize_respects_content_id_scoping_even_for_a_real_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let song = synth_tone(&[500.0, 1_000.0], 16_000, 5_000, 12_000.0);
+        write_wav(&dir.path().join("song1.wav"), &song, 16_000);
+
+        let manifest = serde_json::json!({
+            "songs": [
+                {"songId": "hymn-1", "contentId": "music:dev-hymnbook", "audioPath": "song1.wav"}
+            ]
+        });
+        std::fs::write(
+            dir.path().join(MODEL_MANIFEST_FILENAME),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let mut recognizer = LocalAcousticMusicRecognizer::configure(LocalAcousticConfig {
+            model_dir: Some(dir.path().to_path_buf()),
+            enabled: true,
+        });
+
+        let excerpt = AudioSegment::new(song[..64_000].to_vec(), 16_000, 0);
+        // Asked to search a dataset the enrolled song is not part of -
+        // must be filtered out even though the acoustic match is real.
+        let candidates = recognizer
+            .recognize(&excerpt, &["music:some-other-dataset".to_string()])
+            .unwrap();
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn silence_against_a_real_enrolled_song_yields_no_candidates() {
+        let dir = tempfile::tempdir().unwrap();
+        let song = synth_tone(&[440.0], 16_000, 5_000, 12_000.0);
+        write_wav(&dir.path().join("song1.wav"), &song, 16_000);
+        let manifest = serde_json::json!({
+            "songs": [
+                {"songId": "hymn-1", "contentId": "music:dev-hymnbook", "audioPath": "song1.wav"}
+            ]
+        });
+        std::fs::write(
+            dir.path().join(MODEL_MANIFEST_FILENAME),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        let mut recognizer = LocalAcousticMusicRecognizer::configure(LocalAcousticConfig {
+            model_dir: Some(dir.path().to_path_buf()),
+            enabled: true,
+        });
+        let silence = AudioSegment::new(vec![0_i16; 64_000], 16_000, 0);
+        let candidates = recognizer
+            .recognize(&silence, &["music:dev-hymnbook".to_string()])
+            .unwrap();
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn one_bad_reference_file_does_not_prevent_other_songs_from_enrolling() {
+        let dir = tempfile::tempdir().unwrap();
+        let song = synth_tone(&[440.0], 16_000, 3_000, 12_000.0);
+        write_wav(&dir.path().join("good.wav"), &song, 16_000);
+
+        let manifest = serde_json::json!({
+            "songs": [
+                {"songId": "bad", "contentId": "music:dev", "audioPath": "missing.wav"},
+                {"songId": "good", "contentId": "music:dev", "audioPath": "good.wav"}
+            ]
+        });
+        std::fs::write(
+            dir.path().join(MODEL_MANIFEST_FILENAME),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let recognizer = LocalAcousticMusicRecognizer::configure(LocalAcousticConfig {
+            model_dir: Some(dir.path().to_path_buf()),
+            enabled: true,
+        });
+        assert_eq!(recognizer.status(), AcousticRecognitionStatus::Available);
+        let reason = recognizer.status_reason().unwrap();
+        assert!(reason.contains("1 of 2"));
+        assert!(reason.contains("bad"));
     }
 
     #[test]

@@ -7,14 +7,17 @@
 //!   adapter for exercising the acoustic wiring without a microphone or
 //!   model.
 //! - [`LocalAcousticMusicRecognizer`] - the real local-model integration
-//!   boundary: genuine configuration and status resolution, honestly
-//!   `Unavailable`/`Error` until a real backend is chosen and wired in a
-//!   future phase (see its module docs for exactly why).
+//!   boundary: genuine configuration and status resolution. As of Phase
+//!   7.1, backed by a real spectral landmark (constellation) hashing
+//!   fingerprint algorithm (see [`fingerprint`]) - `Available` once a
+//!   manifest naming at least one enrollable reference recording is
+//!   configured, honestly `Unavailable`/`Error` otherwise.
 //!
 //! All three satisfy the same `cip_core_music::AcousticMusicRecognizer`
 //! trait - callers never know which one they're holding, mirroring
 //! `cip_ai_speech`'s three `SpeechEngine` implementations exactly.
 
+pub mod fingerprint;
 mod local;
 mod null;
 mod scripted;

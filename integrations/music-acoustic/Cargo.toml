@@ -11,6 +11,10 @@ repository.workspace = true
 cip-core-music.workspace = true
 cip-core-confidence.workspace = true
 uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rustfft = "6"
+hound = "3"
 
 [dev-dependencies]
 tempfile = "3"

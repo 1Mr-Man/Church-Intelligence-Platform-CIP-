@@ -1,0 +1,47 @@
+{
+  "phase": "7.1",
+  "summary": "Environment A evidence for replacing LocalAcousticMusicRecognizer's honest Phase 2.2 scaffold with a real, offline spectral landmark (constellation) hashing audio fingerprinting algorithm.",
+  "auditFinding": "integrations/music-acoustic's LocalAcousticMusicRecognizer always reported Unavailable/Error - Phase 2.2 deliberately left no fingerprint algorithm implemented, only the real configuration/status-resolution boundary and a documented seam (recognize()'s RecognitionFailed branch). No acoustic recognition algorithm existed anywhere in the codebase. See docs/phase-7-audit.md and docs/phase-7-1-real-audio-fingerprinting.md.",
+  "designChoice": "No genuine architectural fork - the seam, manifest convention, and desktop wiring already existed and required zero changes. The one real decision was which algorithm: spectral landmark hashing (Wang 2003, the published Shazam algorithm) - offline, well-understood, testable on synthetic signals, pure-Rust-implementable with no native toolchain dependency.",
+  "newCode": {
+    "fingerprintRs": "integrations/music-acoustic/src/fingerprint.rs (new): fingerprint() extracts spectral-peak landmark hashes via rustfft STFT; FingerprintIndex enrolls reference clips and matches query clips via hash lookup + offset-histogram voting.",
+    "localRs": "integrations/music-acoustic/src/local.rs (rewritten): LocalAcousticMusicRecognizer::configure() parses an extended manifest ({songs: [{songId, contentId, audioPath}]}), reads each WAV file via hound, downmixes to mono, and enrolls into a real FingerprintIndex. recognize() queries the index and maps votes to a capped ConfidenceResult.",
+    "dependencies": "rustfft (pure-Rust FFT) and hound (pure-Rust WAV codec) added to integrations/music-acoustic/Cargo.toml only - neither requires a C/C++ toolchain."
+  },
+  "newTests": {
+    "fingerprintTestCount": 13,
+    "localTestCount": 15,
+    "totalNewTests": 37,
+    "coverage": [
+      "empty/too-short samples produce no landmarks",
+      "a clip matches itself with a strong majority vote at one offset",
+      "two acoustically different synthetic songs do not cross-match",
+      "a cropped mid-clip excerpt still matches via time-shift invariance",
+      "moderate added white noise still matches",
+      "silence and an empty index produce zero matches, never fabricated",
+      "min-votes threshold correctly filters weak/coincidental matches",
+      "enrolling the same song twice is additive",
+      "hash packing is lossless for realistic inputs",
+      "the full manifest -> WAV file -> real FingerprintIndex -> recognize() round trip, with real (test-generated) WAV files via hound",
+      "content_id dataset scoping is honored even for a real acoustic match",
+      "one bad reference file in a manifest does not prevent other songs from enrolling",
+      "every prior Phase 2.2 status-resolution test (disabled/no-dir/nonexistent-dir/empty-manifest/malformed-manifest) still passes unchanged"
+    ],
+    "command": "cargo test -p cip-integrations-music-acoustic",
+    "result": "37 passed, 0 failed"
+  },
+  "fullRegression": {
+    "fmt": "cargo fmt --all -- --check: clean (after one cargo fmt --all pass)",
+    "clippy": "cargo clippy --workspace --all-targets -- -D warnings: clean, both feature configs",
+    "check": "cargo check --workspace: clean, both with and without --features whisper,semantic-search",
+    "test": "cargo test --workspace: all crates passing, both feature configs, zero regressions outside cip-integrations-music-acoustic",
+    "frontend": "npm run typecheck/lint/test/build: all clean/unchanged - zero frontend files touched this phase; 258/258 tests still pass, lint shows the same 5 pre-existing warnings as before"
+  },
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands, zero new events, zero new database schema - the entire change sits behind AcousticMusicRecognizer, a trait wired end to end since Phase 2.2.",
+    "core/music (the domain contract crate) is untouched - the algorithm lives entirely in integrations/music-acoustic, honoring the project's own boundary rule that core crates never depend on a specific implementation.",
+    "NullAcousticMusicRecognizer and ScriptedAcousticMusicRecognizer are byte-identical to before this phase.",
+    "A build with no manifest configured (the default, every shipped build today) behaves identically to every prior phase - Unavailable, never fabricated recognition."
+  ],
+  "honestLimitation": "No real recorded audio exists anywhere in this repository or container to enroll or query against - the algorithm is proven correct on synthetic multi-tone signals only. Its real-world false-positive/false-negative behavior against actual congregational singing, live instrumentation, and room acoustics is genuinely unknown until Environment C testing with real reference recordings happens."
+}
