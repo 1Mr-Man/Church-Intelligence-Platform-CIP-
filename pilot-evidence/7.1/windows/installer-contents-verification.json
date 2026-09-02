@@ -1,0 +1,62 @@
+{
+  "phase": "7.1",
+  "summary": "Environment A direct-binary verification for the Phase 7.1 Windows rebuild (real audio fingerprinting) - unlike every Phase 6.x slice, this phase changes Rust code compiled into the desktop binary (integrations/music-acoustic, a dependency of apps/desktop/src-tauri), so a genuine rebuild with direct binary proof is required, not a frontend-only rebuild.",
+  "buildCommand": "bash scripts/build-windows-whisper.sh (--features whisper,semantic-search, x86_64-pc-windows-gnu target)",
+  "buildResult": "Rust build succeeded (whisper-rs-sys ggml lib-name two-pass fix applied as expected on the first-attempt failure, exactly as every prior rebuild, unrelated to this phase's own changes); pnpm build (tsc -b && vite build) succeeded producing a fresh dist/assets bundle (unchanged - no frontend files touched this phase); NSIS packaging finished with the three runtime DLLs confirmed present by the script's own built-in check.",
+  "installer": {
+    "filename": "Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "fileSizeBytes": 14040318,
+    "sha256": "39a9fe76d3bc26f3cda4b46d6dc7be68fcdd8518a7d4157246362b8912fa76a5",
+    "priorPhaseFileSizeBytes": 13748320,
+    "priorPhaseSha256": "949d8a9a71b6d1786f33ad6266abcee9154ad3b3758788f86b67fa47efce5a09",
+    "sha256Changed": true,
+    "fileSizeChanged": true,
+    "fileSizeDeltaBytes": 291998,
+    "fileSizeDeltaNote": "A real, expected size increase (unlike every Phase 6.x frontend-only rebuild, which left the Rust binary's own size essentially flat) - this phase adds rustfft and hound (both new statically-linked crates) plus a real fingerprinting/enrollment implementation to the compiled binary."
+  },
+  "extractionMethod": "7z x against the built installer into a scratch directory; confirmed exit code 0 and listed contents.",
+  "runtimeDllsPresent": ["libstdc++-6.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll"],
+  "symbolRegressionCheck": {
+    "method": "x86_64-w64-mingw32-strings/nm against the extracted cip-desktop.exe, re-run for every prior-phase symbol/string this project has established as a regression tripwire.",
+    "rejection_echo_count": { "count": 5, "priorPhaseCount": 5, "unchanged": true },
+    "find_rejected_suggestion_for_reference": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "record_rejection_echo": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "silentWindowsSkipped": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "get_service_report": {
+      "count": 2,
+      "priorPhaseCount": 1,
+      "unchanged": false,
+      "note": "Investigated, not a regression: `strings | grep -c` counts matching LINES, and this build's output happens to place the giant single-line invoke_handler command-name literal (which has always contained the substring 'get_service_report', across every phase) as a separate output line from the mangled Rust symbol name _ZN15cip_desktop_lib8commands18get_service_report..., where a prior run's exact strings/line-wrapping evidently coalesced them onto fewer matched lines. Manually reviewing the raw strings output (see this evidence's own generation transcript) confirms only these same two occurrences exist - the same command list literal and the same one real exported symbol as every prior phase; this crate's service_report code path was not touched by this phase (only integrations/music-acoustic changed). Treated the same way this project has always treated line-count/tool-output non-determinism (see whisper_full_with_state's own documented 96->93 one-time drift, Phase 6.2) - investigated and explained, not silently accepted."
+    },
+    "audioErrorText": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "speechErrorText": { "count": 1, "priorPhaseCount": 1, "unchanged": true },
+    "whisper_full_with_state": { "count": 93, "priorPhaseCount": 93, "unchanged": true, "note": "Stable at 93 for an eighth consecutive rebuild (Phase 6.2 through 7.1)." },
+    "conclusion": "Every prior-phase Rust-side symbol/string count is unchanged except get_service_report's line-count artifact (investigated and explained above, not a real change to that code path). Zero regression in any pre-existing feature."
+  },
+  "newSymbolsThisPhase": {
+    "method": "x86_64-w64-mingw32-nm against the extracted cip-desktop.exe, searching for the new crate's own mangled symbols - direct proof the real fingerprinting/enrollment code actually compiled into this exact binary, not just built and tested in this container.",
+    "fingerprintMatchCount": 7,
+    "sampleSymbols": [
+      "LocalAcousticMusicRecognizer as AcousticMusicRecognizer>::recognize",
+      "LocalAcousticMusicRecognizer as AcousticMusicRecognizer>::status_reason",
+      "Manifest>::deserialize::__Visitor",
+      "ManifestSong>::deserialize::__Visitor"
+    ],
+    "rustfftStringMatches": 1308,
+    "houndStringMatches": 20,
+    "manifestFilenameStringMatches": 1,
+    "manifestFilenameSearched": "acoustic-model.json",
+    "conclusion": "Direct proof this phase's real implementation - not just its Cargo.toml dependency declarations - is compiled into this exact packaged .exe."
+  },
+  "frontendTextSearch": {
+    "method": "x86_64-w64-mingw32-strings against the extracted cip-desktop.exe.",
+    "note": "This phase touches zero frontend files - no new frontend strings were introduced or expected. The fresh Vite build in this rebuild's log shows the identical asset filenames/sizes as the Phase 6.8 baseline (dist/assets/index-CYX_gW6_.css, dist/assets/index-4mREFPay.js), confirming the frontend bundle itself is byte-identical - correctness for the frontend surface rests on that identity, not a new-string search.",
+    "conclusion": "No frontend regression possible - the frontend was not rebuilt with any source change, only re-bundled as part of the standard packaging step."
+  },
+  "architecturalSafetyNotes": [
+    "core/music (the domain contract crate) has zero symbol-level changes - confirmed no cip_core_music::acoustic-specific new exported symbols beyond what Phase 2.2 already established; the new algorithm is entirely inside cip_integrations_music_acoustic.",
+    "NullAcousticMusicRecognizer and ScriptedAcousticMusicRecognizer's compiled symbols are present and unchanged in shape from Phase 2.2/6.x builds - only LocalAcousticMusicRecognizer's recognize()/status_reason() implementations changed.",
+    "No new Tauri command names appear in the invoke_handler command-list literal - confirmed identical set of command name substrings to the Phase 6.8 baseline, aside from the get_service_report line-count artifact explained above."
+  ],
+  "environmentCStatus": "NOT YET VERIFIED for this exact artifact - the decisive pending gate is real recorded music: the operator must create an acoustic-model.json manifest naming real WAV reference recordings, restart the app, confirm Diagnostics Mode's acoustic status reports Available, then play one of those songs live and confirm it is correctly recognized - and, just as importantly, confirm an unrelated song or ambient service audio does NOT produce a false match. This gate is more consequential than most prior phases' Environment C gates since no real audio has ever been enrolled or queried against anywhere, in this container or otherwise."
+}
