@@ -1,0 +1,78 @@
+{
+  "phase": "16",
+  "summary": "Environment A direct-binary proof that Phase 16 (Live Transcript Show/Hide toggle) is a pure frontend change: no new Rust symbols were expected or introduced, and every prior-phase Rust-side symbol/string count (through Phase 15's own fuller-context detection functions) is confirmed unchanged in this rebuilt installer.",
+  "gitCommit": "b582de6ee37262de8e64acf9b3407fb660570f25",
+  "gitCommitShort": "b582de6",
+  "gitCommitNote": "This is the source tree commit (Phase 16's own core-implementation commit) the Phase 16 rebuild was performed against. Phase 16 touches only apps/desktop/src/components/LiveChurchBrain.tsx and a new apps/desktop/src/lib/transcriptPanel.ts - no Rust source file changed.",
+  "buildScript": "scripts/build-windows-whisper.sh",
+  "buildLog": "/tmp/phase16-build.log (not committed - ephemeral build log)",
+  "installer": {
+    "path": "release/windows/Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "fileSizeBytes": 14380217,
+    "sha256": "10c2f3b96d24545eac107515ecfb517ccbda6e37a778bf1619e3de4bdc2e616f",
+    "builtAtUtc": "2026-09-03T20:13:11Z",
+    "target": "x86_64-pc-windows-gnu",
+    "ggmlTwoPassFixApplied": true,
+    "ggmlTwoPassFixNote": "First build attempt failed as expected on the known whisper-rs-sys ggml lib-name defect; the build script applied its established fix and the retry succeeded - the same harmless, unrelated build-toolchain quirk documented and handled identically in every prior whisper-enabled Windows rebuild this project has done (now a 10th consecutive rebuild).",
+    "pnpmBuildSucceeded": true,
+    "nsisPackagingSucceeded": true,
+    "runtimeDllsConfirmedByBuildScript": [
+      "libstdc++-6.dll",
+      "libgcc_s_seh-1.dll",
+      "libwinpthread-1.dll"
+    ]
+  },
+  "extraction": {
+    "method": "7z x",
+    "exitCode": 0,
+    "confirmedPresent": [
+      "cip-desktop.exe",
+      "WebView2Loader.dll",
+      "libstdc++-6.dll",
+      "libgcc_s_seh-1.dll",
+      "libwinpthread-1.dll",
+      "uninstall.exe"
+    ]
+  },
+  "symbolRegressionCheck": {
+    "method": "x86_64-w64-mingw32-strings cip-desktop.exe | grep -c <symbol>, run against the extracted installer's main executable",
+    "tripwiresFromPriorPhases": {
+      "rejection_echo_count": 5,
+      "find_rejected_suggestion_for_reference": 1,
+      "record_rejection_echo": 1,
+      "silentWindowsSkipped": 1,
+      "audioErrorText": 1,
+      "speechErrorText": 1,
+      "enroll_acoustic_reference": 2,
+      "list_acoustic_enrollments": 2,
+      "remove_acoustic_reference": 2,
+      "whisper_full_with_state": 96
+    },
+    "tripwiresResult": "All 10 counts identical to the Phase 15 baseline - zero regression. whisper_full_with_state stable at 96 for a 10th consecutive rebuild (Phase 7.3 through Phase 16).",
+    "priorPhaseSymbolCheck": {
+      "test_obs_connection": 3,
+      "ensure_admin": 3,
+      "operator_accounts": 9,
+      "enable_congregant_companion": 2,
+      "companion_snapshot": 1,
+      "get_speech_language_capabilities": 3,
+      "set_speech_language": 2,
+      "get_church_knowledge_base": 2,
+      "saved_sermon_findings": 8,
+      "last_feed_was_non_speech_placeholder": 1,
+      "nonSpeechPlaceholdersSkipped": 1,
+      "finalize_bible_fuller_context_retry": 2,
+      "retry_paraphrase_or_semantic_with_fuller_context": 1,
+      "persist_detections_and_suggestions": 1
+    },
+    "priorPhaseNote": "Every prior-phase symbol checked, including Phase 15's own fuller-context detection functions, remains present and unregressed."
+  },
+  "newSymbolsThisPhase": "None expected and none introduced - Phase 16 is a pure frontend change (a Show/Hide button and a new lib/transcriptPanel.ts pure function), so the Rust binary itself is unchanged in substance from Phase 15 aside from the fresh bundled frontend asset it packages.",
+  "frontendTextSearchLimitation": "The frontend bundle is bundled into the Tauri resources directory, not searchable as plain strings inside cip-desktop.exe in the same way Rust symbols are - the new Show/Hide button copy was not independently string-searched, consistent with every prior phase's methodology. Frontend correctness for this phase rests on npm run typecheck's success, the fresh Vite build hash (dist/assets/index-ykq23sTh.js, unchanged from the local pre-rebuild build since no further frontend edits were made), and the full 298/298 frontend test pass.",
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands, zero new events, zero backend changes of any kind - confirmed by an empty Rust diff and this rebuild's own zero-new-symbol result.",
+    "Bible/Sermon/Service/Music detection are architecturally incapable of being affected by this toggle - they are driven entirely by the backend speech worker, which has no dependency on frontend rendering state.",
+    "Every prior-phase command and Phase 14/15 symbol remains present and unregressed, confirming this phase's addition did not disturb any prior gate or feature."
+  ],
+  "environmentCStatus": "Not yet performed. A real operator toggling Hide/Show during a real service, confirming Bible/Sermon/Service/Music detection keep working unchanged while the transcript list is hidden, is required to close Environment C for this phase, exactly as for every prior phase's physicalHardwareStatement discipline."
+}
