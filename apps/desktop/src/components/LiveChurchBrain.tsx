@@ -43,6 +43,11 @@ import { CONFIRM_WINDOW_MS, decideConfirmClick, type PendingConfirm } from "../l
 import { humanizeBusyKey } from "../lib/errorContext";
 import { computeSetupGaps } from "../lib/setupGaps";
 import { buildUnifiedFeed, type UnifiedIntelligenceItem } from "../lib/unifiedFeed";
+import {
+  isLiveTranscriptCollapsed,
+  LIVE_TRANSCRIPT_COLLAPSED_STORAGE_KEY,
+  LIVE_TRANSCRIPT_COLLAPSED_VALUE,
+} from "../lib/transcriptPanel";
 import { WorkspaceHeader } from "./workspace/WorkspaceHeader";
 import { PilotDiagnosticsPanel } from "./workspace/PilotDiagnosticsPanel";
 import { AttentionQueue } from "./workspace/AttentionQueue";
@@ -104,6 +109,31 @@ function sermonFindingCategory(summary: string): string {
   ];
   const match = prefixes.find(([prefix]) => summary.startsWith(prefix));
   return match ? match[1] : "Structural";
+}
+
+// Phase 16: mirrors `OnboardingWalkthrough.tsx`'s own real-`localStorage`
+// wrapper precedent - see `lib/transcriptPanel.ts`'s own docs for why
+// collapsing this panel is a pure display preference, never a pipeline
+// control.
+function readTranscriptCollapsedPreference(): string | null {
+  try {
+    return window.localStorage.getItem(LIVE_TRANSCRIPT_COLLAPSED_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function persistTranscriptCollapsedPreference(collapsed: boolean): void {
+  try {
+    if (collapsed) {
+      window.localStorage.setItem(LIVE_TRANSCRIPT_COLLAPSED_STORAGE_KEY, LIVE_TRANSCRIPT_COLLAPSED_VALUE);
+    } else {
+      window.localStorage.removeItem(LIVE_TRANSCRIPT_COLLAPSED_STORAGE_KEY);
+    }
+  } catch {
+    // Best-effort only - if storage is unavailable the panel simply
+    // defaults to expanded again next launch. It never blocks anything.
+  }
 }
 
 /**
@@ -260,6 +290,13 @@ export function LiveChurchBrain() {
   // is the read-only phase/freshness summary, polled alongside status;
   // transitions/anomalies are ordinary findings awaiting operator review.
   const [serviceIntel, setServiceIntel] = useState<ServiceIntelligenceSummary | null>(null);
+  // Phase 16: collapsing the Live Transcript panel is purely a display
+  // preference - Bible/Sermon/Service/Music detection all run on the
+  // backend regardless of whether this panel is rendered, so hiding it
+  // never pauses anything it displays from. See `lib/transcriptPanel.ts`.
+  const [transcriptCollapsed, setTranscriptCollapsed] = useState(() =>
+    isLiveTranscriptCollapsed(readTranscriptCollapsedPreference()),
+  );
   const [serviceTransitions, setServiceTransitions] = useState<IntelligenceFinding[]>([]);
   const [serviceAnomalies, setServiceAnomalies] = useState<IntelligenceFinding[]>([]);
   const [serviceManualText, setServiceManualText] = useState("");
@@ -1184,8 +1221,32 @@ export function LiveChurchBrain() {
       )}
 
       <section className="live-brain__panel">
-        <h2>Live Transcript</h2>
-        {transcript.length === 0 ? (
+        <h2>
+          Live Transcript{" "}
+          <button
+            type="button"
+            onClick={() =>
+              setTranscriptCollapsed((prev) => {
+                const next = !prev;
+                persistTranscriptCollapsedPreference(next);
+                return next;
+              })
+            }
+          >
+            {transcriptCollapsed ? "Show" : "Hide"}
+          </button>
+        </h2>
+        {transcriptCollapsed ? (
+          // Phase 16: this only ever hides the transcript list from view.
+          // Bible/Sermon/Service/Music detection all run on the backend
+          // speech worker regardless of whether this panel is rendered -
+          // hiding it declutters a long, noisy session without pausing any
+          // of the detection engines below. See `lib/transcriptPanel.ts`.
+          <p className="live-brain__hint">
+            Live Transcript hidden - Bible, Music, Sermon, and Service detection keep running
+            unchanged. Click Show to view it again.
+          </p>
+        ) : transcript.length === 0 ? (
           <p className="live-brain__hint">Nothing transcribed yet.</p>
         ) : (
           <>
