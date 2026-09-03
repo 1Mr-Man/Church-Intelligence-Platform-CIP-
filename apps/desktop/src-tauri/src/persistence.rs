@@ -593,6 +593,100 @@ pub fn list_suggestions(
         .collect()
 }
 
+/// Every persisted suggestion, across every service - not scoped to one
+/// `service_id` like [`list_suggestions`]. Phase 17 (Detection Accuracy
+/// Analytics) is the first caller that needs a cross-service view; bounded
+/// by `limit` for the same reason `sermon_knowledge_base.rs`'s own
+/// cross-service reads are bounded (generous enough to cover years of
+/// weekly services without being genuinely unbounded).
+pub fn list_all_suggestions(
+    conn: &Connection,
+    limit: u32,
+) -> Result<Vec<Suggestion>, PersistError> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SUGGESTION_COLUMNS} FROM ai_suggestions ORDER BY created_at DESC LIMIT ?1"
+    ))?;
+    let rows = stmt
+        .query_map(params![limit], suggestion_row)?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    rows.into_iter()
+        .map(
+            |(
+                id,
+                service_id,
+                payload,
+                status,
+                score,
+                created_at,
+                seg_id,
+                src,
+                confirm_count,
+                reject_echo_count,
+            )| {
+                row_to_suggestion(
+                    id,
+                    service_id,
+                    payload,
+                    status,
+                    score,
+                    created_at,
+                    seg_id,
+                    src,
+                    confirm_count,
+                    reject_echo_count,
+                )
+            },
+        )
+        .collect()
+}
+
+/// Every persisted `scripture_detections` row, across every service, that
+/// carries a `transcript_segment_id` - the join key
+/// `pipeline.rs::persist_detections_and_suggestions` guarantees a suggestion
+/// derived from the same detection shares (see that function: it persists
+/// the detection, then persists the suggestion with
+/// `.with_source(segment_id, ...)` using the exact same `segment_id`, for
+/// both the raw-window path and the Phase 15 fuller-context retry path).
+/// Returns `(service_id, transcript_segment_id, reference, detection_type)`
+/// tuples - deliberately not a `ScriptureDetection` reconstruction, since
+/// Phase 17's analytics correlation only ever needs these four fields.
+pub fn list_all_scripture_detections_with_segment(
+    conn: &Connection,
+    limit: u32,
+) -> Result<Vec<(Uuid, Uuid, String, String)>, PersistError> {
+    let mut stmt = conn.prepare(
+        "SELECT service_id, transcript_segment_id, reference, detection_type
+         FROM scripture_detections
+         WHERE transcript_segment_id IS NOT NULL
+         ORDER BY detected_at DESC LIMIT ?1",
+    )?;
+    let rows = stmt
+        .query_map(params![limit], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|(service_id, segment_id, reference, detection_type)| {
+            let service_id = Uuid::parse_str(&service_id).ok()?;
+            let segment_id = Uuid::parse_str(&segment_id).ok()?;
+            Some((
+                service_id,
+                segment_id,
+                reference,
+                detection_type.unwrap_or_else(|| "UNKNOWN".to_string()),
+            ))
+        })
+        .collect())
+}
+
 pub fn get_suggestion(conn: &Connection, suggestion_id: Uuid) -> Result<Suggestion, PersistError> {
     conn.query_row(
         &format!("SELECT {SUGGESTION_COLUMNS} FROM ai_suggestions WHERE id = ?1"),

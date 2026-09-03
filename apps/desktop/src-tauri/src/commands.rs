@@ -3437,6 +3437,24 @@ pub fn get_service_report(
     .map_err(log_and_return)
 }
 
+/// Detection Accuracy Analytics (Phase 17): read-only, cross-service
+/// aggregation of Bible suggestion outcomes (approved/edited/rejected/
+/// pending), broken down by confidence level and by detection method, plus
+/// a per-service trend - unlike `get_service_report`, this spans every
+/// service, not just the one an operator selects. Open to any operator -
+/// like `get_church_knowledge_base`, a read of already-decided history is
+/// no more sensitive than the Scripture & Findings list each service's
+/// own report already shows.
+#[tauri::command]
+pub fn get_bible_detection_analytics(
+    state: State<'_, AppState>,
+) -> Result<crate::bible_detection_analytics::BibleDetectionAnalytics, AppError> {
+    let db = state.db.lock().expect("db connection poisoned");
+    crate::bible_detection_analytics::build_bible_detection_analytics(&db)
+        .map_err(AppError::from)
+        .map_err(log_and_return)
+}
+
 #[tauri::command]
 pub fn approve_suggestion(
     suggestion_id: String,

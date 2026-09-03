@@ -16,6 +16,7 @@
  */
 import { useEffect, useState } from "react";
 import type {
+  BibleDetectionAnalytics,
   ContentCandidate,
   PresentationItem,
   SermonKnowledgeBase,
@@ -40,6 +41,7 @@ export function HistoryView() {
   const [savedContent, setSavedContent] = useState<ContentCandidate[]>([]);
   const [report, setReport] = useState<ServiceReport | null>(null);
   const [knowledgeBase, setKnowledgeBase] = useState<SermonKnowledgeBase | null>(null);
+  const [accuracy, setAccuracy] = useState<BibleDetectionAnalytics | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -55,6 +57,12 @@ export function HistoryView() {
     commands
       .getChurchKnowledgeBase()
       .then(setKnowledgeBase)
+      .catch((e) => setError(String(e)));
+    // Detection Accuracy Analytics (Phase 17) likewise spans every
+    // service, not the one an operator selects below.
+    commands
+      .getBibleDetectionAnalytics()
+      .then(setAccuracy)
       .catch((e) => setError(String(e)));
   }, []);
 
@@ -122,6 +130,122 @@ export function HistoryView() {
 
       {!selected ? (
         <>
+          <section className="library-panel">
+            <h2>Detection Accuracy</h2>
+            <p className="live-brain__hint">
+              How often an operator has approved, edited, or rejected a Bible suggestion, across every service - not
+              just the one you open below.
+            </p>
+            {!accuracy || accuracy.overall.total === 0 ? (
+              <p className="library-page__empty">
+                Nothing decided yet - approve, edit, or reject a Bible suggestion during a service to start building
+                this.
+              </p>
+            ) : (
+              <>
+                <ul className="library-card-list">
+                  <li className="library-card library-card--bible">
+                    <div className="library-card__header">
+                      <strong>Overall</strong>
+                      <span className="library-card__meta">
+                        {accuracy.overallApprovalRate !== null
+                          ? `${(accuracy.overallApprovalRate * 100).toFixed(0)}% approved`
+                          : "nothing decided yet"}
+                      </span>
+                    </div>
+                    <p className="library-card__text">
+                      {accuracy.overall.total} total &middot; {accuracy.overall.approved} approved &middot;{" "}
+                      {accuracy.overall.edited} edited &middot; {accuracy.overall.rejected} rejected &middot;{" "}
+                      {accuracy.overall.pending} pending
+                      {accuracy.rejectionEchoes > 0 && (
+                        <>
+                          {" "}
+                          &middot; {accuracy.rejectionEchoes} rejected reference{accuracy.rejectionEchoes === 1 ? "" : "s"}{" "}
+                          redetected again and kept suppressed
+                        </>
+                      )}
+                    </p>
+                  </li>
+                  <li className="library-card library-card--bible">
+                    <div className="library-card__header">
+                      <strong>By confidence level</strong>
+                    </div>
+                    <p className="library-card__text">
+                      {accuracy.byConfidenceLevel
+                        .filter((b) => b.counts.total > 0)
+                        .map((b) => {
+                          const rate =
+                            b.counts.approved + b.counts.edited + b.counts.rejected > 0
+                              ? Math.round(
+                                  (b.counts.approved / (b.counts.approved + b.counts.edited + b.counts.rejected)) * 100,
+                                )
+                              : null;
+                          return `${b.level}: ${b.counts.total}${rate !== null ? ` (${rate}% approved)` : ""}`;
+                        })
+                        .join(" · ") || "No decided suggestions yet."}
+                    </p>
+                  </li>
+                  {accuracy.byDetectionKind.length > 0 && (
+                    <li className="library-card library-card--bible">
+                      <div className="library-card__header">
+                        <strong>By detection method</strong>
+                      </div>
+                      <p className="library-card__text">
+                        {accuracy.byDetectionKind
+                          .map((b) => {
+                            const rate =
+                              b.counts.approved + b.counts.edited + b.counts.rejected > 0
+                                ? Math.round(
+                                    (b.counts.approved / (b.counts.approved + b.counts.edited + b.counts.rejected)) *
+                                      100,
+                                  )
+                                : null;
+                            return `${b.kind.replace(/_/g, " ")}: ${b.counts.total}${rate !== null ? ` (${rate}% approved)` : ""}`;
+                          })
+                          .join(" · ")}
+                      </p>
+                      {accuracy.unmatchedDetectionKindCount > 0 && (
+                        <p className="live-brain__hint">
+                          {accuracy.unmatchedDetectionKindCount} suggestion
+                          {accuracy.unmatchedDetectionKindCount === 1 ? "" : "s"} could not be matched to a detection
+                          method (e.g. a manually corrected reference) and are not counted above.
+                        </p>
+                      )}
+                    </li>
+                  )}
+                </ul>
+                {accuracy.serviceTrend.filter((s) => s.counts.total > 0).length > 1 && (
+                  <details>
+                    <summary>Trend by service (oldest first)</summary>
+                    <ul className="library-card-list">
+                      {accuracy.serviceTrend
+                        .filter((s) => s.counts.total > 0)
+                        .map((s) => {
+                          const decided = s.counts.approved + s.counts.edited + s.counts.rejected;
+                          const rate = decided > 0 ? Math.round((s.counts.approved / decided) * 100) : null;
+                          return (
+                            <li key={s.serviceId} className="library-card library-card--bible">
+                              <div className="library-card__header">
+                                <strong>{s.serviceTitle}</strong>
+                                <span className="library-card__meta">
+                                  {rate !== null ? `${rate}% approved` : "nothing decided"}
+                                </span>
+                              </div>
+                              <p className="library-card__text">
+                                {formatClockTime(s.startedAt)} &middot; {s.counts.total} total &middot;{" "}
+                                {s.counts.approved} approved &middot; {s.counts.edited} edited &middot;{" "}
+                                {s.counts.rejected} rejected
+                              </p>
+                            </li>
+                          );
+                        })}
+                    </ul>
+                  </details>
+                )}
+              </>
+            )}
+          </section>
+
           <section className="library-panel">
             <h2>Church Knowledge Base</h2>
             <p className="live-brain__hint">

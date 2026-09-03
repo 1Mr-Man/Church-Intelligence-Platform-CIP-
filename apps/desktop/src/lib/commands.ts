@@ -19,6 +19,7 @@ import type {
   AcousticEnrollment,
   AudioDevice,
   BibleBook,
+  BibleDetectionAnalytics,
   BibleSearchResult,
   BibleTranslation,
   SavedScripture,
@@ -770,6 +771,16 @@ export function harvestSermon(): Promise<SermonHarvest> {
  * operator; never requires an active sermon or service. */
 export function getChurchKnowledgeBase(): Promise<SermonKnowledgeBase> {
   return invokeCommand("get_church_knowledge_base");
+}
+
+/** Phase 17 (Detection Accuracy Analytics): a read-only, cross-service
+ * aggregation of Bible suggestion outcomes (approved/edited/rejected/
+ * pending), broken down by confidence level and by detection method, plus
+ * a per-service trend - see `domain/service.ts`'s `BibleDetectionAnalytics`
+ * docs. Unlike `getServiceReport`, this spans every service, not just one.
+ * Open to any operator. */
+export function getBibleDetectionAnalytics(): Promise<BibleDetectionAnalytics> {
+  return invokeCommand("get_bible_detection_analytics");
 }
 
 // --- bible intelligence bridge (Phase 2.4) --------------------------------------

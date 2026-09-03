@@ -180,3 +180,69 @@ export interface ServiceReport {
   liveDiagnostics: LiveDiagnosticsSnapshot;
   generatedAt: string; // ISO-8601
 }
+
+// --- Detection Accuracy Analytics (Phase 17) ---------------------------
+//
+// Mirrors `apps/desktop/src-tauri/src/bible_detection_analytics.rs`
+// exactly. Unlike `ServiceReport` above (one service), this spans every
+// service - a read-only aggregation of the same `ai_suggestions`/
+// `scripture_detections` data, answering "how accurate has Bible
+// detection actually been" rather than "what happened in this service."
+
+export interface OutcomeCounts {
+  total: number;
+  pending: number;
+  approved: number;
+  edited: number;
+  rejected: number;
+}
+
+export interface ConfidenceLevelBreakdown {
+  level: "low" | "medium" | "high";
+  counts: OutcomeCounts;
+}
+
+/** A `ReferenceKind` label (e.g. `"DIRECT_REFERENCE"`,
+ * `"PARAPHRASE_REFERENCE"`, `"SEMANTIC_REFERENCE"`) paired with the
+ * outcome counts of every suggestion that detection method produced. */
+export interface DetectionKindBreakdown {
+  kind: string;
+  counts: OutcomeCounts;
+}
+
+/** One service's own outcome counts, oldest-service-first in
+ * `BibleDetectionAnalytics.serviceTrend` - "is accuracy improving service
+ * to service." */
+export interface ServiceAccuracyTrendEntry {
+  serviceId: string;
+  serviceTitle: string;
+  startedAt: string; // ISO-8601
+  counts: OutcomeCounts;
+}
+
+/** The complete cross-service Bible detection accuracy bundle, as returned
+ * by `get_bible_detection_analytics`. */
+export interface BibleDetectionAnalytics {
+  overall: OutcomeCounts;
+  /** `approved / (approved + edited + rejected)` - `null` when nothing has
+   * been decided yet. */
+  overallApprovalRate: number | null;
+  /** `(edited + rejected) / (approved + edited + rejected)` - `null` when
+   * nothing has been decided yet. */
+  overallCorrectionRate: number | null;
+  /** Sum of every suggestion's rejection-echo count (Phase 5.4) across
+   * every service - a systemic false-positive signal. */
+  rejectionEchoes: number;
+  /** Always exactly three entries, in order: low, medium, high. */
+  byConfidenceLevel: ConfidenceLevelBreakdown[];
+  /** Ascending by kind label, only kinds actually observed. */
+  byDetectionKind: DetectionKindBreakdown[];
+  /** How many suggestions in `overall`/`byConfidenceLevel` could not be
+   * correlated to a detection kind (e.g. a manual context-correction
+   * suggestion with no originating transcript segment) - reported
+   * honestly rather than silently dropped or guessed into a bucket. */
+  unmatchedDetectionKindCount: number;
+  /** Oldest service first. */
+  serviceTrend: ServiceAccuracyTrendEntry[];
+  generatedAt: string; // ISO-8601
+}

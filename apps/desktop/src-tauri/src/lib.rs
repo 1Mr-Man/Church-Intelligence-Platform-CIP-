@@ -1,5 +1,6 @@
 mod access;
 mod acoustic;
+mod bible_detection_analytics;
 mod bible_production_dataset;
 mod commands;
 mod companion;
@@ -560,6 +561,7 @@ pub fn run() {
             commands::list_service_history,
             commands::get_service,
             commands::get_service_report,
+            commands::get_bible_detection_analytics,
             commands::resolve_ambiguous_reference,
             commands::correct_scripture_context,
             commands::analyze_sermon_transcript,
