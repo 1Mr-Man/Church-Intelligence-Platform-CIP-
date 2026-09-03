@@ -207,6 +207,83 @@ pub fn process_transcript_segment_with_semantic_search(
     )
 }
 
+/// Phase 15: a fuller-context second look, run only against the bounded
+/// 12-20s accumulated logical segment (`segmentation::TranscriptSegmenter`),
+/// and only when its raw ~3s sub-windows produced no suggestion at all via
+/// [`process_transcript_segment`]/[`process_transcript_segment_with_semantic_search`].
+///
+/// Deliberately narrower than either of those: never re-runs citation
+/// detection (`detect_candidates`) - a raw ~3s window (roughly 8-15 spoken
+/// words) is already enough for `detect_candidates` to catch an explicit
+/// "book chapter verse" citation, so re-attempting it here on the same
+/// underlying speech would only ever rediscover what the raw-window pass
+/// already found (or already correctly found nothing), real but wasted
+/// work exactly as `finalize_and_route_segment`'s own docs describe for why
+/// Bible detection does not re-run there. What a single ~3s window
+/// genuinely lacks is *vocabulary*: `MIN_PARAPHRASE_SIGNIFICANT_WORDS`/
+/// `MIN_SEMANTIC_SIGNIFICANT_WORDS` (4 distinct words) is a low bar, but a
+/// short fragment ("understand the Word of God") often doesn't clear it at
+/// all, and even when it does, `try_paraphrase`'s overlap ratio is
+/// computed against only that fragment's few words rather than the full
+/// sentence a paraphrase actually needs to be recognized against. Trying
+/// again with the accumulated window's full ~15s of text - several times
+/// the vocabulary - materially raises the odds of a genuine match without
+/// touching either threshold.
+///
+/// Never mutates `context` beyond what `try_paraphrase`/`try_semantic`
+/// themselves already guarantee (same as every other fallback in this
+/// module - a paraphrase/semantic match is never treated as an explicit
+/// citation). Returns a [`ProcessedSegment`] whose `detections` contains,
+/// at most, one `Paraphrase` and one `Semantic` entry (mirroring
+/// `process_transcript_segment_inner`'s own "only when nothing already
+/// found a suggestion" gating between the two fallbacks) - never a
+/// citation-shaped detection, since this function never attempts one.
+pub fn retry_paraphrase_or_semantic_with_fuller_context(
+    service_id: Uuid,
+    segment_text: &str,
+    translation_id: &str,
+    provider: &dyn BibleProvider,
+    context: &mut DefaultScriptureContextManager,
+    semantic: Option<&SemanticSearch>,
+) -> ProcessedSegment {
+    let normalized = normalize_text(segment_text);
+    let mut detections = Vec::new();
+    let mut suggestions = Vec::new();
+
+    if let Some(detection) =
+        try_paraphrase(translation_id, provider, &normalized, segment_text, context)
+    {
+        if let Some(suggestion) = suggestion_for(service_id, &detection) {
+            suggestions.push(suggestion);
+        }
+        detections.push(detection);
+    }
+
+    if suggestions.is_empty() {
+        if let Some(semantic) = semantic {
+            if let Some(detection) = try_semantic(
+                translation_id,
+                provider,
+                semantic,
+                &normalized,
+                segment_text,
+                context,
+            ) {
+                if let Some(suggestion) = suggestion_for(service_id, &detection) {
+                    suggestions.push(suggestion);
+                }
+                detections.push(detection);
+            }
+        }
+    }
+
+    ProcessedSegment {
+        service_id,
+        detections,
+        suggestions,
+    }
+}
+
 fn process_transcript_segment_inner(
     service_id: Uuid,
     segment_text: &str,
@@ -1488,5 +1565,138 @@ mod tests {
             .detections
             .iter()
             .all(|d| d.kind != ReferenceKind::Semantic));
+    }
+
+    // 30. Phase 15: the fuller-context retry finds a paraphrase a single
+    // short raw ~3s window's few words could not - it needs the
+    // accumulated window's full vocabulary, not just a fragment's.
+    #[test]
+    fn fuller_context_retry_finds_a_paraphrase_a_short_fragment_alone_would_miss() {
+        let provider = FakeBibleProvider::kjv_fixture();
+        let mut context = DefaultScriptureContextManager::new("KJV");
+
+        // A short fragment alone (the sort of thing one ~3s Whisper window
+        // might contain): too little vocabulary for the paraphrase
+        // fallback to even attempt scoring.
+        let short_fragment_result = process(&provider, &mut context, "all things work");
+        assert!(
+            short_fragment_result.suggestions.is_empty(),
+            "a 3-word fragment must not be enough on its own"
+        );
+
+        // The same wording, but with the accumulated window's fuller
+        // sentence - now clears MIN_PARAPHRASE_SIGNIFICANT_WORDS and
+        // matches Romans 8:28.
+        let result = retry_paraphrase_or_semantic_with_fuller_context(
+            Uuid::new_v4(),
+            "And we know that all things work together for good.",
+            "KJV",
+            &provider,
+            &mut context,
+            None,
+        );
+
+        assert_eq!(result.suggestions.len(), 1);
+        assert_eq!(result.detections[0].kind, ReferenceKind::Paraphrase);
+        assert_eq!(
+            result.detections[0].reference.as_ref().unwrap().to_string(),
+            "ROM 8:28"
+        );
+    }
+
+    // 31. The fuller-context retry never attempts citation detection - it
+    // is deliberately narrower than `process_transcript_segment` (see its
+    // own docs for why re-running `detect_candidates` here would only
+    // ever rediscover what the raw ~3s window's own pass already found).
+    #[test]
+    fn fuller_context_retry_never_produces_a_citation_detection() {
+        let provider = FakeBibleProvider::kjv_fixture();
+        let mut context = DefaultScriptureContextManager::new("KJV");
+
+        let result = retry_paraphrase_or_semantic_with_fuller_context(
+            Uuid::new_v4(),
+            "Turn with me to Romans 8:28 in your Bibles this morning.",
+            "KJV",
+            &provider,
+            &mut context,
+            None,
+        );
+
+        assert!(
+            result
+                .detections
+                .iter()
+                .all(|d| d.kind != ReferenceKind::Direct),
+            "the fuller-context retry must never attempt citation detection"
+        );
+    }
+
+    // 32. Like every other fallback in this module, the fuller-context
+    // retry never mutates the active Scripture context - a paraphrase
+    // match is not an explicit citation.
+    #[test]
+    fn fuller_context_retry_never_mutates_the_active_context() {
+        let provider = FakeBibleProvider::kjv_fixture();
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        process(&provider, &mut context, "Romans 8");
+
+        let result = retry_paraphrase_or_semantic_with_fuller_context(
+            Uuid::new_v4(),
+            "And we know that all things work together for good.",
+            "KJV",
+            &provider,
+            &mut context,
+            None,
+        );
+
+        assert_eq!(result.detections[0].kind, ReferenceKind::Paraphrase);
+        assert_eq!(
+            context.active_context().unwrap().chapter,
+            8,
+            "context must survive a fuller-context paraphrase retry unchanged"
+        );
+        assert_eq!(context.active_context().unwrap().last_verse, None);
+    }
+
+    // 33. When the lexical fallback finds nothing, the fuller-context
+    // retry falls through to the semantic fallback exactly like
+    // `process_transcript_segment_with_semantic_search` does - the same
+    // "only when nothing else already found a suggestion" gating applies
+    // between the two fallbacks here too.
+    #[test]
+    fn fuller_context_retry_falls_through_to_semantic_when_lexical_finds_nothing() {
+        let provider = matthew_provider();
+        let segment_text = "Jesus told us we should be kind even to those who hate us.";
+        let engine = FakeEmbeddingEngine::new("test-model", 2, &[(segment_text, vec![1.0, 0.0])]);
+        let store = FakeVerseEmbeddingStore::new(vec![(
+            "test-model",
+            VerseEmbedding {
+                reference: ScriptureReference::single("KJV", "MAT", 5, 44),
+                vector: vec![1.0, 0.0],
+            },
+        )]);
+        let semantic = SemanticSearch {
+            engine: &engine,
+            store: &store,
+        };
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        let result = retry_paraphrase_or_semantic_with_fuller_context(
+            Uuid::new_v4(),
+            segment_text,
+            "KJV",
+            &provider,
+            &mut context,
+            Some(&semantic),
+        );
+
+        assert_eq!(result.detections.len(), 1);
+        let detection = &result.detections[0];
+        assert_eq!(detection.kind, ReferenceKind::Semantic);
+        assert_eq!(
+            detection.reference.as_ref().unwrap().to_string(),
+            "MAT 5:44"
+        );
+        assert_eq!(result.suggestions.len(), 1);
+        assert_eq!(result.suggestions[0].status, SuggestionStatus::Pending);
     }
 }

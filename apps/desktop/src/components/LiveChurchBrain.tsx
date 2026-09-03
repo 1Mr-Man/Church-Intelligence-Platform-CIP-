@@ -1188,19 +1188,36 @@ export function LiveChurchBrain() {
         {transcript.length === 0 ? (
           <p className="live-brain__hint">Nothing transcribed yet.</p>
         ) : (
-          <ul className="live-brain__transcript">
-            {transcript.map((segment) => (
-              <li key={segment.id}>
-                {transcriptReceivedAt[segment.id] && (
-                  <span className="live-brain__timestamp">{formatClockTime(transcriptReceivedAt[segment.id])}</span>
-                )}
-                &ldquo;{segment.text}&rdquo;
-                {segment.confidence && (
-                  <span className="live-brain__confidence"> ({Math.round(segment.confidence.score * 100)}%)</span>
-                )}
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="live-brain__transcript">
+              {transcript.map((segment) => (
+                <li key={segment.id}>
+                  {transcriptReceivedAt[segment.id] && (
+                    <span className="live-brain__timestamp">{formatClockTime(transcriptReceivedAt[segment.id])}</span>
+                  )}
+                  &ldquo;{segment.text}&rdquo;
+                  {segment.confidence && (
+                    <span className="live-brain__confidence"> ({Math.round(segment.confidence.score * 100)}%)</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {/* Phase 15: this same panel is exactly where the operator is
+                looking when the transcript appears to stop updating - the
+                freshness signal (already computed and polled for Service
+                Intelligence, see the "Transcript:" line further down) is
+                repeated here, right where a stall is actually noticed,
+                instead of only in a collapsed section the operator may
+                never open. Never fabricates a transcript line - only ever
+                reports elapsed time since the last real one. */}
+            {serviceIntel?.transcriptFreshness.status === "stale" && (
+              <p className="live-brain__hint" role="status">
+                No new transcript in {serviceIntel.transcriptFreshness.secondsSince}s - still
+                listening; this can mean the microphone isn&rsquo;t picking up clear speech (see the
+                input level above) rather than a stopped app.
+              </p>
+            )}
+          </>
         )}
       </section>
       </>

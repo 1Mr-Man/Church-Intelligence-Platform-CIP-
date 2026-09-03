@@ -179,12 +179,81 @@ fn handle_final_transcript_inner(
         processed.detections.len()
     );
 
+    persist_detections_and_suggestions(
+        conn,
+        service_id,
+        segment.id,
+        &segment.text,
+        translation_id,
+        &mut processed,
+    )?;
+
+    Ok(processed)
+}
+
+/// Phase 15: a fuller-context second look at an *already-persisted*
+/// accumulated logical segment (`segmentation::TranscriptSegmenter`'s
+/// bounded 12-20s window) - never a raw ~3s window, and never called at
+/// all unless that window's own raw sub-segments produced no suggestion
+/// through `handle_final_transcript`/`handle_final_transcript_with_semantic_search`.
+/// See `cip_core_service::retry_paraphrase_or_semantic_with_fuller_context`'s
+/// own docs for why more accumulated vocabulary raises the odds of a
+/// genuine paraphrase/semantic match without touching either threshold.
+///
+/// Deliberately does **not** call `persist_transcript_segment` - the
+/// caller (`commands::finalize_bible_fuller_context_retry`) guarantees
+/// `segment.id` already has a `transcript_segments` row (from
+/// `finalize_and_route_segment`'s own persistence of this exact segment),
+/// so calling it again here would attempt a duplicate-primary-key insert.
+pub fn retry_paraphrase_or_semantic_with_fuller_context(
+    conn: &Connection,
+    provider: &dyn BibleProvider,
+    context: &mut DefaultScriptureContextManager,
+    service_id: Uuid,
+    translation_id: &str,
+    segment: &cip_core_ai::TranscriptSegment,
+    semantic: Option<&SemanticSearch>,
+) -> Result<ProcessedSegment, PersistError> {
+    let mut processed = cip_core_service::retry_paraphrase_or_semantic_with_fuller_context(
+        service_id,
+        &segment.text,
+        translation_id,
+        provider,
+        context,
+        semantic,
+    );
+    persist_detections_and_suggestions(
+        conn,
+        service_id,
+        segment.id,
+        &segment.text,
+        translation_id,
+        &mut processed,
+    )?;
+    Ok(processed)
+}
+
+/// Shared by [`handle_final_transcript_inner`] and
+/// [`retry_paraphrase_or_semantic_with_fuller_context`]: persists every
+/// detection, then persists a suggestion for each one that resolved to a
+/// concrete reference, applying the same dedup/confirmation/rejection-echo
+/// policy either caller needs - see [`handle_final_transcript_inner`]'s
+/// former inline version (moved here unchanged in Phase 15 so a second
+/// caller doesn't have to duplicate it) for the full policy rationale.
+fn persist_detections_and_suggestions(
+    conn: &Connection,
+    service_id: Uuid,
+    segment_id: Uuid,
+    segment_text: &str,
+    translation_id: &str,
+    processed: &mut ProcessedSegment,
+) -> Result<(), PersistError> {
     let persist_start = Instant::now();
     for detection in &processed.detections {
         persist_scripture_detection(
             conn,
             service_id,
-            Some(segment.id),
+            Some(segment_id),
             translation_id,
             detection,
         )?;
@@ -201,7 +270,7 @@ fn handle_final_transcript_inner(
         .map(|d| d.kind);
 
     let mut kept_suggestions = Vec::with_capacity(processed.suggestions.len());
-    for (kind, suggestion) in detection_kinds.zip(processed.suggestions) {
+    for (kind, suggestion) in detection_kinds.zip(std::mem::take(&mut processed.suggestions)) {
         let reference_display = match &suggestion.kind {
             SuggestionKind::Scripture { reference } => reference.clone(),
             _ => String::new(),
@@ -226,7 +295,7 @@ fn handle_final_transcript_inner(
                 &reference_display,
                 category,
                 SUGGESTION_DEDUP_WINDOW_SECONDS,
-                segment.id,
+                segment_id,
             )?;
         if is_duplicate {
             log::debug!(
@@ -280,7 +349,7 @@ fn handle_final_transcript_inner(
             continue;
         }
 
-        let suggestion = suggestion.with_source(segment.id, segment.text.clone());
+        let suggestion = suggestion.with_source(segment_id, segment_text.to_string());
         persist_suggestion(conn, &suggestion)?;
         kept_suggestions.push(suggestion);
     }
@@ -292,7 +361,7 @@ fn handle_final_transcript_inner(
         processed.suggestions.len()
     );
 
-    Ok(processed)
+    Ok(())
 }
 
 #[cfg(test)]

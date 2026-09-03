@@ -2360,6 +2360,11 @@ fn spawn_speech_worker(
         // last caught up - see `should_reset_segmenter_on_overload`'s own
         // docs. Owned exclusively by this thread, same as `segmenter`.
         let mut consecutive_overloads: u32 = 0;
+        // Phase 15: whether any raw ~3s sub-window contributed to the
+        // *current* accumulated window has already found a Bible
+        // suggestion - reset every time that window flushes. Owned
+        // exclusively by this thread, same as `segmenter`.
+        let mut window_had_suggestion = false;
 
         while let Ok(chunk) = rx.recv() {
             let chunk_ms = chunk_duration_ms(&chunk);
@@ -2408,6 +2413,10 @@ fn spawn_speech_worker(
                 consecutive_overloads = consecutive_overloads.saturating_add(1);
                 if should_reset_segmenter_on_overload(consecutive_overloads) {
                     segmenter.reset();
+                    // Phase 15: any suggestion tally for the just-discarded
+                    // accumulation is now stale - the next window starts
+                    // clean, same as `segmenter` itself.
+                    window_had_suggestion = false;
                 }
                 {
                     let mut diag = state
@@ -2426,7 +2435,14 @@ fn spawn_speech_worker(
             }
             consecutive_overloads = 0;
 
-            handle_audio_chunk(&app, service_id, chunk, generation, &mut segmenter);
+            handle_audio_chunk(
+                &app,
+                service_id,
+                chunk,
+                generation,
+                &mut segmenter,
+                &mut window_had_suggestion,
+            );
         }
 
         // Phase 3.8.7.5: `stop_listening` closed the channel - whatever is
@@ -2437,7 +2453,14 @@ fn spawn_speech_worker(
             let state = app.state::<AppState>();
             if state.listening_generation.load(Ordering::SeqCst) == generation {
                 remaining.sequence = state.transcript_sequence.fetch_add(1, Ordering::SeqCst);
-                finalize_and_route_segment(&app, &state, service_id, remaining);
+                finalize_and_route_segment(&app, &state, service_id, remaining.clone());
+                // Phase 15: same fuller-context retry as the main loop's
+                // per-window flush, applied to this final partial window
+                // too - a short leftover chunk deserves the same second
+                // look as any other.
+                if !window_had_suggestion {
+                    finalize_bible_fuller_context_retry(&app, &state, service_id, &remaining);
+                }
             }
         }
     });
@@ -2469,6 +2492,7 @@ fn handle_audio_chunk(
     chunk: AudioChunk,
     generation: u64,
     segmenter: &mut TranscriptSegmenter,
+    window_had_suggestion: &mut bool,
 ) {
     let state = app.state::<AppState>();
 
@@ -2659,7 +2683,9 @@ fn handle_audio_chunk(
         // 20s later. See `finalize_bible_only`'s own docs for why this is
         // safe (still a real, already-final Whisper segment, never a
         // partial/interim guess) and what it deliberately does not do.
-        finalize_bible_only(app, &state, service_id, segment.clone());
+        if finalize_bible_only(app, &state, service_id, segment.clone()) {
+            *window_had_suggestion = true;
+        }
 
         // Phase 3.8.7.5 Part A: accumulate this raw ~3s Whisper window into
         // a bounded 12-20s logical segment for the *other* live-connectable
@@ -2670,7 +2696,18 @@ fn handle_audio_chunk(
             continue;
         };
         accumulated.sequence = state.transcript_sequence.fetch_add(1, Ordering::SeqCst);
-        finalize_and_route_segment(app, &state, service_id, accumulated);
+        // Phase 15: a fuller-context retry (paraphrase/semantic only) once
+        // this accumulated window closes, but only when none of its raw
+        // ~3s sub-windows above already found a suggestion - see
+        // `finalize_bible_fuller_context_retry`'s own docs for why a short
+        // 3s fragment often lacks the vocabulary a genuine paraphrase
+        // needs, while this fuller ~15s window usually does not.
+        let had_suggestion = *window_had_suggestion;
+        *window_had_suggestion = false;
+        finalize_and_route_segment(app, &state, service_id, accumulated.clone());
+        if !had_suggestion {
+            finalize_bible_fuller_context_retry(app, &state, service_id, &accumulated);
+        }
     }
 }
 
@@ -2696,12 +2733,20 @@ fn handle_audio_chunk(
 /// `route_segment_to_live_intelligence_engines`: Sermon/Service/Music
 /// still need the fuller 12-20s window, unchanged, from
 /// `finalize_and_route_segment`.
+/// Returns `true` when this raw window's Bible detection pass kept at
+/// least one suggestion (Phase 15) - checked by `spawn_speech_worker`'s
+/// per-window flush to decide whether `finalize_bible_fuller_context_retry`
+/// should get a fuller-context second look once the accumulated 12-20s
+/// window this raw segment contributed to closes. `false` on a persistence
+/// error too (already logged/reported below) - harmless: the fuller-context
+/// retry attempting anyway on that rare path costs one extra, idempotent
+/// detection pass, never a correctness problem.
 fn finalize_bible_only(
     app: &AppHandle,
     state: &tauri::State<'_, AppState>,
     service_id: Uuid,
     segment: TranscriptSegment,
-) {
+) -> bool {
     let segment_for_event = segment.clone();
 
     let processed = {
@@ -2747,8 +2792,10 @@ fn finalize_bible_only(
                 .lock()
                 .expect("last_transcript_at mutex poisoned") = Some(chrono::Utc::now());
             let _ = emit(app, AppEvent::TranscriptUpdated, segment_for_event);
+            let had_suggestion = !processed.suggestions.is_empty();
             let db = state.db.lock().expect("db connection poisoned");
             emit_processed_segment_events(app, &db, service_id, &processed);
+            had_suggestion
         }
         Err(e) => {
             log::error!(target: LogCategory::Database.target(), "failed to persist raw transcript segment: {e}");
@@ -2759,6 +2806,80 @@ fn finalize_bible_only(
                 AppEvent::ErrorOccurred,
                 LogCategory::Database,
                 serde_json::json!({ "context": "finalize_bible_only", "error": e.to_string() }),
+            );
+            false
+        }
+    }
+}
+
+/// Phase 15: a fuller-context second look at an already-persisted
+/// accumulated 12-20s logical segment, using only the paraphrase/semantic
+/// fallbacks (never citation detection - see
+/// `cip_core_service::retry_paraphrase_or_semantic_with_fuller_context`'s
+/// own docs for why). Called from `spawn_speech_worker`'s per-window flush
+/// only when every raw ~3s sub-window across this accumulated segment's
+/// span returned `false` from `finalize_bible_only` - a confident citation
+/// or an already-found paraphrase/semantic match is never second-guessed
+/// by this. Never persists a `transcript_segments` row itself - the caller
+/// guarantees `segment.id` already has one (from `finalize_and_route_segment`,
+/// which the caller always runs first).
+fn finalize_bible_fuller_context_retry(
+    app: &AppHandle,
+    state: &tauri::State<'_, AppState>,
+    service_id: Uuid,
+    segment: &TranscriptSegment,
+) {
+    let processed = {
+        let db = state.db.lock().expect("db connection poisoned");
+        let mut context = state
+            .context_manager
+            .lock()
+            .expect("context_manager mutex poisoned");
+        if state.embedding_ready {
+            let engine = state
+                .embedding_engine
+                .lock()
+                .expect("embedding engine lock poisoned");
+            let semantic = cip_core_service::SemanticSearch {
+                engine: engine.as_ref(),
+                store: &state.verse_embedding_store,
+            };
+            crate::pipeline::retry_paraphrase_or_semantic_with_fuller_context(
+                &db,
+                state.bible_provider.as_ref(),
+                &mut context,
+                service_id,
+                &resolve_default_translation_id(state),
+                segment,
+                Some(&semantic),
+            )
+        } else {
+            crate::pipeline::retry_paraphrase_or_semantic_with_fuller_context(
+                &db,
+                state.bible_provider.as_ref(),
+                &mut context,
+                service_id,
+                &resolve_default_translation_id(state),
+                segment,
+                None,
+            )
+        }
+    };
+
+    match processed {
+        Ok(processed) => {
+            let db = state.db.lock().expect("db connection poisoned");
+            emit_processed_segment_events(app, &db, service_id, &processed);
+        }
+        Err(e) => {
+            log::error!(target: LogCategory::Database.target(), "failed to persist fuller-context Bible detection retry: {e}");
+            let db = state.db.lock().expect("db connection poisoned");
+            record_timeline(
+                &db,
+                Some(service_id),
+                AppEvent::ErrorOccurred,
+                LogCategory::Database,
+                serde_json::json!({ "context": "finalize_bible_fuller_context_retry", "error": e.to_string() }),
             );
         }
     }
