@@ -41,4 +41,37 @@ describe("describeAudioSignal", () => {
     expect(describeAudioSignal(0.14)).toContain("LOW SIGNAL");
     expect(describeAudioSignal(0.15)).not.toContain("LOW SIGNAL");
   });
+
+  it("gives loopback-specific NO SIGNAL guidance for a Stereo Mix device, never 'move the microphone'", () => {
+    // The exact device name + reading (0%) a real Windows pilot session
+    // reported while playing a YouTube video through Stereo Mix.
+    const message = describeAudioSignal(0, "Stereo Mix (Realtek(R) Audio)");
+    expect(message).toContain("NO SIGNAL");
+    expect(message.toLowerCase()).toContain("recording");
+    expect(message.toLowerCase()).not.toContain("microphone");
+  });
+
+  it("gives loopback-specific LOW SIGNAL guidance without suggesting a microphone gain adjustment", () => {
+    const message = describeAudioSignal(0.06, "Stereo Mix (Realtek(R) Audio)");
+    expect(message).toContain("LOW SIGNAL");
+    expect(message.toLowerCase()).toContain("volume");
+    expect(message.toLowerCase()).not.toContain("microphone");
+  });
+
+  it("detects loopback devices case-insensitively and by common alias", () => {
+    expect(describeAudioSignal(0, "STEREO MIX").toLowerCase()).toContain("recording");
+    expect(describeAudioSignal(0, "What U Hear (Realtek Audio)").toLowerCase()).toContain("recording");
+  });
+
+  it("keeps the original physical-microphone wording for a normal input device", () => {
+    expect(describeAudioSignal(0, "Microphone Array (Intel Smart Sound Technology)")).toBe(
+      "NO SIGNAL — audio device is capturing but no sound is being detected",
+    );
+    const low = describeAudioSignal(0.06, "Microphone Array (Intel Smart Sound Technology)");
+    expect(low.toLowerCase()).toContain("microphone");
+  });
+
+  it("keeps the original wording when no device name is known", () => {
+    expect(describeAudioSignal(0, null)).toBe("NO SIGNAL — audio device is capturing but no sound is being detected");
+  });
 });

@@ -1084,7 +1084,7 @@ export function LiveChurchBrain() {
         </div>
         {status && status.audioStatus === "listening" && (
           <p className="live-brain__hint" aria-live="polite">
-            {describeAudioSignal(status.audio.inputLevel)}
+            {describeAudioSignal(status.audio.inputLevel, status.audio.selectedDevice)}
             {status.speechStatus === "ready" ? " — transcription active" : " — transcription unavailable, audio capture only"}
           </p>
         )}
