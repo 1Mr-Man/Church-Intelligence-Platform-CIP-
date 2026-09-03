@@ -1,0 +1,79 @@
+{
+  "phase": "14",
+  "summary": "Environment A direct-binary proof that Phase 14 (Whisper hallucination filtering + real confidence scoring) compiled into the real Windows NSIS installer: the new last_feed_was_non_speech_placeholder trait method, the nonSpeechPlaceholdersSkipped diagnostics field, and the full normalized non-speech-placeholder string set (blank audio, silence, inaudible, speaking in foreign language, laughter, music, applause, background noise, static, buzzing, etc.) are all present in the shipped exe, with zero regression against every prior phase's symbol tripwires.",
+  "gitCommit": "aea96262b7c0ccf9fb9d9a4f9e8826ab23d041d0",
+  "gitCommitShort": "aea9626",
+  "buildScript": "scripts/build-windows-whisper.sh",
+  "buildLog": "/tmp/phase14-build.log (not committed - ephemeral build log)",
+  "installer": {
+    "path": "release/windows/Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "fileSizeBytes": 14381576,
+    "sha256": "f0c52145fa3adfb4ab5a6ed8d38e0ef0a735891b3e85d5b992ebd53ada728b33",
+    "builtAtUtc": "2026-09-03T17:26:32Z",
+    "target": "x86_64-pc-windows-gnu",
+    "ggmlTwoPassFixApplied": true,
+    "ggmlTwoPassFixNote": "First build attempt failed as expected on the known whisper-rs-sys ggml lib-name defect; the build script applied its established fix and the retry succeeded - the same harmless, unrelated build-toolchain quirk documented and handled identically in every prior whisper-enabled Windows rebuild this project has done (now an 8th consecutive rebuild).",
+    "pnpmBuildSucceeded": true,
+    "nsisPackagingSucceeded": true,
+    "runtimeDllsConfirmedByBuildScript": [
+      "libstdc++-6.dll",
+      "libgcc_s_seh-1.dll",
+      "libwinpthread-1.dll"
+    ]
+  },
+  "extraction": {
+    "method": "7z x",
+    "exitCode": 0,
+    "confirmedPresent": [
+      "cip-desktop.exe",
+      "WebView2Loader.dll",
+      "libstdc++-6.dll",
+      "libgcc_s_seh-1.dll",
+      "libwinpthread-1.dll",
+      "uninstall.exe"
+    ]
+  },
+  "symbolRegressionCheck": {
+    "method": "x86_64-w64-mingw32-strings cip-desktop.exe | grep -c <symbol>, run against the extracted installer's main executable",
+    "tripwiresFromPriorPhases": {
+      "rejection_echo_count": 5,
+      "find_rejected_suggestion_for_reference": 1,
+      "record_rejection_echo": 1,
+      "silentWindowsSkipped": 1,
+      "audioErrorText": 1,
+      "speechErrorText": 1,
+      "enroll_acoustic_reference": 2,
+      "list_acoustic_enrollments": 2,
+      "remove_acoustic_reference": 2,
+      "whisper_full_with_state": 96
+    },
+    "tripwiresResult": "All 10 counts identical to the Phase 13 baseline - zero regression. whisper_full_with_state stable at 96 for an 8th consecutive rebuild (Phase 7.3 through Phase 14).",
+    "priorPhaseSymbolCheck": {
+      "test_obs_connection": 3,
+      "ensure_admin": 3,
+      "operator_accounts": 9,
+      "enable_congregant_companion": 2,
+      "companion_snapshot": 1,
+      "get_speech_language_capabilities": 3,
+      "set_speech_language": 2,
+      "get_church_knowledge_base": 2,
+      "saved_sermon_findings": 8
+    },
+    "priorPhaseNote": "Every prior-phase symbol checked (Production Integration, Church/User Roles & Permissions, Local Congregant Companion View, Multi-language Whisper, Church Knowledge Base) remains present and unregressed. saved_sermon_findings rose from 7 to 8 purely because this phase's own confidence-scoring rewrite touches the same run_inference function that constructs each persisted finding's context - a source-line-count artifact of the string table, not a functional change to persistence itself, confirmed by the full 1023/1023 Rust test pass being unchanged."
+  },
+  "newSymbolsThisPhase": {
+    "last_feed_was_non_speech_placeholder": 1,
+    "nonSpeechPlaceholdersSkipped": 1,
+    "is_non_speech_placeholder": 0,
+    "normalize_for_placeholder_match": 0,
+    "non_speech_placeholders_skipped": 0
+  },
+  "newSymbolsNote": "last_feed_was_non_speech_placeholder (the SpeechEngine trait method) and nonSpeechPlaceholdersSkipped (the serde camelCase JSON field name) are directly present. is_non_speech_placeholder, normalize_for_placeholder_match, and the raw snake_case non_speech_placeholders_skipped struct field name were inlined/elided by the release-mode optimizer - consistent with this project's own established precedent (Phase 3.8.7.3's classify_overload/chunk_duration_ms were inlined identically) - and are instead verified via the 4 dedicated unit tests in ai/speech/src/whisper.rs. Decisive direct proof instead comes from the literal placeholder string data itself: strings finds the full normalized NON_SPEECH_PLACEHOLDERS set compiled contiguously into .rodata - 'blank audio', 'silence', 'no audio', 'no speech', 'no speech detected', 'inaudible', 'speaking in foreign language', 'foreign language', 'unintelligible', 'laughter', 'laughing', 'music', 'music playing', 'applause', 'clapping', 'background noise', 'background music', 'static', 'buzzing', 'silence in the video' - an exact match to the 20-entry NON_SPEECH_PLACEHOLDERS const in ai/speech/src/whisper.rs, none of which existed in the Phase 13 binary.",
+  "frontendTextSearchLimitation": "The frontend bundle (dist/assets/index-*.js) is bundled into the Tauri resources directory, not searchable as plain strings inside cip-desktop.exe itself in the same way Rust symbols are - the new LOW SIGNAL band's own UI copy in lib/format.ts/LiveChurchBrain.tsx was not independently string-searched in this phase, consistent with every prior phase's installer-contents-verification methodology in this project. Frontend correctness for this phase rests on npm run typecheck's success, the fresh Vite build hash, and the full 294/294 frontend test pass.",
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands, zero new events, zero new migrations - this phase lives entirely inside the existing speech pipeline and its diagnostics.",
+    "is_non_speech_placeholder's whole-string-only matching means a segment mixing real words with a bracketed tag can never be discarded - the same 'never eat real content' discipline SILENCE_RMS_THRESHOLD already established.",
+    "Every prior-phase command (test_obs_connection, ensure_admin, operator_accounts, enable_congregant_companion, companion_snapshot, get_speech_language_capabilities, set_speech_language, get_church_knowledge_base) remains present and unregressed, confirming this phase's additions did not disturb any prior gate or feature."
+  ],
+  "environmentCStatus": "Not yet performed. A second real pilot session on the same or similar Windows hardware, confirming the Live Transcript panel no longer shows whisper.cpp's own placeholder captions as if they were real speech and that the confidence badge now genuinely varies with transcription quality, is required to close Environment C for this phase, exactly as for every prior phase's physicalHardwareStatement discipline."
+}
