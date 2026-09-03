@@ -183,6 +183,13 @@ export function PilotDiagnosticsPanel() {
                 {diagnostics.speech.silentWindowsSkipped > 0 && (
                   <> ({diagnostics.speech.silentWindowsSkipped} windows skipped - classified as silence)</>
                 )}
+                {diagnostics.speech.nonSpeechPlaceholdersSkipped > 0 && (
+                  <>
+                    {" "}
+                    ({diagnostics.speech.nonSpeechPlaceholdersSkipped} non-speech captions discarded - e.g.
+                    "[BLANK_AUDIO]", not real speech)
+                  </>
+                )}
               </div>
               {diagnostics.speech.lastError && <div>Last error: {diagnostics.speech.lastError}</div>}
             </dd>

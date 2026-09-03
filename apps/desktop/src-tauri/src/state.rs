@@ -155,6 +155,15 @@ pub struct SpeechDiagnostics {
     /// was never classified as silence either) - this field only ever
     /// counts a real, observed VAD decision.
     pub silent_windows_skipped: u64,
+    /// Phase 14: count of real inference passes that produced only one of
+    /// whisper.cpp's own known non-speech placeholder captions (e.g.
+    /// `"[BLANK_AUDIO]"`, `"(speaking in foreign language)"`) and were
+    /// discarded rather than reported as real spoken content
+    /// (`SpeechEngine::last_feed_was_non_speech_placeholder() == true`) -
+    /// see `docs/phase-14-audit.md`. Distinct from `silent_windows_skipped`:
+    /// that counter means inference never ran at all; this one means it
+    /// did run and produced a known non-answer.
+    pub non_speech_placeholders_skipped: u64,
 }
 
 /// Phase 4.4 counterpart to [`SpeechDiagnostics`], much smaller: there is

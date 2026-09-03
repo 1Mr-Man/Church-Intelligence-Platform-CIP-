@@ -35,7 +35,7 @@ import type {
 import type { AppConfig } from "../config/appConfig";
 import * as commands from "../lib/commands";
 import * as liveEvents from "../lib/liveEvents";
-import { formatClockTime } from "../lib/format";
+import { describeAudioSignal, formatClockTime } from "../lib/format";
 import { describeTimelineEntry } from "../lib/timelineFormat";
 import { resolveUnifiedShortcutAction, shouldHandleShortcut } from "../lib/keyboardShortcuts";
 import { buildAttentionQueue } from "../lib/attentionQueue";
@@ -1047,11 +1047,7 @@ export function LiveChurchBrain() {
         </div>
         {status && status.audioStatus === "listening" && (
           <p className="live-brain__hint" aria-live="polite">
-            {status.audio.inputLevel != null
-              ? status.audio.inputLevel > 0.01
-                ? `SIGNAL CAPTURED — input level ${Math.round(status.audio.inputLevel * 100)}%`
-                : "NO SIGNAL — audio device is capturing but no sound is being detected"
-              : "Capturing — input level not yet reported"}
+            {describeAudioSignal(status.audio.inputLevel)}
             {status.speechStatus === "ready" ? " — transcription active" : " — transcription unavailable, audio capture only"}
           </p>
         )}

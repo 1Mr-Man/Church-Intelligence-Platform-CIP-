@@ -108,6 +108,15 @@ export interface SpeechRuntimeDiagnostics {
    * finished buffering yet - that case never increments this counter.
    */
   silentWindowsSkipped: number;
+  /**
+   * Phase 14: count of real inference passes that produced only one of
+   * whisper.cpp's own known non-speech placeholder captions (e.g.
+   * `"[BLANK_AUDIO]"`, `"(speaking in foreign language)"`) and were
+   * discarded rather than reported as real spoken content. Distinct from
+   * `silentWindowsSkipped` - that counter means inference never ran at
+   * all; this one means it did run and produced a known non-answer.
+   */
+  nonSpeechPlaceholdersSkipped: number;
 }
 
 export interface PilotDiagnostics {

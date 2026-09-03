@@ -117,6 +117,25 @@ pub trait SpeechEngine: Send + Sync {
         false
     }
 
+    /// Whether the most recent `feed_audio` call's fully-buffered window ran
+    /// real inference, but the result was one of whisper.cpp's own
+    /// well-known non-speech placeholder captions (e.g. `"[BLANK_AUDIO]"`,
+    /// `"(speaking in foreign language)"`) rather than genuine transcribed
+    /// speech, and was discarded rather than reported as if the
+    /// congregation had said it. `false` by default - only an engine that
+    /// actually recognizes these placeholders (`WhisperSpeechEngine`,
+    /// Phase 14) overrides this.
+    ///
+    /// Phase 14: added after a real Windows pilot session showed exactly
+    /// these placeholder strings displayed as if they were real spoken
+    /// content, with no way for an operator to tell the difference - see
+    /// `docs/phase-14-audit.md`. Distinct from `last_feed_was_silence`:
+    /// that flag means inference never ran at all; this one means it did
+    /// run, and produced a known non-answer.
+    fn last_feed_was_non_speech_placeholder(&self) -> bool {
+        false
+    }
+
     /// Discard any buffered-but-not-yet-inferred audio without running
     /// inference on it. A no-op by default (`NullSpeechEngine`/
     /// `ScriptedSpeechEngine` hold no such buffer).

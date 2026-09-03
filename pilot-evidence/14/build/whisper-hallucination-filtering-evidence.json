@@ -1,0 +1,41 @@
+{
+  "phase": "14",
+  "summary": "Environment A evidence for filtering whisper.cpp's own known non-speech placeholder captions (e.g. \"[BLANK_AUDIO]\", \"(speaking in foreign language)\") out of the live transcript, and replacing a hardcoded 0.75 confidence literal with a real per-token-probability-averaged score - a direct response to the first genuine Environment C bug report this project has received.",
+  "trigger": "Two real Windows pilot screenshots showing the Live Transcript panel full of whisper.cpp's own non-speech placeholder captions, every line at an identical hardcoded (75%) confidence, 6% input level, and zero Bible detections. See docs/phase-14-audit.md for the full root-cause investigation.",
+  "premiseVerification": {
+    "claim1_fake_confidence": "Confirmed ai/speech/src/whisper.rs hardcoded confidence: ConfidenceResult::new(0.75, ...) for every segment. Its own comment ('no per-token confidence exposed by this API') was false - confirmed against the vendored whisper-rs-0.14.4 source that WhisperState::full_n_tokens and WhisperState::full_get_token_prob are real, implemented accessors this code never called.",
+    "claim2_real_placeholders": "Confirmed [BLANK_AUDIO]/(speaking in foreign language)/[inaudible]/[LAUGHTER] are whisper.cpp's own well-documented non-speech placeholder captions (training-data artifacts), not random hallucination, and that nothing in this codebase recognized them before this phase.",
+    "claim3_vad_worked_correctly": "Confirmed SILENCE_RMS_THRESHOLD (1%) correctly let the reported 6% signal through to real inference - the VAD gate is not the defect; the gap is entirely downstream of it.",
+    "claim4_bible_detection_not_separately_broken": "Reviewed all twelve reported transcript lines - seven are pure placeholder captions, three are garbled nonsense, two are coherent but contain no Scripture reference. No evidence supports a separate Bible-detection defect."
+  },
+  "designChoice": "Whole-string-only placeholder matching (never a partial/substring match, so a segment mixing real words with a bracketed tag is kept in full) via a normalized (lowercase, alphanumeric-only) comparison against a documented set of known captions. Real confidence computed by averaging whisper.cpp's own per-token decode probability across every token in the pass, replacing the hardcoded 0.75. A new, honest 'LOW SIGNAL' UI band (1%-15% input level) calibrated directly from this real operator's own 6%-produced-garbage evidence.",
+  "explicitlyDeferred": "Software gain normalization/AGC before feeding Whisper - considered and rejected for this phase specifically because WhisperSpeechEngine buffers many small AudioChunk deliveries into one ~3s inference window, so a per-chunk gain stage would apply inconsistently across that window, a real artifact risk this environment has no real audio to verify against. See docs/phase-14-audit.md's 'Explicitly deferred' section.",
+  "newCode": {
+    "coreAi": "core/ai/src/speech_engine.rs: new SpeechEngine::last_feed_was_non_speech_placeholder trait method, default false.",
+    "aiSpeechWhisper": "ai/speech/src/whisper.rs: NON_SPEECH_PLACEHOLDERS, normalize_for_placeholder_match, is_non_speech_placeholder (pure, tested); run_inference discards pure-placeholder decodes and computes real per-token-averaged confidence; last_feed_was_non_speech_placeholder field + trait impl.",
+    "stateRs": "apps/desktop/src-tauri/src/state.rs: SpeechDiagnostics.non_speech_placeholders_skipped counter.",
+    "commandsRs": "apps/desktop/src-tauri/src/commands.rs: SpeechRuntimeDiagnostics.non_speech_placeholders_skipped field + mapping; handle_audio_chunk increments it in parallel with the existing silent_windows_skipped check.",
+    "frontend": "lib/format.ts: describeAudioSignal (extracted, tested pure function, new LOW SIGNAL band); LiveChurchBrain.tsx uses it; PilotDiagnosticsPanel.tsx surfaces the new counter; appConfig.ts gains nonSpeechPlaceholdersSkipped."
+  },
+  "newTests": {
+    "aiSpeechWhisperTestCount": 4,
+    "frontendFormatTestCount": 7,
+    "testingBoundaryNote": "Every new function is either pure (is_non_speech_placeholder, normalize_for_placeholder_match, describeAudioSignal) or thin diagnostics-counter wiring mirroring an already-established, already-untested-directly pattern (silent_windows_skipped itself has no dedicated integration test either, per this project's standing 'thin orchestration stays untested directly, the pure logic beneath it is what's tested' convention). Test input uses the exact strings and the exact 6% level from the real pilot screenshots.",
+    "command": "cargo test --workspace && cargo test -p cip-ai-speech --features whisper && cargo test --features whisper (apps/desktop/src-tauri) && npm run test -- --run",
+    "result": "1023 passed (workspace default, unchanged from Phase 13 - new tests are whisper-feature-gated), 19 passed (cip-ai-speech --features whisper, up from 15), 350 passed (cip-desktop --features whisper, unchanged), 294 passed (frontend, up from 287) - 0 failures across all four"
+  },
+  "fullRegression": {
+    "fmt": "cargo fmt --all -- --check: clean",
+    "clippy": "cargo clippy --workspace --all-targets -- -D warnings: clean, both feature configs (default and --features whisper)",
+    "test": "see newTests.result above",
+    "frontend": "npm run typecheck/lint/test/build: all clean - same 5 pre-existing lint warnings, no new ones"
+  },
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands, zero new events, zero new migrations - entirely inside the existing speech pipeline and its diagnostics.",
+    "is_non_speech_placeholder's whole-string-only matching can never discard a segment containing real words alongside a bracketed tag.",
+    "TranscriptSegment.confidence's type/range is unchanged - only the value computation changed, so no downstream consumer needed updating.",
+    "core/bible, core/sermon, core/music, core/service, core/presentation (every domain contract crate) are entirely untouched."
+  ],
+  "honestLimitation": "No audio gain normalization (deliberately deferred). The non-speech placeholder list is documented but not exhaustive - a new placeholder pattern observed in a future real session should be added the same way these were, from direct evidence. Garbled-but-real-looking hallucinated phrases that are not one of whisper.cpp's known fixed captions are not removed, only now honestly scored lower - no confidence-threshold hiding was added without further real operator feedback on a useful cutoff.",
+  "environmentCStatus": "NOT YET VERIFIED for this exact artifact - the decisive pending gate is a second real pilot session on the same or similar hardware confirming the Live Transcript panel no longer shows whisper.cpp's own placeholder captions as real speech, and that the confidence badge now genuinely varies with transcription quality."
+}

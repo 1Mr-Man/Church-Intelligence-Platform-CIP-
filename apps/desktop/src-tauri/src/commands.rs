@@ -1353,6 +1353,12 @@ pub struct SpeechRuntimeDiagnostics {
     /// `state::SpeechDiagnostics::silent_windows_skipped` and
     /// `docs/phase-5-3-audio-vad.md`.
     pub silent_windows_skipped: u64,
+    /// Phase 14: count of real inference passes that produced only one of
+    /// whisper.cpp's own known non-speech placeholder captions and were
+    /// discarded rather than reported as real spoken content - see
+    /// `state::SpeechDiagnostics::non_speech_placeholders_skipped` and
+    /// `docs/phase-14-audit.md`.
+    pub non_speech_placeholders_skipped: u64,
 }
 
 /// Phase 3.8.7.3: the speech pipeline's operator-visible backlog state,
@@ -1525,6 +1531,7 @@ pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> Pilo
             last_transcript_pipeline_duration_ms: diag.last_transcript_pipeline_duration_ms,
             overload_state: classify_overload(diag.queue_pending_ms),
             silent_windows_skipped: diag.silent_windows_skipped,
+            non_speech_placeholders_skipped: diag.non_speech_placeholders_skipped,
         }
     };
 
@@ -2570,6 +2577,18 @@ fn handle_audio_chunk(
                 .lock()
                 .expect("speech_diagnostics mutex poisoned")
                 .silent_windows_skipped += 1;
+        }
+
+        // Phase 14: distinct from the silence check above - inference did
+        // run here, it just produced one of whisper.cpp's own known
+        // non-speech placeholder captions rather than real speech. See
+        // `SpeechEngine::last_feed_was_non_speech_placeholder`'s own docs.
+        if speech.last_feed_was_non_speech_placeholder() {
+            state
+                .speech_diagnostics
+                .lock()
+                .expect("speech_diagnostics mutex poisoned")
+                .non_speech_placeholders_skipped += 1;
         }
 
         match feed_result {
@@ -7923,6 +7942,7 @@ mod tests {
                 last_transcript_pipeline_duration_ms: None,
                 overload_state: OverloadState::Normal,
                 silent_windows_skipped: 0,
+                non_speech_placeholders_skipped: 0,
             },
             audio_devices: Vec::new(),
             audio: AudioEngineStatus {

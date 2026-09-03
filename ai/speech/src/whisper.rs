@@ -92,6 +92,74 @@ fn is_silence(samples: &[i16]) -> bool {
     rms_level(samples) < SILENCE_RMS_THRESHOLD
 }
 
+/// Whisper.cpp's own well-known non-speech placeholder captions - literal
+/// strings that appear in the caption datasets Whisper was trained on
+/// (YouTube-auto-caption-style annotations for non-speech audio), which the
+/// model reproduces verbatim as ordinary decoded text when it is uncertain
+/// about quiet, unclear, or non-speech-shaped audio. Confirmed against a
+/// real Windows pilot session (see `docs/phase-14-audit.md`) where a quiet
+/// room microphone produced exactly `"(speaking in foreign language)"`,
+/// `"[BLANK_AUDIO]"`, `"[inaudible]"`, and `"[LAUGHTER]"` as if they were
+/// real spoken content. Compared against [`normalize_for_placeholder_match`]'s
+/// output, so bracket/parenthesis style, case, punctuation, and surrounding
+/// whitespace never matter.
+const NON_SPEECH_PLACEHOLDERS: &[&str] = &[
+    "blank audio",
+    "silence",
+    "no audio",
+    "no speech",
+    "no speech detected",
+    "inaudible",
+    "speaking in foreign language",
+    "foreign language",
+    "unintelligible",
+    "laughter",
+    "laughing",
+    "music",
+    "music playing",
+    "applause",
+    "clapping",
+    "background noise",
+    "background music",
+    "static",
+    "buzzing",
+    "silence in the video",
+];
+
+/// Lowercases `text` and keeps only ASCII letters/digits, collapsing every
+/// other character (brackets, parentheses, underscores, punctuation,
+/// whitespace) to single spaces - so `"[BLANK_AUDIO]"`,
+/// `"(speaking in foreign language)"`, and `"[LAUGHTER]."` all normalize to
+/// exactly the same form regardless of which bracket style or punctuation
+/// whisper.cpp happened to wrap them in.
+fn normalize_for_placeholder_match(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut last_was_space = true;
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_was_space = false;
+        } else if !last_was_space {
+            out.push(' ');
+            last_was_space = true;
+        }
+    }
+    out.trim_end().to_string()
+}
+
+/// Whether `text` (already trimmed) is, in its entirety, one of
+/// whisper.cpp's own known non-speech placeholder captions rather than
+/// genuine transcribed speech - see [`NON_SPEECH_PLACEHOLDERS`]'s own docs.
+/// Deliberately whole-string, not substring: a segment that mixes real
+/// words with a bracketed tag (e.g. `"Amen. [BLANK_AUDIO]"`) is kept in
+/// full rather than guessed at, matching this codebase's "never eat real
+/// content" discipline (the same reasoning behind [`SILENCE_RMS_THRESHOLD`]
+/// being conservative rather than aggressive).
+fn is_non_speech_placeholder(text: &str) -> bool {
+    let normalized = normalize_for_placeholder_match(text);
+    !normalized.is_empty() && NON_SPEECH_PLACEHOLDERS.contains(&normalized.as_str())
+}
+
 pub struct WhisperSpeechEngine {
     ctx: WhisperContext,
     buffer: Vec<i16>,
@@ -112,6 +180,10 @@ pub struct WhisperSpeechEngine {
     /// classified as silence and skipped rather than fed to whisper.cpp -
     /// see `SpeechEngine::last_feed_was_silence`'s own docs.
     last_feed_was_silence: bool,
+    /// Phase 14: whether the most recent real inference pass produced only
+    /// one of whisper.cpp's own known non-speech placeholder captions - see
+    /// `SpeechEngine::last_feed_was_non_speech_placeholder`'s own docs.
+    last_feed_was_non_speech_placeholder: bool,
 }
 
 impl WhisperSpeechEngine {
@@ -141,6 +213,7 @@ impl WhisperSpeechEngine {
             requested_language: "en".to_string(),
             last_feed_triggered_inference: false,
             last_feed_was_silence: false,
+            last_feed_was_non_speech_placeholder: false,
         })
     }
 
@@ -161,6 +234,7 @@ impl WhisperSpeechEngine {
         if self.buffer.is_empty() {
             self.last_feed_triggered_inference = false;
             self.last_feed_was_silence = false;
+            self.last_feed_was_non_speech_placeholder = false;
             return Ok(vec![]);
         }
 
@@ -179,9 +253,11 @@ impl WhisperSpeechEngine {
             self.buffer.clear();
             self.last_feed_triggered_inference = false;
             self.last_feed_was_silence = true;
+            self.last_feed_was_non_speech_placeholder = false;
             return Ok(vec![]);
         }
         self.last_feed_was_silence = false;
+        self.last_feed_was_non_speech_placeholder = false;
 
         let audio_f32: Vec<f32> = self
             .buffer
@@ -242,9 +318,27 @@ impl WhisperSpeechEngine {
             .map_err(|e| SpeechEngineError::TranscriptionFailed(e.to_string()))?;
 
         let mut text = String::new();
+        // Phase 14: average whisper.cpp's own real per-token decode
+        // probability across every token in this pass - `full_get_token_prob`
+        // is a genuine, implemented accessor (confirmed against the
+        // vendored whisper-rs source; see docs/phase-14-audit.md), not the
+        // hardcoded placeholder score this used to be. `prob_count` stays
+        // 0 (and the fallback below applies) only if whisper.cpp produced
+        // no tokens at all for a non-empty segment text, which should not
+        // happen in practice but is handled rather than panicking.
+        let mut prob_sum = 0.0_f64;
+        let mut prob_count: usize = 0;
         for i in 0..num_segments {
             if let Ok(segment_text) = state.full_get_segment_text(i) {
                 text.push_str(&segment_text);
+            }
+            if let Ok(n_tokens) = state.full_n_tokens(i) {
+                for j in 0..n_tokens {
+                    if let Ok(p) = state.full_get_token_prob(i, j) {
+                        prob_sum += f64::from(p);
+                        prob_count += 1;
+                    }
+                }
             }
         }
         let text = text.trim().to_string();
@@ -252,18 +346,41 @@ impl WhisperSpeechEngine {
             return Ok(vec![]);
         }
 
+        // Phase 14: whisper.cpp's own known non-speech placeholder captions
+        // (e.g. "[BLANK_AUDIO]", "(speaking in foreign language)") are not
+        // genuine transcribed speech - discard them exactly like an empty
+        // decode, rather than reporting them as if the congregation had
+        // said them. See docs/phase-14-audit.md for the real-pilot evidence
+        // that prompted this.
+        if is_non_speech_placeholder(&text) {
+            self.last_feed_was_non_speech_placeholder = true;
+            return Ok(vec![]);
+        }
+
+        let (confidence_score, confidence_note) = if prob_count > 0 {
+            (
+                (prob_sum / prob_count as f64) as f32,
+                format!(
+                    "whisper.cpp full() decode; averaged real per-token probability across {prob_count} token(s)"
+                ),
+            )
+        } else {
+            (
+                0.75,
+                "whisper.cpp full() decode; no tokens were readable for this segment, falling back to a neutral estimate"
+                    .to_string(),
+            )
+        };
+
         let segment = TranscriptSegment {
             id: Uuid::new_v4(),
             sequence: self.sequence,
             text,
             is_final: true,
             confidence: ConfidenceResult::new(
-                0.75,
+                confidence_score,
                 ConfidenceSource::Model,
-                Some(
-                    "whisper.cpp full() decode; no per-token confidence exposed by this API"
-                        .to_string(),
-                ),
+                Some(confidence_note),
             ),
             start_ms,
             end_ms: self.elapsed_ms,
@@ -287,6 +404,7 @@ impl SpeechEngine for WhisperSpeechEngine {
         } else {
             self.last_feed_triggered_inference = false;
             self.last_feed_was_silence = false;
+            self.last_feed_was_non_speech_placeholder = false;
             Ok(vec![])
         }
     }
@@ -305,6 +423,10 @@ impl SpeechEngine for WhisperSpeechEngine {
 
     fn last_feed_was_silence(&self) -> bool {
         self.last_feed_was_silence
+    }
+
+    fn last_feed_was_non_speech_placeholder(&self) -> bool {
+        self.last_feed_was_non_speech_placeholder
     }
 
     fn discard_buffered_audio(&mut self) {
@@ -370,6 +492,71 @@ mod tests {
     fn rms_level_of_an_empty_buffer_is_zero_not_a_panic() {
         assert_eq!(rms_level(&[]), 0.0);
         assert!(is_silence(&[]));
+    }
+
+    // --- Phase 14: whisper.cpp's own non-speech placeholder captions,
+    // recognized post-decode - see docs/phase-14-audit.md for the real
+    // pilot session these exact strings came from ------------------------
+
+    #[test]
+    fn recognizes_every_placeholder_string_seen_on_a_real_windows_pilot() {
+        // Verbatim from the real operator screenshots that prompted this
+        // phase (docs/phase-14-audit.md).
+        for text in [
+            "[BLANK_AUDIO]",
+            "(speaking in foreign language)",
+            "[inaudible]",
+            "[LAUGHTER]",
+        ] {
+            assert!(
+                is_non_speech_placeholder(text),
+                "{text:?} must be recognized as a known non-speech placeholder"
+            );
+        }
+    }
+
+    #[test]
+    fn placeholder_matching_is_case_and_punctuation_insensitive() {
+        for text in [
+            "[blank_audio]",
+            "Blank Audio",
+            "[BLANK_AUDIO].",
+            "  [BLANK_AUDIO]  ",
+            "(BLANK_AUDIO)",
+        ] {
+            assert!(
+                is_non_speech_placeholder(text),
+                "{text:?} must still match regardless of case/bracket/whitespace style"
+            );
+        }
+    }
+
+    #[test]
+    fn real_transcribed_speech_is_never_flagged_as_a_placeholder() {
+        for text in [
+            "Yeah, we did it. We did it.",
+            "Turn with me to Romans chapter eight.",
+            "I've got myself going on.",
+            "",
+            "   ",
+        ] {
+            assert!(
+                !is_non_speech_placeholder(text),
+                "{text:?} must never be discarded as a placeholder"
+            );
+        }
+    }
+
+    #[test]
+    fn a_placeholder_tag_mixed_with_real_words_is_kept_in_full() {
+        // Deliberately conservative: only a *pure* placeholder decode is
+        // discarded - never guess at a segment that also contains real
+        // words, matching this codebase's "never eat real content"
+        // discipline (see SILENCE_RMS_THRESHOLD's own reasoning).
+        assert!(!is_non_speech_placeholder("Amen. [BLANK_AUDIO]"));
+        assert!(!is_non_speech_placeholder(
+            "(speaking in foreign language) but then he said amen"
+        ));
     }
 
     /// The one thing about this engine that's fully verifiable without a
