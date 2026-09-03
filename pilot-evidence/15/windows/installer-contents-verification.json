@@ -1,0 +1,81 @@
+{
+  "phase": "15",
+  "summary": "Environment A direct-binary proof that Phase 15 (transcript stall visibility + fuller-context Bible detection) compiled into the real Windows NSIS installer: finalize_bible_fuller_context_retry, retry_paraphrase_or_semantic_with_fuller_context, and persist_detections_and_suggestions are all present in the shipped exe, with zero regression against every prior phase's symbol tripwires.",
+  "gitCommit": "ce9b2ea24c74b2cdc17957eddda3668673e8b1ac",
+  "gitCommitShort": "ce9b2ea",
+  "gitCommitNote": "This is the source tree commit (Phase 15's own core-implementation commit) the Phase 15 rebuild was performed against.",
+  "buildScript": "scripts/build-windows-whisper.sh",
+  "buildLog": "/tmp/phase15-build.log (not committed - ephemeral build log)",
+  "installer": {
+    "path": "release/windows/Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "fileSizeBytes": 14384920,
+    "sha256": "86d453131a0286bafb2ad95a6f221e79ef4830863c76815e902b73f585cacc3e",
+    "builtAtUtc": "2026-09-03T19:29:42Z",
+    "target": "x86_64-pc-windows-gnu",
+    "ggmlTwoPassFixApplied": true,
+    "ggmlTwoPassFixNote": "First build attempt failed as expected on the known whisper-rs-sys ggml lib-name defect; the build script applied its established fix and the retry succeeded - the same harmless, unrelated build-toolchain quirk documented and handled identically in every prior whisper-enabled Windows rebuild this project has done (now a 9th consecutive rebuild).",
+    "pnpmBuildSucceeded": true,
+    "nsisPackagingSucceeded": true,
+    "runtimeDllsConfirmedByBuildScript": [
+      "libstdc++-6.dll",
+      "libgcc_s_seh-1.dll",
+      "libwinpthread-1.dll"
+    ]
+  },
+  "extraction": {
+    "method": "7z x",
+    "exitCode": 0,
+    "confirmedPresent": [
+      "cip-desktop.exe",
+      "WebView2Loader.dll",
+      "libstdc++-6.dll",
+      "libgcc_s_seh-1.dll",
+      "libwinpthread-1.dll",
+      "uninstall.exe"
+    ]
+  },
+  "symbolRegressionCheck": {
+    "method": "x86_64-w64-mingw32-strings cip-desktop.exe | grep -c <symbol>, run against the extracted installer's main executable",
+    "tripwiresFromPriorPhases": {
+      "rejection_echo_count": 5,
+      "find_rejected_suggestion_for_reference": 1,
+      "record_rejection_echo": 1,
+      "silentWindowsSkipped": 1,
+      "audioErrorText": 1,
+      "speechErrorText": 1,
+      "enroll_acoustic_reference": 2,
+      "list_acoustic_enrollments": 2,
+      "remove_acoustic_reference": 2,
+      "whisper_full_with_state": 96
+    },
+    "tripwiresResult": "All 10 counts identical to the Phase 14 baseline - zero regression. whisper_full_with_state stable at 96 for a 9th consecutive rebuild (Phase 7.3 through Phase 15).",
+    "priorPhaseSymbolCheck": {
+      "test_obs_connection": 3,
+      "ensure_admin": 3,
+      "operator_accounts": 9,
+      "enable_congregant_companion": 2,
+      "companion_snapshot": 1,
+      "get_speech_language_capabilities": 3,
+      "set_speech_language": 2,
+      "get_church_knowledge_base": 2,
+      "saved_sermon_findings": 8,
+      "last_feed_was_non_speech_placeholder": 1,
+      "nonSpeechPlaceholdersSkipped": 1
+    },
+    "priorPhaseNote": "Every prior-phase symbol checked (Production Integration through Phase 14's whisper hallucination filtering) remains present and unregressed."
+  },
+  "newSymbolsThisPhase": {
+    "finalize_bible_fuller_context_retry": 2,
+    "retry_paraphrase_or_semantic_with_fuller_context": 1,
+    "persist_detections_and_suggestions": 1,
+    "window_had_suggestion": 0
+  },
+  "newSymbolsNote": "finalize_bible_fuller_context_retry, retry_paraphrase_or_semantic_with_fuller_context, and persist_detections_and_suggestions - the three new named functions this phase adds - are all directly present. window_had_suggestion is a local bool owned by spawn_speech_worker's thread closure, not a named function, and was inlined/elided by the release-mode optimizer as expected - consistent with this project's own established precedent for small local state (e.g. Phase 3.8.7.3's classify_overload/chunk_duration_ms).",
+  "frontendTextSearchLimitation": "The frontend bundle is bundled into the Tauri resources directory, not searchable as plain strings inside cip-desktop.exe in the same way Rust symbols are - the new stall-indicator copy ('No new transcript in Ns...') was not found via strings (confirmed absent, as expected) and was not independently string-searched further, consistent with every prior phase's methodology. Frontend correctness for this phase rests on npm run typecheck's success, the fresh Vite build hash, and the full 294/294 frontend test pass (unchanged, since this UI change only displays an already-tested value).",
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands, zero new events, zero new migrations - this phase lives entirely inside the existing Bible detection and transcript pipeline plus one frontend display change.",
+    "retry_paraphrase_or_semantic_with_fuller_context can never attempt citation detection or mutate the active Scripture context.",
+    "Every prior-phase command (test_obs_connection, ensure_admin, operator_accounts, enable_congregant_companion, companion_snapshot, get_speech_language_capabilities, set_speech_language, get_church_knowledge_base, and Phase 14's own non-speech-placeholder handling) remains present and unregressed, confirming this phase's additions did not disturb any prior gate or feature."
+  ],
+  "environmentCStatus": "Not yet performed. A second real pilot session on the same or similar Windows hardware, confirming the Live Transcript panel now surfaces a clear 'no new transcript' message instead of silently freezing during a long quiet/unclear stretch, and that a genuine paraphrase spoken without a book name is now more likely to be caught, is required to close Environment C for this phase, exactly as for every prior phase's physicalHardwareStatement discipline."
+}
