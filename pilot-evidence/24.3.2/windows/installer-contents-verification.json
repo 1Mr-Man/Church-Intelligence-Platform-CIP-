@@ -1,0 +1,89 @@
+{
+    "phase": "24.3.2",
+    "summary": "Environment A direct-binary proof that Phase 24.3.2 (quality-tier backlog visibility status label: consecutive_jobs_dropped streak counter + derived QualityBacklogState, surfaced in PilotDiagnosticsPanel) is genuinely compiled into this rebuilt installer, with zero functional regression to every prior-phase Rust symbol.",
+    "gitCommit": "d9bd2d3cf0164f57c828b887229dbdbe01d0e293",
+    "gitCommitShort": "d9bd2d3",
+    "gitCommitNote": "This is the source tree commit (Phase 24.3.2's own commit) this rebuild was performed against. Phase 24.3.2 touches apps/desktop/src-tauri/src/state.rs (SpeechQualityDiagnostics.consecutive_jobs_dropped), apps/desktop/src-tauri/src/commands.rs (QualityBacklogState enum, classify_quality_backlog, wiring in spawn_quality_worker/handle_audio_chunk/get_pilot_diagnostics), and two frontend files (config/appConfig.ts, components/workspace/PilotDiagnosticsPanel.tsx). No migrations, no new commands, no new events. This is the fifth consecutive rebuild this session (following Phase 24.1's gitCommit 472b91a, Phase 24.2's gitCommit b668be5, Phase 24.3's gitCommit c9f3ef0, and Phase 24.3.1's gitCommit 8dfc7c5) - all five closed real gaps identified by continuing directly from the operator's own follow-up direction.",
+    "buildScript": "scripts/build-windows-whisper.sh",
+    "buildLog": "ran directly in this session (not committed - ephemeral build log)",
+    "installer": {
+        "path": "release/windows/Church Intelligence Platform_0.1.0_x64-setup.exe",
+        "fileSizeBytes": 14423517,
+        "sha256": "0aaf6f73e5970568d5a6882e7d5ad1cf3eeb514e7e9415b1779ea2e2875c18d6",
+        "builtAtUtc": "2026-09-04T15:17:00Z",
+        "target": "x86_64-pc-windows-gnu",
+        "ggmlTwoPassFixApplied": true,
+        "ggmlTwoPassFixNote": "First build attempt failed as expected on the known whisper-rs-sys ggml lib-name defect; the build script applied its established fix and the retry succeeded - the same harmless, unrelated build-toolchain quirk documented and handled identically in every prior whisper-enabled Windows rebuild this project has done.",
+        "pnpmBuildSucceeded": true,
+        "nsisPackagingSucceeded": true,
+        "runtimeDllsConfirmedByBuildScript": [
+            "libstdc++-6.dll",
+            "libgcc_s_seh-1.dll",
+            "libwinpthread-1.dll"
+        ]
+    },
+    "extraction": {
+        "method": "7z x",
+        "exitCode": 0,
+        "fileCount": 12,
+        "confirmedPresent": [
+            "cip-desktop.exe",
+            "WebView2Loader.dll",
+            "libstdc++-6.dll",
+            "libgcc_s_seh-1.dll",
+            "libwinpthread-1.dll",
+            "uninstall.exe"
+        ]
+    },
+    "symbolRegressionCheck": {
+        "method": "x86_64-w64-mingw32-strings cip-desktop.exe | grep -c <symbol>, run against the extracted installer's main executable. Every tripwire from Phase 24.3.1's own baseline (the most recent prior rebuild) was re-checked.",
+        "tripwiresFromPriorPhases": {
+            "rejection_echo_count": 5,
+            "find_rejected_suggestion_for_reference": 1,
+            "record_rejection_echo": 1,
+            "silentWindowsSkipped": 1,
+            "audioErrorText": 1,
+            "speechErrorText": 1,
+            "enroll_acoustic_reference": 2,
+            "list_acoustic_enrollments": 2,
+            "remove_acoustic_reference": 2,
+            "whisper_full_with_state": 96,
+            "finalize_bible_fuller_context_retry": 2,
+            "persist_detections_and_suggestions": 1,
+            "build_bible_detection_analytics": 1,
+            "get_bible_detection_analytics": 2,
+            "OutcomeCounts": 1,
+            "retry_paraphrase_or_semantic_with_fuller_context": 1,
+            "normalize_word_token": 1,
+            "fuzzy_match_book": 1,
+            "canonicalize_book": 1,
+            "correct_scripture_context": 2,
+            "last_feed_was_vad_early_flush": 1,
+            "feed_audio": 4,
+            "classify_model_size_tier": 0,
+            "get_prepared_item_slide": 2,
+            "decode_pass": 1,
+            "try_interim_decode": 1,
+            "should_flush_early": 0,
+            "should_attempt_interim_decode": 0,
+            "transcribe_once": 3,
+            "take_last_final_window_audio": 2,
+            "spawn_quality_worker": 3,
+            "persist_transcript_correction": 1,
+            "install_whisper_quality_model": 2
+        },
+        "tripwiresFromPriorPhasesDeviation": "One: retry_paraphrase_or_semantic_with_fuller_context dropped from its Phase 24.3.1 baseline of 2 to 1 this rebuild. Investigated via `x86_64-w64-mingw32-nm cip-desktop.exe | c++filt`: only the core/service::bible_intelligence copy (_ZN16cip_core_service18bible_intelligence48retry_paraphrase_or_semantic_with_fuller_context...) remains a linked `T` symbol; the apps/desktop pipeline.rs copy that contributed the second occurrence in every prior rebuild is no longer present as its own linker symbol. `git diff 86f874c d9bd2d3 -- apps/desktop/src-tauri/src/pipeline.rs core/service/src/bible_intelligence.rs` is byte-for-byte empty - neither function's source changed at all since the last verified rebuild. This confirms the deviation is a pure codegen/inlining artifact: the pipeline.rs copy (a small function with one call site) was fully inlined into its caller by LLVM this build, most likely because unrelated new code added to commands.rs (QualityBacklogState, classify_quality_backlog, and its call sites) shifted that translation unit's size/optimization heuristics enough to change this one inlining decision. Confirmed benign - not a functional regression, both underlying functions are unchanged and both still exist in source, only the desktop-local one no longer survives as a separate linked symbol in this particular build.",
+        "newTripwiresThisPhase": {
+            "classify_quality_backlog": 0
+        },
+        "newTripwiresThisPhaseNote": "classify_quality_backlog (the new pure function this phase derives QualityBacklogState from) shows 0, matching the exact same already-established pattern as classify_model_size_tier, should_flush_early, and should_attempt_interim_decode above (all 0 in this and every prior baseline): a small helper with a single call site (get_pilot_diagnostics) is a textbook LLVM inlining target in a release build and is expected to leave no standalone linker symbol. Its 5 unit tests (compiled only under #[cfg(test)], never part of this release binary) are the direct evidence this function exists and behaves correctly - the same testing-boundary precedent every other 0-count tripwire in this table already relies on. QualityBacklogState's own string variants (\"normal\"/\"busy\"/\"falling_behind\"/\"overloaded\") were also confirmed present via `strings | grep falling_behind` (1 occurrence), independently confirming the enum's serde serialization code compiled into this build."
+    },
+    "frontendTextSearchLimitation": "Not applicable this phase - the Rust-side changes are the substantive proof; the frontend changes (appConfig.ts type mirror, PilotDiagnosticsPanel.tsx display row) were verified via npm run typecheck/lint/test/build, all clean, per docs/phase-24-3-2-audit.md's own Full regression result section.",
+    "architecturalSafetyNotes": [
+        "Zero changes to any existing Tauri command's signature or behavior, zero changes to any existing event's payload shape, zero new migrations, zero new commands, zero new events.",
+        "consecutive_jobs_dropped and backlog_state are purely additive diagnostics fields - never read by any decision-making code. The quality worker's own backpressure behavior (try_send, drop-newest-on-full-channel) is completely unchanged.",
+        "Every prior-phase command and symbol remains present and functionally unregressed - one symbol-count deviation this rebuild, investigated and confirmed to be a benign codegen/inlining artifact with zero source change to either implicated function.",
+        "New enum/function this phase (QualityBacklogState, classify_quality_backlog) confirmed compiled in via string-literal serde variant names, consistent with the project's established testing-boundary precedent for small, fully-inlined pure helper functions."
+    ],
+    "environmentCStatus": "Not yet performed. This fix improves diagnostics visibility for the still-real-hardware-unconfirmed dual-tier pipeline - it does not itself close Environment C for the quality tier. See docs/phase-24-3-audit.md's and docs/phase-24-3-2-audit.md's own Known Limitations."
+}
