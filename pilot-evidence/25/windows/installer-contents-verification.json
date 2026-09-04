@@ -1,0 +1,94 @@
+{
+    "phase": "25",
+    "summary": "Environment A direct-binary proof that Phase 25 (Session Black Box: export_session_report bundling the full transcript, timeline, suggestions, and corrections plus a human_summary paragraph into one downloadable JSON file) is genuinely compiled into this rebuilt installer, with zero functional regression to every prior-phase Rust symbol.",
+    "gitCommit": "8949b4cd2fb972fb4eff11e79d551d87d54af60d",
+    "gitCommitShort": "8949b4c",
+    "gitCommitNote": "This is the source tree commit (Phase 25's own commit) this rebuild was performed against. Phase 25 adds a new module apps/desktop/src-tauri/src/session_report.rs (SessionReport, build_session_report, build_human_summary), extends service_report.rs's LiveDiagnosticsSnapshot/build_service_report with quality-tier and audio-error fields, adds persistence::list_transcript_corrections + TranscriptCorrection, and adds the export_session_report command. No migrations, no new events, one existing command's internal call site (get_service_report) updated for the new build_service_report parameters. This is the sixth consecutive rebuild this session (following Phase 24.1's gitCommit 472b91a, Phase 24.2's gitCommit b668be5, Phase 24.3's gitCommit c9f3ef0, Phase 24.3.1's gitCommit 8dfc7c5, and Phase 24.3.2's gitCommit d9bd2d3) - the operator's own explicit request: a downloadable file reporting everything CIP observed during a real test, to hand back alongside their own transcript/notes.",
+    "buildScript": "scripts/build-windows-whisper.sh",
+    "buildLog": "ran directly in this session (not committed - ephemeral build log)",
+    "installer": {
+        "path": "release/windows/Church Intelligence Platform_0.1.0_x64-setup.exe",
+        "fileSizeBytes": 14425884,
+        "sha256": "e89b5a8a467478edf3d3fd0fee133fa09e2bdbe3f0affb57e542a7f41240eb34",
+        "builtAtUtc": "2026-09-04T16:24:00Z",
+        "target": "x86_64-pc-windows-gnu",
+        "ggmlTwoPassFixApplied": true,
+        "ggmlTwoPassFixNote": "First build attempt failed as expected on the known whisper-rs-sys ggml lib-name defect; the build script applied its established fix and the retry succeeded - the same harmless, unrelated build-toolchain quirk documented and handled identically in every prior whisper-enabled Windows rebuild this project has done.",
+        "pnpmBuildSucceeded": true,
+        "nsisPackagingSucceeded": true,
+        "runtimeDllsConfirmedByBuildScript": [
+            "libstdc++-6.dll",
+            "libgcc_s_seh-1.dll",
+            "libwinpthread-1.dll"
+        ]
+    },
+    "extraction": {
+        "method": "7z x",
+        "exitCode": 0,
+        "fileCount": 12,
+        "confirmedPresent": [
+            "cip-desktop.exe",
+            "WebView2Loader.dll",
+            "libstdc++-6.dll",
+            "libgcc_s_seh-1.dll",
+            "libwinpthread-1.dll",
+            "uninstall.exe"
+        ]
+    },
+    "symbolRegressionCheck": {
+        "method": "x86_64-w64-mingw32-strings cip-desktop.exe | grep -c <symbol>, run against the extracted installer's main executable. Every tripwire from Phase 24.3.2's own baseline (the most recent prior rebuild) was re-checked.",
+        "tripwiresFromPriorPhases": {
+            "rejection_echo_count": 5,
+            "find_rejected_suggestion_for_reference": 1,
+            "record_rejection_echo": 1,
+            "silentWindowsSkipped": 1,
+            "audioErrorText": 1,
+            "speechErrorText": 1,
+            "enroll_acoustic_reference": 2,
+            "list_acoustic_enrollments": 2,
+            "remove_acoustic_reference": 2,
+            "whisper_full_with_state": 96,
+            "finalize_bible_fuller_context_retry": 2,
+            "persist_detections_and_suggestions": 1,
+            "build_bible_detection_analytics": 0,
+            "get_bible_detection_analytics": 2,
+            "OutcomeCounts": 1,
+            "retry_paraphrase_or_semantic_with_fuller_context": 2,
+            "normalize_word_token": 1,
+            "fuzzy_match_book": 1,
+            "canonicalize_book": 1,
+            "correct_scripture_context": 2,
+            "last_feed_was_vad_early_flush": 1,
+            "feed_audio": 4,
+            "classify_model_size_tier": 0,
+            "get_prepared_item_slide": 2,
+            "decode_pass": 1,
+            "try_interim_decode": 1,
+            "should_flush_early": 0,
+            "should_attempt_interim_decode": 0,
+            "transcribe_once": 3,
+            "take_last_final_window_audio": 2,
+            "spawn_quality_worker": 3,
+            "persist_transcript_correction": 1,
+            "install_whisper_quality_model": 2,
+            "classify_quality_backlog": 0
+        },
+        "tripwiresFromPriorPhasesDeviation": "Two, both investigated and confirmed benign codegen/inlining artifacts with zero source change: (1) build_bible_detection_analytics dropped from its Phase 24.3.2 baseline of 1 to 0 this rebuild. `git diff 1ea3124 8949b4c -- apps/desktop/src-tauri/src/bible_detection_analytics.rs` is byte-for-byte empty, and the function has exactly one call site (commands.rs's get_bible_detection_analytics command) - a textbook LLVM single-call-site inlining target, matching the exact same already-established pattern as classify_model_size_tier/should_flush_early/should_attempt_interim_decode/classify_quality_backlog (all 0 in this and prior baselines). (2) retry_paraphrase_or_semantic_with_fuller_context returned to 2 this rebuild, up from Phase 24.3.2's own investigated baseline of 1 (itself down from Phase 24.3.1's baseline of 2). `git diff 1ea3124 8949b4c -- apps/desktop/src-tauri/src/pipeline.rs core/service/src/bible_intelligence.rs` is byte-for-byte empty; `nm | c++filt` confirms both the cip_desktop_lib::pipeline copy and the cip_core_service::bible_intelligence copy are present again as separate linked symbols - the same two genuinely distinct, unchanged functions sharing a short name first investigated in Phase 24.3, whose individual survival as separate linker symbols has now fluctuated 1->2->1->2 across four consecutive rebuilds purely from unrelated code elsewhere in the binary shifting LLVM's per-build inlining/codegen-unit decisions, never from either function's own source changing.",
+        "newTripwiresThisPhase": {
+            "list_transcript_corrections": 0,
+            "build_session_report": 1,
+            "build_human_summary": 0,
+            "export_session_report": 3,
+            "build_service_report": 3
+        },
+        "newTripwiresThisPhaseNote": "list_transcript_corrections and build_human_summary show 0, matching the same established single-call-site-inlining pattern as every other 0-count tripwire in this table (list_transcript_corrections is called once, from build_session_report; build_human_summary is called once, from build_session_report). build_session_report (1) and export_session_report (3) both confirmed present and compiled in. build_service_report rose from its own implicit baseline (present but never individually tracked as a tripwire before this phase, since Phase 5.1) to 3 - consistent with Phase 25 adding a second call site (session_report::build_session_report now also calls it, alongside the pre-existing commands::get_service_report), each producing its own reference/symbol occurrence in the compiled string table."
+    },
+    "frontendTextSearchLimitation": "Not applicable this phase - the Rust-side changes are the substantive proof; the frontend changes (appConfig.ts/domain/service.ts type mirrors, commands.ts wrapper, HistoryView.tsx export button) were verified via npm run typecheck/lint/test/build, all clean, per docs/phase-25-audit.md's own Full regression result section.",
+    "architecturalSafetyNotes": [
+        "Zero changes to any existing Tauri command's signature or behavior from a caller's perspective, zero changes to any existing event's payload shape, zero new migrations, zero new events - one new command (export_session_report).",
+        "build_service_report's signature change (two new parameters) is backwards-incompatible at the Rust level by design - the compiler enforces every call site (there is exactly one, get_service_report) passes the new speech_quality_diagnostics/audio_error arguments, so no call site could silently miss them.",
+        "export_session_report never mutates any table - it only reads already-persisted rows (the same functions get_service_report/list_transcript/list_timeline/list_suggestions already call) and writes a new file to an operator-chosen directory.",
+        "Every prior-phase command and symbol remains present and functionally unregressed - two symbol-count deviations this rebuild, both investigated and confirmed to be benign codegen/inlining artifacts with zero source change to any implicated function."
+    ],
+    "environmentCStatus": "Not yet performed. This phase's own artifact (the exported session report) is what would let a real Windows-hardware test finally close Environment C for the wider dual-tier pipeline (Phase 24.3) with a complete, structured record rather than a verbal description - but the export feature itself, like every other phase this session, has not yet been exercised on real Windows hardware. See docs/phase-25-audit.md's own Known Limitations."
+}
