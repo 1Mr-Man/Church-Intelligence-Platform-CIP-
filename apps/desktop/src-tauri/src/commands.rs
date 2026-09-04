@@ -1485,6 +1485,15 @@ pub struct SpeechQualityRuntimeDiagnostics {
     pub jobs_submitted: u64,
     pub jobs_dropped_backlog: u64,
     pub jobs_completed: u64,
+    /// Phase 24.3.2: consecutive jobs dropped since the worker last
+    /// actually processed one - the raw signal `backlog_state` below is
+    /// derived from. See `state::SpeechQualityDiagnostics::consecutive_jobs_dropped`'s
+    /// own docs.
+    pub consecutive_jobs_dropped: u64,
+    /// Derived from `consecutive_jobs_dropped` against fixed thresholds -
+    /// see `classify_quality_backlog`. Never stored redundantly; mirrors
+    /// `overload_state`'s own "computed fresh at read time" discipline.
+    pub backlog_state: QualityBacklogState,
     pub last_error: Option<String>,
 }
 
@@ -1526,6 +1535,53 @@ fn classify_overload(pending_ms: u64) -> OverloadState {
         OverloadState::Busy
     } else {
         OverloadState::Normal
+    }
+}
+
+/// Phase 24.3.2: the quality-tier's operator-visible backlog state -
+/// mirrors `OverloadState`'s shape (same four labels), but derived from a
+/// *streak* of consecutive dropped jobs
+/// (`state::SpeechQualityDiagnostics::consecutive_jobs_dropped`) rather
+/// than milliseconds of queued audio. The fast tier's own
+/// `queue_pending_ms` is a continuous quantity (audio keeps arriving
+/// whether or not the engine keeps up); the quality tier's jobs arrive as
+/// discrete, infrequent events (at most one per fast-tier final window),
+/// so a small integer streak - not a duration - is the honest unit here.
+/// Never persisted or set directly; always computed fresh at diagnostics-
+/// read time, same discipline as `classify_overload`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualityBacklogState {
+    #[default]
+    Normal,
+    Busy,
+    FallingBehind,
+    Overloaded,
+}
+
+/// Streak thresholds (consecutive dropped quality jobs since the worker
+/// last actually processed one). Deliberately small integers, not
+/// milliseconds - see `QualityBacklogState`'s own docs for why. A single
+/// drop is the common, usually-harmless case (the fast tier just produced
+/// two final windows close together while the quality worker was mid-
+/// decode on the first); a streak of `OVERLOADED_DROP_STREAK` or more in a
+/// row is real, sustained evidence the configured quality model is too
+/// slow for this hardware at this cadence, not a transient blip.
+const BUSY_DROP_STREAK: u64 = 1;
+const FALLING_BEHIND_DROP_STREAK: u64 = 2;
+const OVERLOADED_DROP_STREAK: u64 = 3;
+
+/// Classifies the quality tier's current drop streak for the operator -
+/// mirrors `classify_overload`'s own pure, directly-testable style.
+fn classify_quality_backlog(consecutive_jobs_dropped: u64) -> QualityBacklogState {
+    if consecutive_jobs_dropped >= OVERLOADED_DROP_STREAK {
+        QualityBacklogState::Overloaded
+    } else if consecutive_jobs_dropped >= FALLING_BEHIND_DROP_STREAK {
+        QualityBacklogState::FallingBehind
+    } else if consecutive_jobs_dropped >= BUSY_DROP_STREAK {
+        QualityBacklogState::Busy
+    } else {
+        QualityBacklogState::Normal
     }
 }
 
@@ -1685,6 +1741,8 @@ pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> Pilo
             jobs_submitted: diag.jobs_submitted,
             jobs_dropped_backlog: diag.jobs_dropped_backlog,
             jobs_completed: diag.jobs_completed,
+            consecutive_jobs_dropped: diag.consecutive_jobs_dropped,
+            backlog_state: classify_quality_backlog(diag.consecutive_jobs_dropped),
             last_error: diag.last_error,
         }
     };
@@ -2580,6 +2638,20 @@ fn spawn_quality_worker(app: AppHandle, rx: mpsc::Receiver<QualityJob>) {
                 engine.transcribe_once(&job.audio, job.language_hint.as_deref())
             };
 
+            // Phase 24.3.2: reaching this point means the worker actually
+            // dequeued and processed a job - real evidence it is keeping
+            // up, regardless of what this particular job's outcome turns
+            // out to be (silence/placeholder/error all still count). See
+            // `QualityBacklogState`'s own docs for why this streak, not
+            // the cumulative `jobs_dropped_backlog`, is what an operator
+            // actually needs to tell "one transient spike" apart from
+            // "this hardware can't keep up with this model."
+            state
+                .speech_quality_diagnostics
+                .lock()
+                .expect("speech_quality_diagnostics mutex poisoned")
+                .consecutive_jobs_dropped = 0;
+
             let quality_transcript = match outcome {
                 Ok(Some(qt)) => qt,
                 Ok(None) => continue,
@@ -3048,11 +3120,16 @@ fn handle_audio_chunk(
                         .jobs_submitted += 1;
                 }
                 Err(_) => {
-                    state
+                    // Phase 24.3.2: `consecutive_jobs_dropped` tracks the
+                    // streak alongside the cumulative counter -
+                    // `spawn_quality_worker` resets it back to 0 the
+                    // moment it next actually processes a job.
+                    let mut diag = state
                         .speech_quality_diagnostics
                         .lock()
-                        .expect("speech_quality_diagnostics mutex poisoned")
-                        .jobs_dropped_backlog += 1;
+                        .expect("speech_quality_diagnostics mutex poisoned");
+                    diag.jobs_dropped_backlog += 1;
+                    diag.consecutive_jobs_dropped += 1;
                 }
             }
         }
@@ -7901,6 +7978,43 @@ mod tests {
     }
 
     #[test]
+    fn classify_quality_backlog_reports_normal_with_no_recent_drops() {
+        assert_eq!(classify_quality_backlog(0), QualityBacklogState::Normal);
+    }
+
+    #[test]
+    fn classify_quality_backlog_reports_busy_on_a_single_isolated_drop() {
+        assert_eq!(classify_quality_backlog(1), QualityBacklogState::Busy);
+    }
+
+    #[test]
+    fn classify_quality_backlog_reports_falling_behind_on_two_consecutive_drops() {
+        assert_eq!(
+            classify_quality_backlog(2),
+            QualityBacklogState::FallingBehind
+        );
+    }
+
+    #[test]
+    fn classify_quality_backlog_reports_overloaded_at_and_above_three_consecutive_drops() {
+        assert_eq!(classify_quality_backlog(3), QualityBacklogState::Overloaded);
+        assert_eq!(
+            classify_quality_backlog(1000),
+            QualityBacklogState::Overloaded
+        );
+    }
+
+    #[test]
+    fn classify_quality_backlog_recovers_back_to_normal_once_the_streak_resets() {
+        // Same pure-function property `classify_overload_recovers_back_to_normal_once_backlog_drains`
+        // proves for the fast tier: no hidden hysteresis/latching state that
+        // could get stuck reporting overloaded after the streak actually
+        // resets to 0.
+        assert_eq!(classify_quality_backlog(5), QualityBacklogState::Overloaded);
+        assert_eq!(classify_quality_backlog(0), QualityBacklogState::Normal);
+    }
+
+    #[test]
     fn saturating_sub_u64_never_underflows() {
         let counter = AtomicU64::new(5);
         saturating_sub_u64(&counter, 10);
@@ -8551,6 +8665,8 @@ mod tests {
                 jobs_submitted: 0,
                 jobs_dropped_backlog: 0,
                 jobs_completed: 0,
+                consecutive_jobs_dropped: 0,
+                backlog_state: QualityBacklogState::Normal,
                 last_error: None,
             },
             audio_devices: Vec::new(),

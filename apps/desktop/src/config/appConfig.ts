@@ -165,6 +165,16 @@ export interface SpeechQualityRuntimeDiagnostics {
   /** Jobs that produced a real, non-empty correction routed through the
    * pipeline as a new, linked transcript segment. */
   jobsCompleted: number;
+  /** Phase 24.3.2: consecutive jobs dropped since the worker last actually
+   * processed one - the raw signal `backlogState` below is derived from. */
+  consecutiveJobsDropped: number;
+  /** Derived from `consecutiveJobsDropped` against fixed thresholds - see
+   * `commands.rs::classify_quality_backlog`. A single drop reads `"busy"`
+   * (usually harmless - the fast tier just produced two windows close
+   * together); a streak of 3+ reads `"overloaded"` - real, sustained
+   * evidence the configured quality model is too slow for this hardware
+   * at this cadence, not a transient blip. */
+  backlogState: "normal" | "busy" | "falling_behind" | "overloaded";
   lastError: string | null;
 }
 

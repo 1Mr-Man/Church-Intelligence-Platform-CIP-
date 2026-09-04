@@ -238,14 +238,22 @@ N events" assertion was updated from 55 to 56 to match the new
   with no jobs to process. Entirely opt-in (no quality model installed =
   zero extra cost, verified by `speech_quality_ready` gating the channel/
   worker spawn), but a real cost once an operator does install one.
-- **The quality worker can fall behind and silently drop jobs** - by
+- ~~The quality worker can fall behind and silently drop jobs - by
   design (a slower model should never block the fast tier), but an
   operator watching `jobsDroppedBacklog` climb has no way from this UI
   alone to distinguish "the model is simply too slow for this hardware"
-  from "a transient spike." `docs/phase-3-8-7-3-audit.md`'s backpressure
-  work for the *fast* tier's own backlog does not apply here - the
-  quality channel is deliberately much simpler (drop-newest on a small
-  fixed-capacity channel, no overload-drain state machine).
+  from "a transient spike."~~ **Fixed in Phase 24.3.2** - see
+  `docs/phase-24-3-2-audit.md`. Diagnostics now also expose
+  `consecutiveJobsDropped` (a streak, reset the moment the worker
+  processes any job) and a derived `backlogState` label
+  (normal/busy/falling_behind/overloaded), surfaced in
+  `PilotDiagnosticsPanel`. The cumulative `jobsDroppedBacklog` counter is
+  unchanged and still present. `docs/phase-3-8-7-3-audit.md`'s
+  backpressure work for the *fast* tier's own backlog still does not
+  apply here - the quality channel is deliberately much simpler
+  (drop-newest on a small fixed-capacity channel, no overload-drain state
+  machine); Phase 24.3.2 only adds a streak-based label, not a new
+  backpressure mechanism.
 - **No history/replay view of past corrections.** `transcript_corrections`
   persists the link durably, but no command/UI reads it back after the
   live session - an operator reviewing history after a service sees only

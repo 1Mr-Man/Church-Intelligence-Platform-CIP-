@@ -46,6 +46,19 @@ function overloadStateLabel(state: PilotDiagnostics["speech"]["overloadState"]):
   return OVERLOAD_STATE_LABELS[state];
 }
 
+/** Phase 24.3.2: mirrors `OVERLOAD_STATE_LABELS` above, for the quality
+ * tier's own streak-based backlog state (`classify_quality_backlog`). */
+const QUALITY_BACKLOG_STATE_LABELS: Record<PilotDiagnostics["speechQuality"]["backlogState"], string> = {
+  normal: "Normal",
+  busy: "Busy (one recent drop - likely a brief spike)",
+  falling_behind: "Falling behind (2 drops in a row)",
+  overloaded: "Overloaded - this model may be too slow for this hardware",
+};
+
+function qualityBacklogStateLabel(state: PilotDiagnostics["speechQuality"]["backlogState"]): string {
+  return QUALITY_BACKLOG_STATE_LABELS[state];
+}
+
 export function PilotDiagnosticsPanel() {
   const [diagnostics, setDiagnostics] = useState<PilotDiagnostics | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -260,7 +273,13 @@ export function PilotDiagnosticsPanel() {
                     Jobs: {diagnostics.speechQuality.jobsCompleted} completed / {diagnostics.speechQuality.jobsSubmitted}{" "}
                     submitted
                     {diagnostics.speechQuality.jobsDroppedBacklog > 0 && (
-                      <> ({diagnostics.speechQuality.jobsDroppedBacklog} dropped - quality worker still catching up)</>
+                      <> ({diagnostics.speechQuality.jobsDroppedBacklog} dropped total)</>
+                    )}
+                  </div>
+                  <div>
+                    Backlog status: <strong>{qualityBacklogStateLabel(diagnostics.speechQuality.backlogState)}</strong>
+                    {diagnostics.speechQuality.consecutiveJobsDropped > 0 && (
+                      <> ({diagnostics.speechQuality.consecutiveJobsDropped} dropped in a row right now)</>
                     )}
                   </div>
                   {diagnostics.speechQuality.lastError && <div>Last error: {diagnostics.speechQuality.lastError}</div>}

@@ -204,6 +204,17 @@ pub struct SpeechQualityDiagnostics {
     /// Quality jobs the worker actually re-decoded into a real, non-empty
     /// correction that was routed through the pipeline.
     pub jobs_completed: u64,
+    /// Phase 24.3.2: how many jobs in a row were dropped (channel full)
+    /// since the quality worker last actually dequeued and processed one -
+    /// reset to 0 by `spawn_quality_worker` the moment it processes any
+    /// job (whatever the outcome), incremented by `handle_audio_chunk`
+    /// every time `try_send` fails. Distinct from the cumulative
+    /// `jobs_dropped_backlog` above: this is a *streak*, the raw signal
+    /// `commands::classify_quality_backlog` derives an operator-facing
+    /// label from - see that function's own docs for why a streak (not a
+    /// cumulative count) is what actually distinguishes "the model is
+    /// genuinely too slow for this hardware" from "one transient spike."
+    pub consecutive_jobs_dropped: u64,
     pub last_error: Option<String>,
 }
 
