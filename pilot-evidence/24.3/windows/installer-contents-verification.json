@@ -1,0 +1,90 @@
+{
+    "phase": "24.3",
+    "summary": "Environment A direct-binary proof that Phase 24.3 (true dual-tier Whisper: a second, optional quality-tier speech engine + one-shot re-transcription pipeline) is genuinely compiled into this rebuilt installer, with zero functional regression to every prior-phase Rust symbol.",
+    "gitCommit": "c9f3ef08c42c82df6c74a918090285f0f7b286f0",
+    "gitCommitShort": "c9f3ef0",
+    "gitCommitNote": "This is the source tree commit (Phase 24.3's own commit) this rebuild was performed against. Phase 24.3 touches core/ai/src/speech_engine.rs and lib.rs, ai/speech/src/whisper.rs, apps/desktop/src-tauri/src/{config,state,lib,commands,persistence,events}.rs, database/{migrations/0019_transcript_corrections.sql,src/migrations.rs}, and the frontend (domain/ai.ts, lib/{commands,liveEvents}.ts, config/appConfig.ts, components/LiveChurchBrain.{tsx,css}, components/workspace/PilotDiagnosticsPanel.tsx, events/eventNames.{ts,test.ts}). This is the third consecutive rebuild this session (following Phase 24.1's gitCommit 472b91a and Phase 24.2's gitCommit b668be5) - all three closed real gaps identified by continuing directly from the operator's own follow-up direction.",
+    "buildScript": "scripts/build-windows-whisper.sh",
+    "buildLog": "ran directly in this session (not committed - ephemeral build log)",
+    "installer": {
+        "path": "release/windows/Church Intelligence Platform_0.1.0_x64-setup.exe",
+        "fileSizeBytes": 14421831,
+        "sha256": "722961a3c490f85e41d99ca7a0511ad2edaa18ae474e3b839e3c027900214589",
+        "builtAtUtc": "2026-09-04T14:10:00Z",
+        "target": "x86_64-pc-windows-gnu",
+        "ggmlTwoPassFixApplied": true,
+        "ggmlTwoPassFixNote": "First build attempt failed as expected on the known whisper-rs-sys ggml lib-name defect; the build script applied its established fix and the retry succeeded - the same harmless, unrelated build-toolchain quirk documented and handled identically in every prior whisper-enabled Windows rebuild this project has done.",
+        "pnpmBuildSucceeded": true,
+        "nsisPackagingSucceeded": true,
+        "runtimeDllsConfirmedByBuildScript": [
+            "libstdc++-6.dll",
+            "libgcc_s_seh-1.dll",
+            "libwinpthread-1.dll"
+        ]
+    },
+    "extraction": {
+        "method": "7z x",
+        "exitCode": 0,
+        "fileCount": 12,
+        "confirmedPresent": [
+            "cip-desktop.exe",
+            "WebView2Loader.dll",
+            "libstdc++-6.dll",
+            "libgcc_s_seh-1.dll",
+            "libwinpthread-1.dll",
+            "uninstall.exe"
+        ]
+    },
+    "symbolRegressionCheck": {
+        "method": "x86_64-w64-mingw32-strings cip-desktop.exe | grep -c <symbol>, run against the extracted installer's main executable. Every tripwire from Phase 24.2's own baseline (the most recent prior rebuild) was re-checked.",
+        "tripwiresFromPriorPhases": {
+            "rejection_echo_count": 5,
+            "find_rejected_suggestion_for_reference": 1,
+            "record_rejection_echo": 1,
+            "silentWindowsSkipped": 1,
+            "audioErrorText": 1,
+            "speechErrorText": 1,
+            "enroll_acoustic_reference": 2,
+            "list_acoustic_enrollments": 2,
+            "remove_acoustic_reference": 2,
+            "whisper_full_with_state": 96,
+            "finalize_bible_fuller_context_retry": 2,
+            "persist_detections_and_suggestions": 1,
+            "build_bible_detection_analytics": 1,
+            "get_bible_detection_analytics": 2,
+            "OutcomeCounts": 1,
+            "retry_paraphrase_or_semantic_with_fuller_context": 2,
+            "normalize_word_token": 1,
+            "fuzzy_match_book": 1,
+            "canonicalize_book": 1,
+            "correct_scripture_context": 2,
+            "last_feed_was_vad_early_flush": 1,
+            "feed_audio": 4,
+            "classify_model_size_tier": 0,
+            "get_prepared_item_slide": 2,
+            "decode_pass": 1,
+            "try_interim_decode": 1,
+            "should_flush_early": 0,
+            "should_attempt_interim_decode": 0
+        },
+        "tripwiresFromPriorPhasesDeviation": "One, investigated and confirmed benign: retry_paraphrase_or_semantic_with_fuller_context read 1 in Phase 24.2's own baseline, 2 here. Demangling both matches (via the same strings output) shows they are two genuinely distinct, pre-existing functions that happen to share a short name - `cip_desktop_lib::pipeline::retry_paraphrase_or_semantic_with_fuller_context` (apps/desktop's own orchestration wrapper) and `cip_core_service::bible_intelligence::retry_paraphrase_or_semantic_with_fuller_context` (the core crate's underlying implementation it calls into). Neither function's source changed this phase (pipeline.rs and core/service are both untouched in this phase's diff) - this is release-mode inlining variance shifting whether the linker's string-constant deduplication happened to merge the two symbols' backtrace-table strings into one entry or keep them as two, the same class of benign, already-documented variance as should_flush_early/classify_model_size_tier (Phase 21/22) reading 0 in some builds. All 27 other pre-existing tripwire symbols matched their Phase 24.2 baseline count exactly.",
+        "newTripwiresThisPhase": {
+            "transcribe_once": 3,
+            "take_last_final_window_audio": 2,
+            "spawn_quality_worker": 3,
+            "persist_transcript_correction": 1,
+            "install_whisper_quality_model": 2,
+            "QualityTranscript": 0,
+            "note": "transcribe_once/take_last_final_window_audio (SpeechEngine trait methods, real overrides on WhisperSpeechEngine), spawn_quality_worker/install_whisper_quality_model (new commands.rs functions), and persist_transcript_correction (new persistence.rs function) are all confirmed present and compiled in. QualityTranscript (a plain data-only struct with no methods of its own) has no symbol table entry, matching the same benign class already documented for other data-only types in this project (e.g. DecodeOutcome was never tracked as a tripwire for the same reason) - its correctness is proven by the config.rs/persistence.rs unit tests and successful compilation/typechecking against its real field usage, not symbol presence."
+        }
+    },
+    "frontendTextSearchLimitation": "The frontend bundle is not searchable as plain strings inside cip-desktop.exe the same way Rust symbols are - the new quality-tier diagnostics section in PilotDiagnosticsPanel.tsx, the TRANSCRIPT_CORRECTED event handling in LiveChurchBrain.tsx, and the new commands.ts/liveEvents.ts wrappers were not independently string-searched, consistent with every prior phase's methodology. Frontend correctness rests on npm run typecheck's success, the full 303/303 frontend test pass (unchanged count - only eventNames.test.ts's 'exactly N events' assertion was updated from 55 to 56), and npm run build's success - real-browser event-simulation verification (as Phase 24.2 performed for its own frontend change) was not performed this phase; see docs/phase-24-3-audit.md's own 'Real-browser verification' section for why it was judged not applicable to this phase's actual risk surface (two Whisper model instances and a second thread, not frontend rendering logic).",
+    "architecturalSafetyNotes": [
+        "Zero changes to any existing Tauri command's signature or behavior, zero changes to any existing event's payload shape, zero changes to any existing migration.",
+        "Two new Tauri commands (install_whisper_quality_model, cfg-gated identically to install_whisper_model), one new event (TRANSCRIPT_CORRECTED), one new migration (0019_transcript_corrections, purely additive - a new table, no existing table altered).",
+        "The quality tier is entirely opt-in and gated on state.speech_quality_ready at every entry point (channel/worker spawn in start_listening, diagnostics section visibility) - an operator who never installs a second model file gets zero new threads, zero new channel overhead, and zero behavior change to the fast tier's own live pipeline.",
+        "transcribe_once/take_last_final_window_audio never touch WhisperSpeechEngine's own self.buffer/self.elapsed_ms/self.sequence/self.window_id - confirmed by direct code review and preserved by construction (take_last_final_window_audio only ever takes an already-separately-stored Option<Vec<i16>>, transcribe_once takes &self, not &mut self) - so a second engine instance's transcribe_once call can never disturb the first engine's own live window.",
+        "Every prior-phase command and symbol remains present and unregressed - 27 of 28 pre-existing tripwires matched exactly, the 28th (retry_paraphrase_or_semantic_with_fuller_context) investigated and confirmed a benign linker-level artifact of two genuinely distinct, unchanged functions, not a regression."
+    ],
+    "environmentCStatus": "Not yet performed. This phase's entire real risk surface - two concurrently loaded Whisper models, a second worker thread, real audio hand-off between them, real decode timing/resource cost - has never run against real microphone audio with two real model files installed on real hardware. See docs/phase-24-3-audit.md's Known Limitations for the full, honest accounting of what remains unconfirmed."
+}
