@@ -253,15 +253,13 @@ N events" assertion was updated from 55 to 56 to match the new
   visual indication it was a correction (the live badge only exists while
   `LiveChurchBrain`'s own in-memory `correctedTextBySegmentId` map is
   populated for that session).
-- **`transcribe_once`'s language conditioning always uses the quality
-  engine's own `requested_language`** (defaulting to `"en"`, settable via
-  the existing `set_language`) - it is never told what language the fast
-  tier detected for that specific window, so a service using `"auto"`
-  language detection could see the two tiers condition on different
-  languages for the same audio. Not a defect this phase introduces (the
-  fast tier's own per-window detected language was never threaded
-  anywhere before this), but a real, undocumented-until-now gap in how
-  far language auto-detection actually reaches.
+- ~~`transcribe_once`'s language conditioning always uses the quality
+  engine's own `requested_language`~~ **Fixed in Phase 24.3.1** - see
+  `docs/phase-24-3-1-audit.md`. `transcribe_once` now accepts a
+  `language_hint` the caller populates from the fast tier's own
+  per-window detected language, so both tiers condition on the same,
+  real, per-window evidence rather than potentially disagreeing
+  defaults.
 - **Model file size/latency tradeoff is entirely the operator's problem to
   reason about** - `install_whisper_quality_model` validates that a file
   loads as a real Whisper model, never that it is meaningfully "better"

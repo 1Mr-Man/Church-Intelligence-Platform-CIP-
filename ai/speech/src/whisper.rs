@@ -107,6 +107,15 @@
 //! quality tier's output becomes a *new*, linked transcript segment rather
 //! than an in-place correction of the original.
 //!
+//! **Phase 24.3.1:** `transcribe_once`'s `language_hint` parameter lets
+//! the caller pass the *first* engine's own real, per-window detected
+//! language for this exact audio (`TranscriptSegment.language`), which
+//! this call conditions on instead of `self.requested_language` (this
+//! engine's own separately-configured default) - closing the gap where
+//! the two tiers could otherwise silently decode the same audio as
+//! different languages, most visibly when either engine uses `"auto"`
+//! language detection. See `docs/phase-24-3-1-audit.md`.
+//!
 //! ## Language (Phase 12)
 //!
 //! Defaults to `"en"`, preserving this engine's exact pre-Phase-12
@@ -787,9 +796,19 @@ impl SpeechEngine for WhisperSpeechEngine {
     /// independently-running `WhisperSpeechEngine` instance (a genuinely
     /// separate `WhisperContext`/model) without disturbing whatever window
     /// that instance may itself be accumulating via its own `feed_audio`.
+    ///
+    /// Phase 24.3.1: `language_hint`, when given, is used for *this call
+    /// only* - it never touches `self.requested_language` (this engine's
+    /// own `set_language`-configured default, which governs every other
+    /// decode this instance ever performs). Closes the gap where a
+    /// second, independently-configured engine's `transcribe_once` would
+    /// otherwise silently condition on its own default language rather
+    /// than the language a first engine's real decode of this exact audio
+    /// actually reported.
     fn transcribe_once(
         &self,
         audio: &[i16],
+        language_hint: Option<&str>,
     ) -> Result<Option<QualityTranscript>, SpeechEngineError> {
         if audio.is_empty() || is_silence(audio) {
             return Ok(None);
@@ -798,7 +817,8 @@ impl SpeechEngine for WhisperSpeechEngine {
             .iter()
             .map(|s| f32::from(*s) / f32::from(i16::MAX))
             .collect();
-        let outcome = Self::decode_pass(&self.ctx, &self.requested_language, &audio_f32)?;
+        let requested_language = language_hint.unwrap_or(&self.requested_language);
+        let outcome = Self::decode_pass(&self.ctx, requested_language, &audio_f32)?;
         match outcome {
             DecodeOutcome::Empty | DecodeOutcome::Placeholder => Ok(None),
             DecodeOutcome::Text {

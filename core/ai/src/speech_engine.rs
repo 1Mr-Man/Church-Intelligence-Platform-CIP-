@@ -215,9 +215,26 @@ pub trait SpeechEngine: Send + Sync {
     /// see `last_feed_was_silence`/`last_feed_was_non_speech_placeholder`
     /// for the equivalent distinction on the buffered path). A caller must
     /// never treat `Ok(None)` as an error.
+    ///
+    /// `language_hint` (Phase 24.3.1): the language the *first* engine's
+    /// own final decode of this exact audio actually reported for it
+    /// (`TranscriptSegment.language`), if any - honest evidence about
+    /// this specific audio, never a guess. When `Some`, an engine that
+    /// performs language-conditioned decoding should condition this one
+    /// call on it, overriding whatever its own `set_language` was
+    /// separately configured to (which reflects the operator's live
+    /// selection for the *first* engine, not necessarily what this
+    /// engine's own default would be) - so both tiers agree on which
+    /// language they're decoding the same audio as. `None` means the
+    /// first engine reported no language for this audio (rare - only an
+    /// engine that never detects one); a caller should then fall back to
+    /// this engine's own default. A no-op for the default `Ok(None)`
+    /// implementation, and for any engine that does not perform
+    /// language-conditioned decoding at all.
     fn transcribe_once(
         &self,
         _audio: &[i16],
+        _language_hint: Option<&str>,
     ) -> Result<Option<QualityTranscript>, SpeechEngineError> {
         Ok(None)
     }

@@ -2530,6 +2530,14 @@ struct QualityJob {
     start_ms: u64,
     end_ms: u64,
     speaker_id: Option<String>,
+    /// Phase 24.3.1: the fast tier's own real, per-window detected
+    /// language for this exact audio (`TranscriptSegment.language`), if
+    /// it reported one - passed to the quality engine's `transcribe_once`
+    /// so both tiers condition on the same language for the same audio,
+    /// rather than the quality engine silently falling back to its own,
+    /// separately-configured default. `None` only when the fast tier
+    /// itself reported none.
+    language_hint: Option<String>,
     audio: Vec<i16>,
 }
 
@@ -2569,7 +2577,7 @@ fn spawn_quality_worker(app: AppHandle, rx: mpsc::Receiver<QualityJob>) {
                     .speech_quality_engine
                     .lock()
                     .expect("speech_quality_engine mutex poisoned");
-                engine.transcribe_once(&job.audio)
+                engine.transcribe_once(&job.audio, job.language_hint.as_deref())
             };
 
             let quality_transcript = match outcome {
@@ -3028,6 +3036,7 @@ fn handle_audio_chunk(
                 start_ms: segment.start_ms,
                 end_ms: segment.end_ms,
                 speaker_id: segment.speaker_id.clone(),
+                language_hint: segment.language.clone(),
                 audio,
             };
             match tx.try_send(job) {
