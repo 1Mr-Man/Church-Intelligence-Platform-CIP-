@@ -140,15 +140,16 @@ only distinguishing signal.
 ### Engine selection and the model-download blocker
 
 `apps/desktop/src-tauri/src/lib.rs::create_speech_engine` chooses at
-startup: if built with `--features whisper` *and*
-`<model_dir>/ggml-tiny.en.bin` (`config::WHISPER_MODEL_FILENAME`) exists,
-it loads `WhisperSpeechEngine`; otherwise it falls back to
-`NullSpeechEngine` and logs why. **A missing or absent model is never
-fatal** - the application starts, the database opens, Bible search and the
-deterministic transcript harness all work; only live microphone
-transcription is unavailable, reported via `SpeechStatusKind::Unavailable`
-in `get_live_status` and surfaced as a notice in the Live Church Brain UI
-rather than a blocked startup.
+startup: if built with `--features whisper` *and* a file exists at
+`<model_dir>/ggml-tiny.en.bin` (`config::WHISPER_MODEL_FILENAME` - a fixed
+*slot* name, not a recommendation of which model to put there; see
+"Model selection and quality" below), it loads `WhisperSpeechEngine`;
+otherwise it falls back to `NullSpeechEngine` and logs why. **A missing or
+absent model is never fatal** - the application starts, the database
+opens, Bible search and the deterministic transcript harness all work;
+only live microphone transcription is unavailable, reported via
+`SpeechStatusKind::Unavailable` in `get_live_status` and surfaced as a
+notice in the Live Church Brain UI rather than a blocked startup.
 
 CIP never bundles or auto-downloads a model. In this development
 environment, obtaining one to verify end-to-end transcription was
@@ -178,13 +179,72 @@ regardless of what is configured.
   transcript from real audio through a real model file, because no model
   file could be obtained here. Anyone running CIP with network access to
   a model host (or who copies a model file in by hand) can verify this by
-  building with `--features whisper`, placing a `ggml-tiny.en.bin` (or
-  another ggml/gguf Whisper model) at `<app-data-dir>/models/`, and
-  starting a service.
+  building with `--features whisper`, installing a real ggml/gguf model
+  through System Diagnostics' "Select Existing Model File" picker (see
+  "Model selection and quality" below for which one), and starting a
+  service.
+
+### Model selection and quality (Phase 22)
+
+**`ggml-tiny.en.bin` is a fixed destination *filename*, not a
+recommendation.** `WHISPER_MODEL_FILENAME`/`whisper_model_path` name the
+one path `create_speech_engine` loads at startup - whatever real
+ggml/gguf model is installed there is what runs, regardless of what the
+name says. Earlier revisions of this document told operators to name
+their downloaded file `ggml-tiny.en.bin`, which in practice steered every
+pilot deployment toward whisper.cpp's smallest, least accurate model
+(39M/75MB parameters) - a real, verified contributor to poor
+transcription accuracy, especially on accents whisper.cpp's smallest
+model was trained on the least of. That guidance was wrong and is
+corrected here: **use System Diagnostics' "Select Existing Model File"
+picker to install whichever real model file you've downloaded** (it
+copies the file into the fixed slot and validates it loads as a real
+model first - see `install_whisper_model`'s own docs) - do not rename
+anything by hand, and do not assume `tiny.en` because of the filename you
+see in this repository's history.
+
+Recommendations, in order of what to actually install:
+
+- **Minimum for real-time detection: `base.en` or `small.en`.** Both are
+  meaningfully more accurate than `tiny.en` at a real-time-appropriate
+  inference cost, and are the first thing to try if Bible/sermon
+  detection is inaccurate, late, or rare - all three symptoms are
+  downstream of Whisper mistranscribing what was said before any
+  detection logic ever runs.
+- **Highest accuracy: `large-v3-turbo`.** Meaningfully more accurate
+  again, at real cost: `WhisperSpeechEngine` runs one inference pass
+  per buffered window (see "Interim vs. final" above and
+  `docs/phase-21-audit.md`'s VAD-triggered flush), and a larger model's
+  pass takes longer wall-clock time - so a `large-v3-turbo` window
+  finishes later than the same window would on `base.en`/`small.en`,
+  trading detection latency for detection accuracy. Try it if accuracy
+  still isn't good enough on `small.en` and later detection is an
+  acceptable cost.
+- **Multiple languages: any *non*-`.en` multilingual model
+  (`ggml-base.bin`, `ggml-small.bin`, `ggml-large-v3-turbo.bin`, ...) plus
+  selecting the language in the UI.** See "Language support" above -
+  Yoruba and Hausa are real, selectable options; Igbo is not, because
+  whisper.cpp itself has no Igbo vocabulary.
+
+**What this project does not have, and is explicitly deferring, not
+silently omitting:** CIP holds exactly one active `WhisperSpeechEngine`
+built from exactly one loaded model file (`AppState.speech_engine`,
+constructed once at startup and held for the process's life). There is no
+mechanism today for running a fast low-latency model and a separate
+high-quality model concurrently and reconciling their output - the
+architecture a genuine "fast detector + high-quality transcript" split
+would require. Building that is real, non-trivial work (a second
+`WhisperContext`, a policy for which output the pipeline trusts and when,
+and - like Phase 21's deliberately-deferred audio-overlapping windows -
+no real microphone audio in this environment to validate the reconciliation
+against) and is out of this phase's scope. The single-model
+`base.en`/`small.en`/`large-v3-turbo` recommendations above are the real,
+available accuracy levers today; a true dual-tier engine is future work,
+not implemented here.
 
 ### Model licensing
 
-Whisper model weights (e.g. `ggml-tiny.en.bin`) are published by the
+Whisper model weights (e.g. `ggml-base.en.bin`) are published by the
 [whisper.cpp project](https://github.com/ggerganov/whisper.cpp) under
 OpenAI's Whisper model license (MIT for the code that produced them;
 consult the specific model card for the weights themselves before
@@ -422,8 +482,34 @@ pnpm --filter @cip/desktop test
 `TranscriptSegment.language` is an `Option<String>` (BCP-47-ish tag, e.g.
 `"en"`), not hard-coded to English anywhere in the contract, and
 `normalize_text`'s number-word handling is English-specific by
-implementation, not by interface. Phase 1.2 does not claim Yoruba, Igbo,
-Hausa, or Nigerian Pidgin support - none of that has been implemented or
-tested - but nothing in the `TranscriptSegment`/`SpeechEngine` contracts
-assumes English, so adding another language's normalization/detection
-later does not require a contract change.
+implementation, not by interface.
+
+**This section originally said (Phase 1.2) that no non-English language was
+implemented at all - that is now stale.** Phase 12
+(`docs/phase-12-multi-language-whisper.md`) implemented real, selectable
+language support: `cip_ai_speech::SUPPORTED_LANGUAGES` offers English,
+Yoruba (`yo`), Hausa (`ha`), and Auto-detect, each a real, verified entry
+in whisper.cpp's own vocabulary table - not a guess. **Igbo is
+deliberately absent**: whisper.cpp's vocabulary has no Igbo entry at all
+(verified directly against the vendored source, not assumed), so no
+CIP-side configuration can make a Whisper model condition on it - this is
+a hard model limitation, not an oversight, and not something a future CIP
+release can add without whisper.cpp itself gaining Igbo training data.
+
+Two conditions both have to hold for a non-English selection to actually
+change what gets transcribed:
+
+1. The installed model file must be a **multilingual** model. English-only
+   files (`ggml-*.en.bin` - the entire `tiny.en`/`base.en`/`small.en`/
+   `medium.en` family) have no language tokens at all and silently keep
+   transcribing in English regardless of what's selected;
+   `WhisperSpeechEngine::is_multilingual()` (Phase 12) detects this from
+   the loaded model itself and the operator UI shows a warning
+   ("The installed Whisper model is English-only...") when a non-English
+   language is selected against one. A Nigerian pastor preaching in
+   English should keep `en` selected either way - multilingual model or
+   not, `en` is a real, correctly-handled selection, not the fallback.
+2. Nigerian Pidgin has no dedicated support and no realistic path to one:
+   it is not one of whisper.cpp's ~100 trained languages under any code,
+   so it is not offered and could not be made to work by CIP-side
+   configuration alone.

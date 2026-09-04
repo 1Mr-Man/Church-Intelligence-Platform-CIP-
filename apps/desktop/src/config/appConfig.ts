@@ -31,7 +31,17 @@ export interface AppConfig {
 export type WhisperModelDiagnostic =
   | { status: "missing"; expectedPath: string }
   | { status: "unreadable"; path: string; reason: string }
-  | { status: "present"; path: string; sizeBytes: number };
+  | {
+      status: "present";
+      path: string;
+      sizeBytes: number;
+      /** Phase 22: a heuristic, size-based guess at the model's whisper.cpp
+       * family (tiny/base/small/medium/large) - see `commands.rs`'s
+       * `classify_model_size_tier` for why `path`'s filename alone can
+       * never answer this. Never a certainty (quantized files of a larger
+       * model can be smaller than an unquantized smaller one). */
+      sizeTierHint: string;
+    };
 
 export interface DisplayDiagnostic {
   name: string | null;

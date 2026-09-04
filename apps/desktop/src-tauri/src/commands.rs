@@ -472,7 +472,49 @@ pub enum WhisperModelDiagnostic {
     Unreadable { path: String, reason: String },
     /// A readable file exists at the configured path.
     #[serde(rename_all = "camelCase")]
-    Present { path: String, size_bytes: u64 },
+    Present {
+        path: String,
+        size_bytes: u64,
+        /// Phase 22: a heuristic, size-based guess at which whisper.cpp
+        /// model family this file belongs to - see
+        /// [`classify_model_size_tier`]. Exists because `path`'s filename
+        /// is never trustworthy for this: `install_whisper_model` always
+        /// copies whatever the operator selects to the same fixed
+        /// destination filename (so the running engine can find it at a
+        /// known location), so a genuinely large, high-quality model and
+        /// the smallest possible one look identical by path alone.
+        size_tier_hint: String,
+    },
+}
+
+/// Phase 22: a heuristic, size-based guess at which whisper.cpp model
+/// "family" (tiny/base/small/medium/large) a model file belongs to.
+/// Deliberately a heuristic, not a certainty: whisper.cpp publishes
+/// quantized variants (q5_0, q5_1, q8_0) of every tier at a meaningfully
+/// smaller file size than the unquantized original, so a quantized
+/// large-class file can land in the same byte range as an unquantized
+/// small-class one - this can only ever narrow down what an operator has
+/// installed, never prove it, which is why every returned label says so.
+/// Thresholds are whisper.cpp's own documented unquantized ggml file
+/// sizes (see the model table in whisper.cpp's `models/README.md`).
+pub(crate) fn classify_model_size_tier(size_bytes: u64) -> &'static str {
+    const MIB: u64 = 1024 * 1024;
+    if size_bytes < 100 * MIB {
+        "likely tiny-class (~75MB, e.g. tiny/tiny.en) - fastest but least accurate; \
+         not recommended as the only model for Bible/sermon detection accuracy"
+    } else if size_bytes < 250 * MIB {
+        "likely base-class (~142MB, e.g. base/base.en) - a reasonable low-latency floor \
+         for real-time detection"
+    } else if size_bytes < 900 * MIB {
+        "likely small-class (~466MB, e.g. small/small.en) - a good real-time \
+         accuracy/latency balance"
+    } else if size_bytes < 2000 * MIB {
+        "likely medium-class (~1.5GB, e.g. medium/medium.en) or large-v3-turbo \
+         (~1.6GB) - higher accuracy, slower inference than small-class"
+    } else {
+        "likely large-class (~2.9GB, e.g. large-v2/large-v3) - highest accuracy, \
+         slowest inference"
+    }
 }
 
 /// Pure, directly-testable classification - the part of
@@ -496,6 +538,7 @@ fn diagnose_whisper_model(path: &std::path::Path) -> WhisperModelDiagnostic {
         Ok(_) => WhisperModelDiagnostic::Present {
             path: path.display().to_string(),
             size_bytes: metadata.len(),
+            size_tier_hint: classify_model_size_tier(metadata.len()).to_string(),
         },
         Err(e) => WhisperModelDiagnostic::Unreadable {
             path: path.display().to_string(),
@@ -8066,14 +8109,59 @@ mod tests {
         let diagnostic = diagnose_whisper_model(&path);
         let _ = std::fs::remove_file(&path);
         match diagnostic {
-            WhisperModelDiagnostic::Present { size_bytes, .. } => {
+            WhisperModelDiagnostic::Present {
+                size_bytes,
+                size_tier_hint,
+                ..
+            } => {
                 assert_eq!(
                     size_bytes,
                     "not a real model, just a readable file".len() as u64
                 );
+                assert!(size_tier_hint.contains("tiny-class"));
             }
             other => panic!("expected Present, got {other:?}"),
         }
+    }
+
+    // --- Phase 22: size-based model-tier classification ------------------
+
+    #[test]
+    fn classify_model_size_tier_labels_a_tiny_sized_file() {
+        assert!(classify_model_size_tier(75 * 1024 * 1024).contains("tiny-class"));
+    }
+
+    #[test]
+    fn classify_model_size_tier_labels_a_base_sized_file() {
+        assert!(classify_model_size_tier(142 * 1024 * 1024).contains("base-class"));
+    }
+
+    #[test]
+    fn classify_model_size_tier_labels_a_small_sized_file() {
+        assert!(classify_model_size_tier(466 * 1024 * 1024).contains("small-class"));
+    }
+
+    #[test]
+    fn classify_model_size_tier_labels_a_medium_or_turbo_sized_file() {
+        let label = classify_model_size_tier(1600 * 1024 * 1024);
+        assert!(label.contains("medium-class"));
+        assert!(label.contains("large-v3-turbo"));
+    }
+
+    #[test]
+    fn classify_model_size_tier_labels_a_large_sized_file() {
+        assert!(classify_model_size_tier(2900 * 1024 * 1024).contains("large-class"));
+    }
+
+    #[test]
+    fn classify_model_size_tier_boundaries_land_in_the_next_tier_up() {
+        // Each threshold is an exclusive lower bound of the next tier -
+        // guards against an off-by-one if the constants are edited later.
+        const MIB: u64 = 1024 * 1024;
+        assert!(classify_model_size_tier(100 * MIB).contains("base-class"));
+        assert!(classify_model_size_tier(250 * MIB).contains("small-class"));
+        assert!(classify_model_size_tier(900 * MIB).contains("medium-class"));
+        assert!(classify_model_size_tier(2000 * MIB).contains("large-class"));
     }
 
     #[test]

@@ -108,6 +108,20 @@ CIP at a different location via `CIP_WHISPER_MODEL_PATH` if you have one
 stored elsewhere. **Manual transcript entry remains fully available
 either way** — see the Quick Start above.
 
+**Which model to install matters a lot.** The default path's filename
+(`ggml-tiny.en.bin`) is a fixed storage *slot*, not a recommendation —
+whisper.cpp's smallest model is meaningfully less accurate than its
+larger ones, especially on accents it was trained on less of, and poor
+transcription is the single biggest cause of inaccurate, late, or
+infrequent Bible/sermon detection (detection can only match text Whisper
+actually produced correctly). Use System Diagnostics' "Select Existing
+Model File" button to install a real model file you've downloaded — at
+minimum `base.en` or `small.en`; `large-v3-turbo` for the highest
+accuracy CIP supports today, at the cost of slower per-window
+transcription. See `docs/live-speech.md`'s "Model selection and quality"
+section for the full comparison, and "Language support" there for Yoruba/
+Hausa (Igbo is not offered — whisper.cpp itself has no Igbo vocabulary).
+
 ## Manual Transcript Fallback
 
 If live speech is unavailable — no microphone, no model configured, or a

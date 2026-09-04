@@ -61,6 +61,32 @@ fn create_speech_engine(config: &AppConfig) -> (Box<dyn SpeechEngine>, state::Sp
         match cip_ai_speech::WhisperSpeechEngine::load(model_path) {
             Ok(engine) => {
                 log::info!(target: LogCategory::Speech.target(), "loaded local speech model from {}", model_path.display());
+                // Phase 22: the ggml-tiny.en.bin filename this project has
+                // historically recommended as a default is whisper.cpp's
+                // smallest, least accurate model - a documented, real
+                // contributor to poor transcription accuracy (especially
+                // on accents whisper.cpp's smaller models were trained on
+                // less of), which in turn starves the Bible/Sermon
+                // detection pipeline of the text it needs to match
+                // against. This is an honest, best-effort nudge from a
+                // file-size heuristic (see `commands::classify_model_size_tier`
+                // for why it can't be a certainty), not a hard block -
+                // CIP has never bundled or validated a "correct" model,
+                // and never will silently refuse to run a real model the
+                // operator chose to install.
+                if let Ok(metadata) = std::fs::metadata(model_path) {
+                    let tier = crate::commands::classify_model_size_tier(metadata.len());
+                    if tier.contains("tiny-class") {
+                        log::warn!(
+                            target: LogCategory::Speech.target(),
+                            "the loaded speech model at {} is {tier} - consider installing a \
+                             larger model (base.en or small.en at minimum) via System \
+                             Diagnostics for meaningfully better transcription accuracy, \
+                             especially on accents whisper.cpp's smallest model handles poorly",
+                            model_path.display()
+                        );
+                    }
+                }
                 let model_is_multilingual = engine.is_multilingual();
                 (
                     Box::new(engine),

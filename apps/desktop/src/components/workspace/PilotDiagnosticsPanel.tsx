@@ -22,7 +22,7 @@ function whisperModelSummary(diagnostics: PilotDiagnostics): string {
     case "unreadable":
       return `Present but unreadable at ${model.path} (${model.reason})`;
     case "present":
-      return `Present at ${model.path} (${model.sizeBytes.toLocaleString()} bytes)`;
+      return `Present at ${model.path} (${model.sizeBytes.toLocaleString()} bytes - ${model.sizeTierHint})`;
     default:
       return "Unknown";
   }
@@ -78,7 +78,10 @@ export function PilotDiagnosticsPanel() {
         setInstalling(true);
         return installWhisperModel(selected)
           .then((result) => {
-            const detail = result.status === "present" ? `${result.sizeBytes.toLocaleString()} bytes` : result.status;
+            const detail =
+              result.status === "present"
+                ? `${result.sizeBytes.toLocaleString()} bytes - ${result.sizeTierHint}`
+                : result.status;
             setInstallMessage(`Installed (${detail}). Restart CIP for it to take effect.`);
             refresh();
           })
