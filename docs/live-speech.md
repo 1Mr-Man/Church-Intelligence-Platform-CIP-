@@ -128,14 +128,36 @@ changed and nothing else observed the failure.
 `false` (interim/partial) segments are forwarded to the frontend as
 `TRANSCRIPT_UPDATED` for live display and nothing else; only `is_final:
 true` segments reach `handle_final_transcript`. whisper.cpp's `full()` call
-is synchronous over a complete buffer, so `WhisperSpeechEngine` does not
-natively produce interim results - it buffers ~3 seconds of audio and emits
-one final segment per inference pass (also on `flush()`, e.g. when capture
-stops). This is an honest reflection of the backend's real behavior, not a
-missing feature: a future engine with true streaming support would emit
-interim segments as words arrive without any change to `handle_audio_chunk`
-or the Bible Intelligence Core, since both already treat `is_final` as the
-only distinguishing signal.
+is synchronous over a complete buffer - it has no native low-latency
+streaming mode - so `WhisperSpeechEngine` buffers audio toward one
+**final** decode per window (also on `flush()`, e.g. when capture stops),
+same as always.
+
+Phase 24.2 added one **real, bounded interim decode** per window: once a
+window has buffered at least 1.5s without yet closing (no pause detected,
+hard cap not yet reached), the engine runs one additional, genuine
+whisper.cpp pass over just the audio buffered so far and emits it as an
+`is_final: false` segment sharing the same `id` the window's eventual
+final segment will carry. This is never fabricated text - it is the same
+real inference call the final decode uses, just run early on a shorter
+prefix of the same audio, so it can legitimately differ from (and is
+sometimes less accurate than) the final segment that replaces it. At most
+one interim attempt happens per window, bounding the worst-case extra
+cost to one additional decode pass, never unbounded polling. The Live
+Transcript panel shows it as a dimmed, provisional line, replaced by the
+real timestamped/scored entry once the window's final segment arrives.
+See `ai/speech/src/whisper.rs`'s own module docs ("Interim decoding") and
+`docs/phase-24-2-audit.md` for the full design.
+
+Not implemented: audio-overlapping windows (each window also decoding a
+shared slice of the previous one's tail for extra left-context). That
+different technique needs a way to reconcile text decoded twice from the
+same audio - real streaming ASR systems solve this with
+token-timestamp-based stitching, which this environment has no real,
+timing-sensitive audio to validate against. Interim decoding has no such
+problem (it decodes a non-overlapping prefix, never the same audio
+twice), which is why it was buildable here while overlapping windows
+still is not - see `docs/phase-21-audit.md` and `docs/phase-24-2-audit.md`.
 
 ### Engine selection and the model-download blocker
 

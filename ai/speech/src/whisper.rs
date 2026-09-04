@@ -18,12 +18,14 @@
 //! ## Design
 //!
 //! whisper.cpp's `full()` call is synchronous and processes a complete
-//! buffer at once - it does not natively stream interim results. This
-//! engine buffers incoming audio and runs one inference pass per window,
-//! always emitting `is_final: true` segments. It does **not** fabricate
-//! interim segments - see `docs/live-speech.md`'s "Interim vs. final"
-//! section for what a future engine with true streaming support would
-//! change.
+//! buffer at once - it does not natively stream interim results the way a
+//! true streaming ASR model would. This engine buffers incoming audio
+//! toward one **final** inference pass per window (see "Window
+//! boundaries" below), and - Phase 24.2 - additionally runs one **real**
+//! (never fabricated) interim decode partway through a longer window, so
+//! an operator watching a multi-second sentence in progress sees text
+//! sooner than waiting for the window to close. See "Interim decoding"
+//! below and `docs/live-speech.md`'s "Interim vs. final" section.
 //!
 //! ## Window boundaries (Phase 21: VAD-triggered flush)
 //!
@@ -45,8 +47,8 @@
 //!    bound and safety net: worst case, behavior is identical to the
 //!    pre-Phase-21 engine.
 //!
-//! Deliberately **not** implemented this phase: audio-overlapping windows
-//! (each window also decoding a shared slice of the previous one's tail for
+//! Deliberately **still not** implemented: audio-overlapping windows (each
+//! window also decoding a shared slice of the previous one's tail for
 //! extra left-context). That technique needs some way to reconcile the
 //! text produced from the shared audio decoded twice - real streaming ASR
 //! systems solve this with token-timestamp-based stitching, which this
@@ -55,7 +57,36 @@
 //! root cause (a boundary landing mid-word) without ever risking duplicated
 //! transcript text: a window boundary chosen at a detected pause has, by
 //! definition, no word left hanging across it. See `docs/phase-21-audit.md`
-//! for the full reasoning.
+//! for the full reasoning. Interim decoding (below) is a different, safer
+//! technique that does not touch window boundaries at all, which is why it
+//! was buildable in this container while overlapping windows still is not.
+//!
+//! ## Interim decoding (Phase 24.2)
+//!
+//! Once a window has buffered at least [`MIN_VAD_FLUSH_SAMPLES`] (1.5s)
+//! without yet closing (no pause detected, hard cap not yet reached), this
+//! engine runs one additional, genuine whisper.cpp `full()` pass over
+//! *only the audio buffered so far* and emits its result as an interim
+//! (`is_final: false`) [`TranscriptSegment`] - sharing the same `id` the
+//! window's eventual final segment will carry, per that field's own
+//! contract. This never fabricates text: it is exactly the same real
+//! inference call the final decode uses, just run early on a shorter
+//! prefix of the same audio. At most one interim decode is attempted per
+//! window (see `window_interim_decoded`) - bounding the worst-case extra
+//! cost to one additional `full()` pass per window, never unbounded
+//! polling. Interim segments are never persisted and never reach the
+//! Bible Intelligence Core - `apps/desktop/src-tauri/src/commands.rs`'s
+//! real-time worker already gated on `is_final` before this phase (see
+//! `docs/live-speech.md`'s "Interim vs. final" section), so this required
+//! zero changes outside this file.
+//!
+//! Honest limitation: a mid-buffer decode has less audio context than the
+//! eventual final decode of the complete window, so an interim segment's
+//! text can legitimately differ from (and is sometimes less accurate
+//! than) the final segment that later replaces it - this is inherent to
+//! decoding a shorter prefix, not a defect. An interim segment is always
+//! superseded by its window's final segment; nothing downstream ever
+//! treats an interim segment as authoritative.
 //!
 //! ## Language (Phase 12)
 //!
@@ -109,6 +140,13 @@ const SILENCE_RMS_THRESHOLD: f32 = 0.01;
 /// Documented reasoning, not empirically calibrated against real
 /// speech-timing data - matches every other threshold in this codebase
 /// (`SILENCE_RMS_THRESHOLD`, `MIN_PARAPHRASE_SCORE`, ...).
+///
+/// Phase 24.2: also the earliest point a window's one allotted interim
+/// decode is attempted (see the module docs' "Interim decoding" section) -
+/// deliberately reused rather than a second constant: a window can only
+/// still be buffering at this point if `should_flush_early` did *not* also
+/// fire on the same `feed_audio` call, so an interim decode and a genuine
+/// VAD flush never compete for the same window in the same call.
 const MIN_VAD_FLUSH_SAMPLES: usize = (SAMPLE_RATE_HZ as usize * 3) / 2; // 1.5s
 
 /// How much trailing near-silence in the buffer counts as a genuine
@@ -141,6 +179,19 @@ fn has_trailing_pause(buffer: &[i16]) -> bool {
 /// separately and independently.
 fn should_flush_early(buffer: &[i16]) -> bool {
     buffer.len() >= MIN_VAD_FLUSH_SAMPLES && has_trailing_pause(buffer)
+}
+
+/// Phase 24.2: whether the current window's one allotted interim decode
+/// (see the module docs' "Interim decoding" section) should be attempted
+/// right now, given the buffer's current length and whether this window
+/// has already had its attempt. Deliberately mirrors [`should_flush_early`]'s
+/// own style - a small, pure, independently-testable gate rather than
+/// inline logic buried in `feed_audio`. Callers (`feed_audio`) only ever
+/// reach this check once the hard-cap and VAD-flush checks have both
+/// already failed for the current call, so an interim attempt and a
+/// genuine flush never compete for the same window in the same call.
+fn should_attempt_interim_decode(buffer_len: usize, already_decoded_this_window: bool) -> bool {
+    !already_decoded_this_window && buffer_len >= MIN_VAD_FLUSH_SAMPLES
 }
 
 /// RMS energy of a PCM16 buffer, `0.0..=1.0` - the same formula
@@ -263,6 +314,19 @@ pub struct WhisperSpeechEngine {
     /// buffer hit the fixed `CHUNK_SAMPLES` cap - see
     /// `SpeechEngine::last_feed_was_vad_early_flush`'s own docs.
     last_feed_was_vad_early_flush: bool,
+    /// Phase 24.2: the stable id assigned to the current window's segment -
+    /// an interim decode and the final segment it settles into share this
+    /// id, per `TranscriptSegment::id`'s own contract. `None` exactly when
+    /// `buffer` is empty (no window in progress); set the moment a new
+    /// window starts buffering (see `feed_audio`), cleared when the window
+    /// closes (see `run_inference`/`discard_buffered_audio`).
+    window_id: Option<Uuid>,
+    /// Phase 24.2: whether the current window has already had its one
+    /// allotted interim decode attempt (see the module docs' "Interim
+    /// decoding" section) - bounds interim decoding to at most once per
+    /// window regardless of how many more `feed_audio` calls arrive before
+    /// the window closes for real.
+    window_interim_decoded: bool,
 }
 
 impl WhisperSpeechEngine {
@@ -294,6 +358,8 @@ impl WhisperSpeechEngine {
             last_feed_was_silence: false,
             last_feed_was_non_speech_placeholder: false,
             last_feed_was_vad_early_flush: false,
+            window_id: None,
+            window_interim_decoded: false,
         })
     }
 
@@ -310,46 +376,22 @@ impl WhisperSpeechEngine {
         self.ctx.is_multilingual()
     }
 
-    fn run_inference(&mut self) -> Result<Vec<TranscriptSegment>, SpeechEngineError> {
-        if self.buffer.is_empty() {
-            self.last_feed_triggered_inference = false;
-            self.last_feed_was_silence = false;
-            self.last_feed_was_non_speech_placeholder = false;
-            return Ok(vec![]);
-        }
-
-        let duration_ms = (self.buffer.len() as u64 * 1000) / u64::from(SAMPLE_RATE_HZ);
-        let start_ms = self.elapsed_ms;
-
-        // Phase 5.3 (VAD gating): a near-silent window still advances the
-        // clock and is still cleared, exactly as if inference had run - it
-        // just never reaches whisper.cpp, avoiding both a wasted (on slow
-        // hardware, expensive) inference pass and the hallucination risk
-        // of running Whisper on near-empty audio. See
-        // `SILENCE_RMS_THRESHOLD`'s own docs for why the cutoff is
-        // deliberately conservative.
-        if is_silence(&self.buffer) {
-            self.elapsed_ms += duration_ms;
-            self.buffer.clear();
-            self.last_feed_triggered_inference = false;
-            self.last_feed_was_silence = true;
-            self.last_feed_was_non_speech_placeholder = false;
-            return Ok(vec![]);
-        }
-        self.last_feed_was_silence = false;
-        self.last_feed_was_non_speech_placeholder = false;
-
-        let audio_f32: Vec<f32> = self
-            .buffer
-            .iter()
-            .map(|s| f32::from(*s) / f32::from(i16::MAX))
-            .collect();
-        self.elapsed_ms += duration_ms;
-        self.buffer.clear();
-        self.last_feed_triggered_inference = true;
-
-        let mut state = self
-            .ctx
+    /// Runs one real whisper.cpp `full()` pass over `audio_f32` and
+    /// classifies the result. Shared by both [`Self::run_inference`] (the
+    /// final decode) and [`Self::try_interim_decode`] (Phase 24.2's
+    /// interim decode) - the exact same real inference call either way,
+    /// never a second, fabricated code path. Deliberately takes `ctx`/
+    /// `requested_language` as plain arguments rather than `&self`/
+    /// `&mut self`: it must never touch `self.buffer`/`self.elapsed_ms`/
+    /// `self.sequence` itself, since the two callers need those mutated at
+    /// different, specific points relative to this call's own fallibility
+    /// (see each caller's own comments for why).
+    fn decode_pass(
+        ctx: &WhisperContext,
+        requested_language: &str,
+        audio_f32: &[f32],
+    ) -> Result<DecodeOutcome, SpeechEngineError> {
+        let mut state = ctx
             .create_state()
             .map_err(|e| SpeechEngineError::TranscriptionFailed(e.to_string()))?;
 
@@ -375,10 +417,10 @@ impl WhisperSpeechEngine {
         // language - `"auto"` is `whisper-rs`'s own documented literal
         // for auto-detection (equivalent to passing `None`), so no
         // special-casing is needed here.
-        params.set_language(Some(&self.requested_language));
+        params.set_language(Some(requested_language));
 
         state
-            .full(params, &audio_f32)
+            .full(params, audio_f32)
             .map_err(|e| SpeechEngineError::TranscriptionFailed(e.to_string()))?;
 
         // Phase 12: read back the language whisper.cpp *actually* used
@@ -391,7 +433,7 @@ impl WhisperSpeechEngine {
             .ok()
             .and_then(whisper_rs::get_lang_str)
             .map(str::to_string)
-            .unwrap_or_else(|| self.requested_language.clone());
+            .unwrap_or_else(|| requested_language.to_string());
 
         let num_segments = state
             .full_n_segments()
@@ -423,7 +465,7 @@ impl WhisperSpeechEngine {
         }
         let text = text.trim().to_string();
         if text.is_empty() {
-            return Ok(vec![]);
+            return Ok(DecodeOutcome::Empty);
         }
 
         // Phase 14: whisper.cpp's own known non-speech placeholder captions
@@ -433,8 +475,7 @@ impl WhisperSpeechEngine {
         // said them. See docs/phase-14-audit.md for the real-pilot evidence
         // that prompted this.
         if is_non_speech_placeholder(&text) {
-            self.last_feed_was_non_speech_placeholder = true;
-            return Ok(vec![]);
+            return Ok(DecodeOutcome::Placeholder);
         }
 
         let (confidence_score, confidence_note) = if prob_count > 0 {
@@ -452,24 +493,167 @@ impl WhisperSpeechEngine {
             )
         };
 
-        let segment = TranscriptSegment {
-            id: Uuid::new_v4(),
-            sequence: self.sequence,
+        Ok(DecodeOutcome::Text {
             text,
-            is_final: true,
             confidence: ConfidenceResult::new(
                 confidence_score,
                 ConfidenceSource::Model,
                 Some(confidence_note),
             ),
-            start_ms,
-            end_ms: self.elapsed_ms,
-            language: Some(detected_language),
-            speaker_id: None,
-        };
-        self.sequence += 1;
-        Ok(vec![segment])
+            language: detected_language,
+        })
     }
+
+    fn run_inference(&mut self) -> Result<Vec<TranscriptSegment>, SpeechEngineError> {
+        if self.buffer.is_empty() {
+            self.last_feed_triggered_inference = false;
+            self.last_feed_was_silence = false;
+            self.last_feed_was_non_speech_placeholder = false;
+            return Ok(vec![]);
+        }
+
+        let duration_ms = (self.buffer.len() as u64 * 1000) / u64::from(SAMPLE_RATE_HZ);
+        let start_ms = self.elapsed_ms;
+
+        // Phase 5.3 (VAD gating): a near-silent window still advances the
+        // clock and is still cleared, exactly as if inference had run - it
+        // just never reaches whisper.cpp, avoiding both a wasted (on slow
+        // hardware, expensive) inference pass and the hallucination risk
+        // of running Whisper on near-empty audio. See
+        // `SILENCE_RMS_THRESHOLD`'s own docs for why the cutoff is
+        // deliberately conservative.
+        if is_silence(&self.buffer) {
+            self.elapsed_ms += duration_ms;
+            self.buffer.clear();
+            self.window_id = None;
+            self.window_interim_decoded = false;
+            self.last_feed_triggered_inference = false;
+            self.last_feed_was_silence = true;
+            self.last_feed_was_non_speech_placeholder = false;
+            return Ok(vec![]);
+        }
+        self.last_feed_was_silence = false;
+        self.last_feed_was_non_speech_placeholder = false;
+
+        // Buffer/clock/window state is always consumed here, *before* the
+        // fallible decode call below - exactly like the silence branch
+        // above already had to be, so a decode error (whisper.cpp itself
+        // failing) never leaves stale audio stuck in the buffer forever,
+        // retried on every subsequent call. `audio_f32` owns its own copy,
+        // so clearing `self.buffer` immediately after building it is safe.
+        let audio_f32: Vec<f32> = self
+            .buffer
+            .iter()
+            .map(|s| f32::from(*s) / f32::from(i16::MAX))
+            .collect();
+        self.elapsed_ms += duration_ms;
+        self.buffer.clear();
+        self.last_feed_triggered_inference = true;
+        let window_id = self.window_id.take().unwrap_or_else(Uuid::new_v4);
+        self.window_interim_decoded = false;
+
+        let outcome = Self::decode_pass(&self.ctx, &self.requested_language, &audio_f32)?;
+
+        match outcome {
+            DecodeOutcome::Empty => Ok(vec![]),
+            DecodeOutcome::Placeholder => {
+                self.last_feed_was_non_speech_placeholder = true;
+                Ok(vec![])
+            }
+            DecodeOutcome::Text {
+                text,
+                confidence,
+                language,
+            } => {
+                let segment = TranscriptSegment {
+                    id: window_id,
+                    sequence: self.sequence,
+                    text,
+                    is_final: true,
+                    confidence,
+                    start_ms,
+                    end_ms: self.elapsed_ms,
+                    language: Some(language),
+                    speaker_id: None,
+                };
+                self.sequence += 1;
+                Ok(vec![segment])
+            }
+        }
+    }
+
+    /// Phase 24.2: attempts the current window's one allotted interim
+    /// decode - see the module docs' "Interim decoding" section. Never
+    /// touches `self.buffer`/`self.elapsed_ms`/`self.sequence`: the window
+    /// is still accumulating audio toward its eventual final decode in
+    /// `run_inference`, and must not be disturbed by this early peek.
+    /// Marks the attempt as spent (`window_interim_decoded = true`)
+    /// regardless of outcome - silence/a placeholder/empty text is never
+    /// retried this window; the next real opportunity is the final decode
+    /// when the window actually closes.
+    fn try_interim_decode(&mut self) -> Result<Option<TranscriptSegment>, SpeechEngineError> {
+        self.window_interim_decoded = true;
+
+        if is_silence(&self.buffer) {
+            self.last_feed_triggered_inference = false;
+            self.last_feed_was_silence = true;
+            self.last_feed_was_non_speech_placeholder = false;
+            return Ok(None);
+        }
+        self.last_feed_was_silence = false;
+
+        let audio_f32: Vec<f32> = self
+            .buffer
+            .iter()
+            .map(|s| f32::from(*s) / f32::from(i16::MAX))
+            .collect();
+        self.last_feed_triggered_inference = true;
+
+        let outcome = Self::decode_pass(&self.ctx, &self.requested_language, &audio_f32)?;
+        self.last_feed_was_non_speech_placeholder = matches!(outcome, DecodeOutcome::Placeholder);
+
+        match outcome {
+            DecodeOutcome::Empty | DecodeOutcome::Placeholder => Ok(None),
+            DecodeOutcome::Text {
+                text,
+                confidence,
+                language,
+            } => {
+                let duration_so_far_ms =
+                    (self.buffer.len() as u64 * 1000) / u64::from(SAMPLE_RATE_HZ);
+                Ok(Some(TranscriptSegment {
+                    id: self.window_id.expect(
+                        "try_interim_decode is only ever called with a window already in progress",
+                    ),
+                    sequence: self.sequence,
+                    text,
+                    is_final: false,
+                    confidence,
+                    start_ms: self.elapsed_ms,
+                    end_ms: self.elapsed_ms + duration_so_far_ms,
+                    language: Some(language),
+                    speaker_id: None,
+                }))
+            }
+        }
+    }
+}
+
+/// The three ways a real whisper.cpp `full()` decode pass can end, once
+/// the pass itself has actually run (the VAD silence gate is checked
+/// separately, before [`WhisperSpeechEngine::decode_pass`] is ever called -
+/// see its callers).
+enum DecodeOutcome {
+    /// Genuine inference ran but decoded nothing (or nothing usable).
+    Empty,
+    /// Genuine inference ran and decoded one of whisper.cpp's own known
+    /// non-speech placeholder captions - see [`NON_SPEECH_PLACEHOLDERS`].
+    Placeholder,
+    Text {
+        text: String,
+        confidence: ConfidenceResult,
+        language: String,
+    },
 }
 
 impl SpeechEngine for WhisperSpeechEngine {
@@ -478,6 +662,14 @@ impl SpeechEngine for WhisperSpeechEngine {
     }
 
     fn feed_audio(&mut self, samples: &[i16]) -> Result<Vec<TranscriptSegment>, SpeechEngineError> {
+        // Phase 24.2: a new window starts the moment a previously-empty
+        // buffer receives audio - allocate its stable id here, before
+        // `samples` is appended, so both an interim decode and the final
+        // segment it settles into share it (see `window_id`'s own docs).
+        if self.buffer.is_empty() {
+            self.window_id = Some(Uuid::new_v4());
+            self.window_interim_decoded = false;
+        }
         self.buffer.extend_from_slice(samples);
         // Phase 21: the hard cap is checked first and independently of
         // `should_flush_early` - a window that has already reached
@@ -490,6 +682,15 @@ impl SpeechEngine for WhisperSpeechEngine {
         } else if should_flush_early(&self.buffer) {
             self.last_feed_was_vad_early_flush = true;
             self.run_inference()
+        } else if should_attempt_interim_decode(self.buffer.len(), self.window_interim_decoded) {
+            // Phase 24.2: still buffering (neither flush condition above
+            // fired this call), but there's now enough audio for a
+            // worthwhile interim peek - see the module docs' "Interim
+            // decoding" section and `MIN_VAD_FLUSH_SAMPLES`'s own docs for
+            // why an interim attempt and a genuine VAD flush never compete
+            // for the same window in the same call.
+            self.last_feed_was_vad_early_flush = false;
+            Ok(self.try_interim_decode()?.into_iter().collect())
         } else {
             self.last_feed_triggered_inference = false;
             self.last_feed_was_silence = false;
@@ -529,6 +730,8 @@ impl SpeechEngine for WhisperSpeechEngine {
 
     fn discard_buffered_audio(&mut self) {
         self.buffer.clear();
+        self.window_id = None;
+        self.window_interim_decoded = false;
     }
 
     fn set_language(&mut self, language: &str) {
@@ -667,6 +870,37 @@ mod tests {
     #[test]
     fn should_flush_early_never_fires_on_an_empty_buffer() {
         assert!(!should_flush_early(&[]));
+    }
+
+    // --- Phase 24.2: interim decoding's own pure gate -------------------
+
+    #[test]
+    fn interim_decode_does_not_fire_before_the_minimum_buffered_duration() {
+        assert!(!should_attempt_interim_decode(
+            MIN_VAD_FLUSH_SAMPLES - 1,
+            false
+        ));
+    }
+
+    #[test]
+    fn interim_decode_fires_exactly_at_the_minimum_buffered_duration() {
+        assert!(should_attempt_interim_decode(MIN_VAD_FLUSH_SAMPLES, false));
+    }
+
+    #[test]
+    fn interim_decode_fires_past_the_minimum_buffered_duration_too() {
+        assert!(should_attempt_interim_decode(
+            MIN_VAD_FLUSH_SAMPLES + 1000,
+            false
+        ));
+    }
+
+    #[test]
+    fn interim_decode_never_fires_twice_in_the_same_window() {
+        // Plenty of buffered audio, but this window already had its one
+        // allotted attempt - must not fire again regardless of how much
+        // more audio has since accumulated.
+        assert!(!should_attempt_interim_decode(CHUNK_SAMPLES, true));
     }
 
     // --- Phase 14: whisper.cpp's own non-speech placeholder captions,

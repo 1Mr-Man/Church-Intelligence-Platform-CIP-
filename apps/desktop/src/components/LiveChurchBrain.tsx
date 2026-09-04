@@ -169,6 +169,13 @@ export function LiveChurchBrain() {
   // history (before any live event fired) has no entry here and simply
   // shows no time, rather than a fabricated one.
   const [transcriptReceivedAt, setTranscriptReceivedAt] = useState<Record<string, string>>({});
+  // Phase 24.2: the current window's still-in-progress interim segment
+  // (`isFinal: false`), if any - real speech-engine output (see
+  // `docs/live-speech.md`'s "Interim vs. final" section), never fabricated.
+  // Never added to `transcript`; replaced by the next interim revision of
+  // the same window, or cleared once that window's real final segment
+  // arrives (see `onTranscriptUpdated` below).
+  const [interimTranscript, setInterimTranscript] = useState<TranscriptSegment | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   // Approved but not yet prepared - a suggestion moves here (never
   // disappears) on approval, and out again once prepared. Kept distinct
@@ -437,6 +444,7 @@ export function LiveChurchBrain() {
       setPreviews({});
       setSearchPreviews({});
       setTranscript([]);
+      setInterimTranscript(null);
       setTranscriptReceivedAt({});
       setTimeline([]);
       setActiveContext(null);
@@ -487,7 +495,14 @@ export function LiveChurchBrain() {
   useEffect(() => {
     const subscriptions = [
       liveEvents.onTranscriptUpdated((segment) => {
-        if (!segment.isFinal) return; // interim text is not added to the permanent feed
+        if (!segment.isFinal) {
+          // Interim text is never added to the permanent feed - only
+          // shown live, and only for the window still in progress. See
+          // `interimTranscript`'s own docs.
+          setInterimTranscript(segment);
+          return;
+        }
+        setInterimTranscript(null);
         setTranscript((prev) => [...prev.slice(-(TRANSCRIPT_LIMIT - 1)), segment]);
         setTranscriptReceivedAt((prev) => ({ ...prev, [segment.id]: new Date().toISOString() }));
       }),
@@ -1327,7 +1342,7 @@ export function LiveChurchBrain() {
             Live Transcript hidden - Bible, Music, Sermon, and Service detection keep running
             unchanged. Click Show to view it again.
           </p>
-        ) : transcript.length === 0 ? (
+        ) : transcript.length === 0 && !interimTranscript ? (
           <p className="live-brain__hint">Nothing transcribed yet.</p>
         ) : (
           <>
@@ -1343,6 +1358,16 @@ export function LiveChurchBrain() {
                   )}
                 </li>
               ))}
+              {interimTranscript && (
+                // Phase 24.2: real, in-progress speech-engine output for
+                // the window still buffering - not yet settled, so no
+                // timestamp/confidence badge (those belong to the final
+                // segment this one will be replaced by) and a distinct
+                // style marking it as provisional.
+                <li className="live-brain__transcript-interim" aria-live="polite">
+                  &ldquo;{interimTranscript.text}&hellip;&rdquo;
+                </li>
+              )}
             </ul>
             {/* Phase 15: this same panel is exactly where the operator is
                 looking when the transcript appears to stop updating - the

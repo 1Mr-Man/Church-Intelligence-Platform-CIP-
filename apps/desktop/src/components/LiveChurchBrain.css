@@ -360,6 +360,18 @@
   color: var(--text-h);
 }
 
+/* Phase 24.2: the current window's still-in-progress interim segment -
+   visually distinct (dimmer, no bottom border) from the settled segments
+   above it, since it is provisional and will be replaced once the window
+   closes for real. */
+.live-brain__transcript-interim {
+  padding: 0.25rem 0;
+  border-bottom: none;
+  font-style: italic;
+  color: var(--text-h);
+  opacity: 0.6;
+}
+
 .live-brain__active-context {
   font-size: 1.4rem;
   font-weight: 600;
