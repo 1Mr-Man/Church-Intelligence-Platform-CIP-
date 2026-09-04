@@ -1,0 +1,71 @@
+{
+  "phase": "18",
+  "summary": "Environment A direct-binary proof that Phase 18 (loopback-aware NO SIGNAL/LOW SIGNAL guidance) is a pure frontend change: no new Rust symbols were expected or introduced, and every prior-phase Rust-side symbol/string count (through Phase 17's own Detection Accuracy Analytics functions) is confirmed unchanged in this rebuilt installer.",
+  "gitCommit": "62f5597528d886251594c65a03bc1c9fa2b8527e",
+  "gitCommitShort": "62f5597",
+  "gitCommitNote": "This is the source tree commit (Phase 18's own core-implementation commit) the Phase 18 rebuild was performed against. Phase 18 touches only apps/desktop/src/lib/format.ts, apps/desktop/src/lib/format.test.ts, and apps/desktop/src/components/LiveChurchBrain.tsx - no Rust source file changed.",
+  "buildScript": "scripts/build-windows-whisper.sh",
+  "buildLog": "ran via a background task this session (not committed - ephemeral build log)",
+  "installer": {
+    "path": "release/windows/Church Intelligence Platform_0.1.0_x64-setup.exe",
+    "fileSizeBytes": 14392003,
+    "sha256": "7d22d91ca80a5cef33a3cf7b0d5c07c964088ef596b2e6abb807a909fdd51e53",
+    "builtAtUtc": "2026-09-04T00:02:20Z",
+    "target": "x86_64-pc-windows-gnu",
+    "ggmlTwoPassFixApplied": true,
+    "ggmlTwoPassFixNote": "First build attempt failed as expected on the known whisper-rs-sys ggml lib-name defect; the build script applied its established fix and the retry succeeded - the same harmless, unrelated build-toolchain quirk documented and handled identically in every prior whisper-enabled Windows rebuild this project has done (now a 12th consecutive rebuild).",
+    "pnpmBuildSucceeded": true,
+    "nsisPackagingSucceeded": true,
+    "runtimeDllsConfirmedByBuildScript": [
+      "libstdc++-6.dll",
+      "libgcc_s_seh-1.dll",
+      "libwinpthread-1.dll"
+    ]
+  },
+  "extraction": {
+    "method": "7z x",
+    "exitCode": 0,
+    "confirmedPresent": [
+      "cip-desktop.exe",
+      "WebView2Loader.dll",
+      "libstdc++-6.dll",
+      "libgcc_s_seh-1.dll",
+      "libwinpthread-1.dll",
+      "uninstall.exe"
+    ]
+  },
+  "symbolRegressionCheck": {
+    "method": "x86_64-w64-mingw32-strings cip-desktop.exe | grep -c <symbol>, run against the extracted installer's main executable",
+    "tripwiresFromPriorPhases": {
+      "rejection_echo_count": 5,
+      "find_rejected_suggestion_for_reference": 1,
+      "record_rejection_echo": 1,
+      "silentWindowsSkipped": 1,
+      "audioErrorText": 1,
+      "speechErrorText": 1,
+      "enroll_acoustic_reference": 2,
+      "list_acoustic_enrollments": 2,
+      "remove_acoustic_reference": 2,
+      "whisper_full_with_state": 96
+    },
+    "tripwiresResult": "All 10 counts identical to the Phase 17 baseline - zero regression. whisper_full_with_state stable at 96 for a 12th consecutive rebuild (Phase 7.3 through Phase 18).",
+    "priorPhaseSymbolCheck": {
+      "finalize_bible_fuller_context_retry": 2,
+      "persist_detections_and_suggestions": 1,
+      "build_bible_detection_analytics": 1,
+      "list_all_scripture_detections_with_segment": 1,
+      "get_bible_detection_analytics": 2,
+      "OutcomeCounts": 1
+    },
+    "priorPhaseNote": "Every prior-phase symbol checked, including Phase 17's own Detection Accuracy Analytics functions, remains present and unregressed. retry_paraphrase_or_semantic_with_fuller_context reconfirmed at its Phase 17-corrected count of 2 distinct mangled symbols (cip_desktop_lib::pipeline's wrapper and cip_core_service::bible_intelligence's own function) - consistent, not a new discrepancy."
+  },
+  "newSymbolsThisPhase": "None expected and none introduced - Phase 18 is a pure frontend change (a loopback-device-name predicate and two new branches in an existing message-formatting function), so the Rust binary itself is unchanged in substance from Phase 17 aside from the fresh bundled frontend asset it packages.",
+  "frontendTextSearchLimitation": "The frontend bundle is bundled into the Tauri resources directory, not searchable as plain strings inside cip-desktop.exe in the same way Rust symbols are - the new loopback-guidance copy was not independently string-searched, consistent with every prior phase's methodology. Frontend correctness for this phase rests on npm run typecheck's success, the fresh Vite build hash (dist/assets/index-C1SVebLH.js, unchanged from the local pre-rebuild build since no further frontend edits were made), and the full 303/303 frontend test pass.",
+  "architecturalSafetyNotes": [
+    "Zero new Tauri commands, zero new events, zero backend changes of any kind - confirmed by an empty Rust diff and this rebuild's own zero-new-symbol result.",
+    "describeAudioSignal's new deviceName parameter is optional and defaults to null - every existing call site not updated this phase keeps its exact prior behavior.",
+    "Bible/Sermon/Service/Music detection are architecturally incapable of being affected by this change - it only reclassifies a status message string in the Live Service UI.",
+    "Every prior-phase command and Phase 14/15/16/17 symbol remains present and unregressed, confirming this phase's addition did not disturb any prior gate or feature."
+  ],
+  "environmentCStatus": "Not yet performed. A real operator checking Stereo Mix's own Windows recording level per this new guidance (and/or confirming the new loopback-specific message text actually renders when Stereo Mix is selected and silent) is required to close Environment C for this phase, exactly as for every prior phase's physicalHardwareStatement discipline."
+}
