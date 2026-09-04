@@ -50,6 +50,7 @@ import type {
   PresentationItem,
   PresentationPreview,
   PresentationScreenState,
+  RenderedSlide,
   SermonFoundationSummary,
   SermonStateSnapshot,
   ServiceIntelligenceSummary,
@@ -64,6 +65,7 @@ import { SystemStatusStrip } from "../workspace/SystemStatusStrip";
 import { AttentionQueue } from "../workspace/AttentionQueue";
 import { IntelligenceFeed } from "../workspace/IntelligenceFeed";
 import { PresentationCard } from "../workspace/PresentationCard";
+import { LivePreviewStage } from "../workspace/LivePreviewStage";
 import type { UnifiedItemAction } from "../workspace/actions";
 import { delayForSpeed, segmentTranscript, type ReplaySegment, type ReplaySpeed } from "./replay";
 
@@ -235,11 +237,15 @@ export function ServiceReplay() {
   const [serviceIntel, setServiceIntel] = useState<ServiceIntelligenceSummary | null>(null);
   const [preparedItems, setPreparedItems] = useState<PresentationItem[]>([]);
   const [activeDisplayItem, setActiveDisplayItem] = useState<PresentationItem | null>(null);
+  // Phase 24: see LiveChurchBrain.tsx's own identical field for why this
+  // was previously discarded despite already being fetched.
+  const [activeSlide, setActiveSlide] = useState<RenderedSlide | null>(null);
   // Phase 3.10: one entry per display screen (Stage/Confidence Monitor/
   // Lobby-Overflow) - see docs/phase-3-10-multi-screen-audit.md.
   const [screens, setScreens] = useState<PresentationScreenState[]>([]);
   const anyScreenOpen = screens.some((s) => s.windowOpen);
   const [previews, setPreviews] = useState<Record<string, PresentationPreview>>({});
+  const [previewSelectionId, setPreviewSelectionId] = useState<string | null>(null);
   const [deviceCount, setDeviceCount] = useState(0);
   const [workspaceBusy, setWorkspaceBusy] = useState<string | null>(null);
 
@@ -310,6 +316,7 @@ export function ServiceReplay() {
       .then((s) => {
         setScreens(s.screens);
         setActiveDisplayItem(s.activeItem);
+        setActiveSlide(s.activeSlide);
       })
       .catch(() => {});
   }, [activeServiceId]);
@@ -363,15 +370,19 @@ export function ServiceReplay() {
         }
       }),
       liveEvents.onPresentationCancelled((item) => setPreparedItems((prev) => prev.filter((x) => x.id !== item.id))),
-      liveEvents.onPresentationStarted(({ item }) => {
+      liveEvents.onPresentationStarted(({ item, slide }) => {
         setPreparedItems((prev) => prev.filter((x) => x.id !== item.id));
         setActiveDisplayItem(item);
+        setActiveSlide(slide);
         // display_presentation always opens Stage specifically before
         // activating (Phase 3.10) - other screens' open/closed state is
         // unaffected by this event.
         setScreens((prev) => prev.map((s) => (s.screen === "stage" ? { ...s, windowOpen: true } : s)));
       }),
-      liveEvents.onPresentationStopped(() => setActiveDisplayItem(null)),
+      liveEvents.onPresentationStopped(() => {
+        setActiveDisplayItem(null);
+        setActiveSlide(null);
+      }),
     ];
     return () => {
       subscriptions.forEach((p) => p.then((unlisten) => unlisten()));
@@ -892,6 +903,14 @@ export function ServiceReplay() {
       </div>
 
       <div className="live-brain__col-stage">
+      <LivePreviewStage
+        activeSlide={activeSlide}
+        previewSlide={previewSelectionId ? (previews[previewSelectionId]?.slide ?? null) : null}
+        preparedItems={preparedItems}
+        activeDisplayItemId={activeDisplayItem?.id ?? null}
+        busy={workspaceBusy}
+        onDisplayQueued={(id) => withWorkspaceBusy(`display-${id}`, async () => { await commands.displayPresentation(id); })}
+      />
       <PresentationCard
         approvedSuggestions={approvedSuggestions}
         previews={previews}
@@ -903,6 +922,7 @@ export function ServiceReplay() {
           withWorkspaceBusy(`preview-${id}`, async () => {
             const preview = await commands.previewPresentation(id);
             setPreviews((prev) => ({ ...prev, [id]: preview }));
+            setPreviewSelectionId(id);
           })
         }
         onPrepare={(id) => withWorkspaceBusy(`prepare-${id}`, async () => { await commands.preparePresentation(id); })}

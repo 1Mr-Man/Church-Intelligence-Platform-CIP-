@@ -17,6 +17,7 @@ import type {
   PresentationItem,
   PresentationPreview,
   PresentationScreenState,
+  RenderedSlide,
   ScriptureContext,
   ScriptureDetection,
   ScriptureReference,
@@ -55,6 +56,7 @@ import { IntelligenceFeed } from "./workspace/IntelligenceFeed";
 import { ServiceControlBar } from "./workspace/ServiceControlBar";
 import { SystemStatusStrip } from "./workspace/SystemStatusStrip";
 import { PresentationCard } from "./workspace/PresentationCard";
+import { LivePreviewStage } from "./workspace/LivePreviewStage";
 import { DisplayRegistryPanel } from "./workspace/DisplayRegistryPanel";
 import { CongregantCompanionPanel } from "./workspace/CongregantCompanionPanel";
 import { ProductionIntegrationPanel } from "./workspace/ProductionIntegrationPanel";
@@ -185,6 +187,13 @@ export function LiveChurchBrain() {
   // automatically. See `docs/presentation.md`'s "Local display
   // architecture" section.
   const [activeDisplayItem, setActiveDisplayItem] = useState<PresentationItem | null>(null);
+  // Phase 24: the already-rendered slide behind `activeDisplayItem` -
+  // `PresentationDisplayPayload`/`PresentationDisplayState` have always
+  // carried this (the display window itself has rendered from it since
+  // Phase 1.4), but the operator's own window discarded it. Exists so the
+  // operator's own Live/Preview stage can show literally the same slide
+  // the real screen shows, never a re-derived approximation.
+  const [activeSlide, setActiveSlide] = useState<RenderedSlide | null>(null);
   // Phase 3.10: one entry per display screen (Stage/Confidence Monitor/
   // Lobby-Overflow), each independently open/closed - see
   // `docs/phase-3-10-multi-screen-audit.md`.
@@ -194,6 +203,11 @@ export function LiveChurchBrain() {
   // Preview never changes `suggestions`/`approvedSuggestions`/`preparedItems`
   // (section 14: preview and prepare are separate actions).
   const [previews, setPreviews] = useState<Record<string, PresentationPreview>>({});
+  // Phase 24: which of `previews`' entries the Live/Preview stage's own
+  // Preview panel currently shows - set on every Preview click, never
+  // fabricated. `null` before the operator has ever previewed anything
+  // this session.
+  const [previewSelectionId, setPreviewSelectionId] = useState<string | null>(null);
   const [searchPreviews, setSearchPreviews] = useState<Record<string, PresentationPreview>>({});
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -392,6 +406,7 @@ export function LiveChurchBrain() {
         .then((s) => {
           setScreens(s.screens);
           setActiveDisplayItem(s.activeItem);
+          setActiveSlide(s.activeSlide);
         })
         .catch(() => {});
       commands.listTranscript(TRANSCRIPT_LIMIT).then(setTranscript).catch(() => {});
@@ -486,15 +501,19 @@ export function LiveChurchBrain() {
       liveEvents.onPresentationCancelled((item) =>
         setPreparedItems((prev) => prev.filter((x) => x.id !== item.id)),
       ),
-      liveEvents.onPresentationStarted(({ item }) => {
+      liveEvents.onPresentationStarted(({ item, slide }) => {
         setPreparedItems((prev) => prev.filter((x) => x.id !== item.id));
         setActiveDisplayItem(item);
+        setActiveSlide(slide);
         // display_presentation always opens Stage specifically before
         // activating (Phase 3.10) - other screens' open/closed state is
         // unaffected by this event.
         setScreens((prev) => prev.map((s) => (s.screen === "stage" ? { ...s, windowOpen: true } : s)));
       }),
-      liveEvents.onPresentationStopped(() => setActiveDisplayItem(null)),
+      liveEvents.onPresentationStopped(() => {
+        setActiveDisplayItem(null);
+        setActiveSlide(null);
+      }),
       liveEvents.onMusicFindingDetected((finding) => setMusicFindings((prev) => [finding, ...prev])),
       liveEvents.onMusicFindingAccepted((finding) =>
         setMusicFindings((prev) => prev.filter((f) => f.id !== finding.id)),
@@ -965,6 +984,14 @@ export function LiveChurchBrain() {
       </div>
 
       <div className="live-brain__col-stage">
+      <LivePreviewStage
+        activeSlide={activeSlide}
+        previewSlide={previewSelectionId ? (previews[previewSelectionId]?.slide ?? null) : null}
+        preparedItems={preparedItems}
+        activeDisplayItemId={activeDisplayItem?.id ?? null}
+        busy={busy}
+        onDisplayQueued={(id) => withBusy(`display-${id}`, async () => { await commands.displayPresentation(id); })}
+      />
       <PresentationCard
         approvedSuggestions={approvedSuggestions}
         previews={previews}
@@ -976,6 +1003,7 @@ export function LiveChurchBrain() {
           withBusy(`preview-${id}`, async () => {
             const preview = await commands.previewPresentation(id);
             setPreviews((prev) => ({ ...prev, [id]: preview }));
+            setPreviewSelectionId(id);
           })
         }
         onPrepare={(id) =>
