@@ -868,6 +868,18 @@ export function LiveChurchBrain() {
         </p>
       )}
 
+      {/* Phase 23: broadcast/production-dashboard shell (operator's own
+          chosen direction - see docs/phase-23-audit.md). A CSS Grid with
+          three explicit columns (rail/stage/intel), each top-level section
+          below wrapped in a col-rail/col-stage/col-intel div assigning
+          which column it renders in - no JSX content was moved or
+          reordered to build this, only wrapped, to keep this exact
+          correctness risk (a 2000+ line workspace component) as low as
+          possible. Unconditional in both modes: Diagnostics Mode's own
+          additional detail panels (below, still a plain stacked column)
+          are deliberately NOT part of this phase's redesign scope. */}
+      <div className="live-brain__grid">
+      <div className="live-brain__col-rail">
       <ServiceControlBar
         isActive={!!status?.service && status.serviceStatus !== "completed"}
         serviceTitle={serviceTitle}
@@ -946,8 +958,13 @@ export function LiveChurchBrain() {
           })
         }
       />
-      <IntelligenceFeed items={unifiedFeed} />
+      </div>
 
+      <div className="live-brain__col-intel">
+      <IntelligenceFeed items={unifiedFeed} />
+      </div>
+
+      <div className="live-brain__col-stage">
       <PresentationCard
         approvedSuggestions={approvedSuggestions}
         previews={previews}
@@ -992,16 +1009,17 @@ export function LiveChurchBrain() {
         onCancel={(id) => withBusy(`cancel-${id}`, async () => { await commands.cancelPresentation(id); })}
         onStopDisplay={() => withBusy("stop-display", async () => { await commands.clearPresentationDisplay(); })}
       />
+      </div>
 
+      <div className="live-brain__col-intel">
       <DisplayRegistryPanel />
       <ProductionIntegrationPanel />
       <CongregantCompanionPanel />
-
-      {mode === "diagnostics" && <PilotDiagnosticsPanel />}
-      {mode === "diagnostics" && <StatusBar status={status} />}
+      </div>
 
       {mode === "operator" && (
       <>
+      <div className="live-brain__col-stage">
       <section className="live-brain__panel">
         <h2>Audio &amp; Speech</h2>
         {status?.speechStatus === "unavailable" && (
@@ -1284,8 +1302,13 @@ export function LiveChurchBrain() {
           </>
         )}
       </section>
+      </div>
       </>
       )}
+      </div>
+
+      {mode === "diagnostics" && <PilotDiagnosticsPanel />}
+      {mode === "diagnostics" && <StatusBar status={status} />}
 
       {mode === "diagnostics" && (
       <>

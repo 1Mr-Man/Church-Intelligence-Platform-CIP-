@@ -678,7 +678,7 @@ export function ServiceReplay() {
   const progressPct = segments.length > 0 ? Math.round((currentIndex / segments.length) * 100) : 0;
 
   return (
-    <div className="library-page library-page--history">
+    <div className="library-page library-page--history library-page--replay-grid">
       <header className="library-page__header">
         <div>
           <p className="library-page__eyebrow">Service Replay</p>
@@ -704,6 +704,15 @@ export function ServiceReplay() {
         </p>
       )}
 
+      {/* Phase 23: same broadcast/production-dashboard grid as Live Service
+          (see LiveChurchBrain.tsx's own Phase 23 comment and
+          docs/phase-23-audit.md) - reuses the exact `live-brain__grid`/
+          `col-rail`/`col-stage`/`col-intel` classes verbatim (they are
+          plain global CSS, not scoped to `.live-brain`) so the two
+          screens share one visual language, per the operator's own
+          chosen scope. No JSX content moved, only wrapped. */}
+      <div className="live-brain__grid">
+      <div className="live-brain__col-rail">
       <section className="library-panel">
         <h2>Core Offline Readiness</h2>
         <div className="op-status-strip">
@@ -743,7 +752,9 @@ export function ServiceReplay() {
           Currently hearing: {currentlyHearing ? `"${currentlyHearing.text}"` : "— nothing replayed yet —"}
         </p>
       </section>
+      </div>
 
+      <div className="live-brain__col-stage">
       <section className="library-panel">
         <p className="live-brain__hint">
           Replay mode simulates a live service from a transcript, feeding it through CIP's real intelligence pipeline
@@ -840,12 +851,16 @@ export function ServiceReplay() {
           </div>
         )}
       </section>
+      </div>
 
+      <div className="live-brain__col-rail">
       <WorkspaceHeader status={status} sermonFoundation={sermonFoundation} serviceIntel={serviceIntel} />
       <SystemStatusStrip status={status} deviceCount={deviceCount} displayWindowOpen={anyScreenOpen} />
 
       <AttentionQueue items={attentionQueue} busy={workspaceBusy} onAction={handleUnifiedAction} />
+      </div>
 
+      <div className="live-brain__col-intel">
       <section className="library-panel">
         <h2>Sermon Intelligence</h2>
         {!sermonState?.theme && (!sermonState?.points || sermonState.points.length === 0) ? (
@@ -874,7 +889,9 @@ export function ServiceReplay() {
       </section>
 
       <IntelligenceFeed items={unifiedFeed} />
+      </div>
 
+      <div className="live-brain__col-stage">
       <PresentationCard
         approvedSuggestions={approvedSuggestions}
         previews={previews}
@@ -935,7 +952,9 @@ export function ServiceReplay() {
           </button>
         </div>
       </section>
+      </div>
 
+      <div className="live-brain__col-intel">
       <section className="library-panel">
         <h2>Quick Scenarios</h2>
         <p className="live-brain__hint">
@@ -994,6 +1013,8 @@ export function ServiceReplay() {
           </ul>
         )}
       </section>
+      </div>
+      </div>
     </div>
   );
 }

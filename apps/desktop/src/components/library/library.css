@@ -43,6 +43,15 @@
   padding: 1.5rem 1.5rem 4rem;
 }
 
+/* Phase 23: Service Replay only (not BibleLibrary/MusicLibrary/HistoryView,
+   which also use .library-page but keep the narrower single-column
+   layout) - widened to match LiveChurchBrain.css's own Phase 23 grid
+   width, since ServiceReplay reuses the same `.live-brain__grid` shell.
+   See docs/phase-23-audit.md. */
+.library-page--replay-grid {
+  max-width: 1600px;
+}
+
 .library-page__header {
   display: flex;
   align-items: flex-start;

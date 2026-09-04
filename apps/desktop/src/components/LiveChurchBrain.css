@@ -3,16 +3,24 @@
    application) to a layout that uses a real laptop screen (the HP
    EliteBook 830 G6's 1920x1080, and 1366x768-class laptops generally)
    without either stranding two-thirds of the screen empty or forcing the
-   operator's eye across an unreadably wide line of text - 1180px keeps
-   body copy readable while giving the presentation/attention cards room
-   to breathe. `display:flex; flex-direction:column` on the direct
-   children lets each top-level section carry its own `order` (see the
-   `.op-order-*` classes below) so operator-priority content can be
-   visually promoted without physically relocating its JSX - important in
-   a 2000+ line workspace component where large text moves are a real
-   correctness risk. */
+   operator's eye across an unreadably wide line of text. `display:flex;
+   flex-direction:column` on the direct children lets each top-level
+   section carry its own `order` (see the `.op-order-*` classes below) so
+   operator-priority content can be visually promoted without physically
+   relocating its JSX - important in a 2000+ line workspace component
+   where large text moves are a real correctness risk.
+
+   Phase 23: widened again, from 1180px to 1600px. The broadcast/
+   production-dashboard shell below (`.live-brain__grid`) needs real
+   horizontal room for three columns (a ~280px queue rail, a flexible
+   live/preview stage, and a ~320px intelligence sidebar) to read as
+   side-by-side panels rather than a cramped stack - see
+   docs/phase-23-audit.md. 1600px still leaves margin on a 1920px display
+   and degrades to the single-column layout below 1200px viewport width
+   (see `.live-brain__grid`'s own media query) rather than clipping
+   anything on a smaller laptop screen. */
 .live-brain {
-  max-width: 1180px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: 1.5rem 1.5rem 4rem;
   font-family: var(--sans);
@@ -159,6 +167,72 @@
 .op-order-7 { order: 7; }
 .op-order-8 { order: 8; }
 .op-order-9 { order: 9; }
+
+/* Phase 23: the broadcast/production-dashboard shell - the operator's own
+   chosen redesign direction (reference images: a schedule/queue rail, a
+   dual live+preview "stage" panel, and a scripture/intelligence sidebar -
+   see docs/phase-23-audit.md), replacing the prior single stacked column
+   this same file's Phase 3.5 comment above already described as sized
+   for "a real laptop screen" but never actually organized into zones.
+   Three explicit columns via `grid-column` on each child, not named
+   `grid-template-areas` - deliberately, so multiple non-contiguous
+   sections can share one column without requiring every section between
+   them to physically move in the JSX (see the wrapping divs in
+   LiveChurchBrain.tsx). `grid-auto-flow: dense` is required, not
+   cosmetic: with the default sparse packing, a later rail item placed
+   after a taller stage/intel item in DOM order gets pushed down to the
+   auto-placement cursor's current row instead of backfilling the empty
+   space directly below the earlier rail item, leaving a visible dead
+   gap - confirmed by a real rendered screenshot during this phase, not
+   assumed. Dense packing fills that hole instead. */
+.live-brain__grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(280px, 340px);
+  grid-auto-flow: dense;
+  align-items: start;
+  gap: 1rem;
+}
+
+.live-brain__grid > * {
+  min-width: 0;
+}
+
+.live-brain__col-rail {
+  grid-column: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.live-brain__col-stage {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.live-brain__col-intel {
+  grid-column: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Below the reference images' own breakpoint for a broadcast-style
+   3-column layout to stay legible - collapses to the same single stacked
+   column this layout replaces, in the same rail/stage/intel visual
+   priority order (queue context, then the live stage, then supporting
+   intelligence). */
+@media (max-width: 1200px) {
+  .live-brain__grid {
+    grid-template-columns: 1fr;
+  }
+  .live-brain__col-rail,
+  .live-brain__col-stage,
+  .live-brain__col-intel {
+    grid-column: 1;
+  }
+}
 
 .live-brain__status-bar {
   display: flex;
