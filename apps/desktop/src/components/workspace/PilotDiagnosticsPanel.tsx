@@ -190,6 +190,9 @@ export function PilotDiagnosticsPanel() {
                     "[BLANK_AUDIO]", not real speech)
                   </>
                 )}
+                {diagnostics.speech.vadEarlyFlushes > 0 && (
+                  <> ({diagnostics.speech.vadEarlyFlushes} windows flushed early - a natural pause was detected)</>
+                )}
               </div>
               {diagnostics.speech.lastError && <div>Last error: {diagnostics.speech.lastError}</div>}
             </dd>

@@ -164,6 +164,14 @@ pub struct SpeechDiagnostics {
     /// that counter means inference never ran at all; this one means it
     /// did run and produced a known non-answer.
     pub non_speech_placeholders_skipped: u64,
+    /// Phase 21: count of `feed_audio` calls that ran real inference
+    /// because a natural pause was detected in the buffered audio, rather
+    /// than because the buffer hit the fixed ~3s cap
+    /// (`SpeechEngine::last_feed_was_vad_early_flush() == true`) - see
+    /// `docs/phase-21-audit.md`. Not mutually exclusive with
+    /// `silent_windows_skipped`: a pause-triggered flush can still turn out
+    /// to have been entirely silence on closer inspection.
+    pub vad_early_flushes: u64,
 }
 
 /// Phase 4.4 counterpart to [`SpeechDiagnostics`], much smaller: there is

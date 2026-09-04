@@ -136,6 +136,26 @@ pub trait SpeechEngine: Send + Sync {
         false
     }
 
+    /// Whether the most recent `feed_audio` call ran real inference because
+    /// a natural pause was detected in the buffered audio (a "VAD-triggered
+    /// flush"), rather than because the buffer reached its fixed maximum
+    /// size. `false` by default - only an engine with its own
+    /// pause-detection gate (`WhisperSpeechEngine`, Phase 21) overrides
+    /// this.
+    ///
+    /// Phase 21: added alongside the fix for windows being cut off at a
+    /// fixed time boundary regardless of whether that boundary landed
+    /// mid-word - flushing early at a genuine pause instead means most
+    /// windows now end where the speaker actually paused, not at an
+    /// arbitrary sample count. Not mutually exclusive with
+    /// `last_feed_was_silence`: a window can be flushed early *because* of
+    /// a detected pause and then, on inspection of the whole window, turn
+    /// out to have been entirely silence (e.g. the microphone was simply
+    /// idle) - both flags independently report what genuinely happened.
+    fn last_feed_was_vad_early_flush(&self) -> bool {
+        false
+    }
+
     /// Discard any buffered-but-not-yet-inferred audio without running
     /// inference on it. A no-op by default (`NullSpeechEngine`/
     /// `ScriptedSpeechEngine` hold no such buffer).

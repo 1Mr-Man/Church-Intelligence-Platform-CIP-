@@ -117,6 +117,14 @@ export interface SpeechRuntimeDiagnostics {
    * all; this one means it did run and produced a known non-answer.
    */
   nonSpeechPlaceholdersSkipped: number;
+  /**
+   * Phase 21: count of real inference passes triggered because a natural
+   * pause was detected in the buffered audio, rather than because the
+   * buffer hit the fixed ~3s cap. Not mutually exclusive with
+   * `silentWindowsSkipped` - a pause-triggered flush can still turn out to
+   * have been entirely silence.
+   */
+  vadEarlyFlushes: number;
 }
 
 export interface PilotDiagnostics {

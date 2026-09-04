@@ -1360,6 +1360,11 @@ pub struct SpeechRuntimeDiagnostics {
     /// `state::SpeechDiagnostics::non_speech_placeholders_skipped` and
     /// `docs/phase-14-audit.md`.
     pub non_speech_placeholders_skipped: u64,
+    /// Phase 21: count of real inference passes triggered by a detected
+    /// pause rather than the fixed ~3s cap - see
+    /// `state::SpeechDiagnostics::vad_early_flushes` and
+    /// `docs/phase-21-audit.md`.
+    pub vad_early_flushes: u64,
 }
 
 /// Phase 3.8.7.3: the speech pipeline's operator-visible backlog state,
@@ -1533,6 +1538,7 @@ pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> Pilo
             overload_state: classify_overload(diag.queue_pending_ms),
             silent_windows_skipped: diag.silent_windows_skipped,
             non_speech_placeholders_skipped: diag.non_speech_placeholders_skipped,
+            vad_early_flushes: diag.vad_early_flushes,
         }
     };
 
@@ -2614,6 +2620,18 @@ fn handle_audio_chunk(
                 .lock()
                 .expect("speech_diagnostics mutex poisoned")
                 .non_speech_placeholders_skipped += 1;
+        }
+
+        // Phase 21: independent of both checks above - records *why* this
+        // window was flushed (a detected pause vs. the fixed cap), not
+        // what the flush produced. See
+        // `SpeechEngine::last_feed_was_vad_early_flush`'s own docs.
+        if speech.last_feed_was_vad_early_flush() {
+            state
+                .speech_diagnostics
+                .lock()
+                .expect("speech_diagnostics mutex poisoned")
+                .vad_early_flushes += 1;
         }
 
         match feed_result {
@@ -8096,6 +8114,7 @@ mod tests {
                 overload_state: OverloadState::Normal,
                 silent_windows_skipped: 0,
                 non_speech_placeholders_skipped: 0,
+                vad_early_flushes: 0,
             },
             audio_devices: Vec::new(),
             audio: AudioEngineStatus {

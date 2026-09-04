@@ -19,11 +19,43 @@
 //!
 //! whisper.cpp's `full()` call is synchronous and processes a complete
 //! buffer at once - it does not natively stream interim results. This
-//! engine buffers incoming audio and runs one inference pass per ~3 seconds
-//! of audio (or on [`flush`](WhisperSpeechEngine::flush)), always emitting
-//! `is_final: true` segments. It does **not** fabricate interim segments -
-//! see `docs/live-speech.md`'s "Interim vs. final" section for what a
-//! future engine with true streaming support would change.
+//! engine buffers incoming audio and runs one inference pass per window,
+//! always emitting `is_final: true` segments. It does **not** fabricate
+//! interim segments - see `docs/live-speech.md`'s "Interim vs. final"
+//! section for what a future engine with true streaming support would
+//! change.
+//!
+//! ## Window boundaries (Phase 21: VAD-triggered flush)
+//!
+//! A window closes - and inference runs - at whichever of these happens
+//! first:
+//!
+//! 1. **A genuine pause is detected** ([`should_flush_early`]): once at
+//!    least [`MIN_VAD_FLUSH_SAMPLES`] (1.5s) has buffered *and* the
+//!    trailing [`TRAILING_SILENCE_SAMPLES`] (0.4s) of that buffer is quiet
+//!    enough to be a real phrase/sentence-level pause (not just an
+//!    ordinary between-word gap). This is the primary mechanism: it means
+//!    most windows now end where the speaker actually paused, rather than
+//!    at an arbitrary fixed sample count that has no relationship to the
+//!    words being spoken - the single biggest source of mid-word cutoffs
+//!    in the original fixed-3s design.
+//! 2. **The fixed [`CHUNK_SAMPLES`] cap** (3s) - unchanged from before this
+//!    phase, and still hit whenever speech runs on with no detectable
+//!    pause (a long, continuous sentence). This remains the hard latency
+//!    bound and safety net: worst case, behavior is identical to the
+//!    pre-Phase-21 engine.
+//!
+//! Deliberately **not** implemented this phase: audio-overlapping windows
+//! (each window also decoding a shared slice of the previous one's tail for
+//! extra left-context). That technique needs some way to reconcile the
+//! text produced from the shared audio decoded twice - real streaming ASR
+//! systems solve this with token-timestamp-based stitching, which this
+//! container has no real, timing-sensitive audio to validate against.
+//! VAD-triggered flush was chosen instead because it addresses the same
+//! root cause (a boundary landing mid-word) without ever risking duplicated
+//! transcript text: a window boundary chosen at a detected pause has, by
+//! definition, no word left hanging across it. See `docs/phase-21-audit.md`
+//! for the full reasoning.
 //!
 //! ## Language (Phase 12)
 //!
@@ -68,6 +100,48 @@ const CHUNK_SAMPLES: usize = SAMPLE_RATE_HZ as usize * 3;
 /// `CONFIRMATION_SCORE_BONUS`) - revisit once real operator feedback from
 /// a live sanctuary environment exists.
 const SILENCE_RMS_THRESHOLD: f32 = 0.01;
+
+/// Minimum buffered duration before an early, pause-triggered flush
+/// ([`should_flush_early`]) is even considered - keeps an ordinary
+/// between-word gap occurring almost immediately from fragmenting the
+/// buffer into a window too short for whisper.cpp to transcribe well, and
+/// guarantees every window carries at least this much real audio context.
+/// Documented reasoning, not empirically calibrated against real
+/// speech-timing data - matches every other threshold in this codebase
+/// (`SILENCE_RMS_THRESHOLD`, `MIN_PARAPHRASE_SCORE`, ...).
+const MIN_VAD_FLUSH_SAMPLES: usize = (SAMPLE_RATE_HZ as usize * 3) / 2; // 1.5s
+
+/// How much trailing near-silence in the buffer counts as a genuine
+/// phrase/sentence-level pause worth flushing early on, rather than an
+/// ordinary between-word gap (typically well under this in normal speech).
+/// See [`has_trailing_pause`].
+const TRAILING_SILENCE_SAMPLES: usize = (SAMPLE_RATE_HZ as usize * 2) / 5; // 0.4s
+
+/// Whether the trailing [`TRAILING_SILENCE_SAMPLES`] of `buffer` are quiet
+/// enough to be a genuine pause - the VAD-triggered-flush signal (Phase
+/// 21). Returns `false` (never a false pause) when `buffer` is shorter
+/// than the trailing window itself, since there isn't yet enough audio to
+/// confirm a real pause happened; a short buffer simply keeps
+/// accumulating toward either an early flush or the hard [`CHUNK_SAMPLES`]
+/// cap.
+fn has_trailing_pause(buffer: &[i16]) -> bool {
+    if buffer.len() < TRAILING_SILENCE_SAMPLES {
+        return false;
+    }
+    is_silence(&buffer[buffer.len() - TRAILING_SILENCE_SAMPLES..])
+}
+
+/// Whether `buffer` should be flushed to inference right now because a
+/// natural pause was detected, rather than waiting for the fixed
+/// [`CHUNK_SAMPLES`] cap - see the module docs' "Window boundaries"
+/// section. Requires both a minimum buffered duration
+/// ([`MIN_VAD_FLUSH_SAMPLES`]) and a genuine trailing pause
+/// ([`has_trailing_pause`]). Does not itself check against `CHUNK_SAMPLES` -
+/// the caller ([`WhisperSpeechEngine::feed_audio`]) checks the hard cap
+/// separately and independently.
+fn should_flush_early(buffer: &[i16]) -> bool {
+    buffer.len() >= MIN_VAD_FLUSH_SAMPLES && has_trailing_pause(buffer)
+}
 
 /// RMS energy of a PCM16 buffer, `0.0..=1.0` - the same formula
 /// `integrations/audio`'s own input-level meter uses, duplicated here
@@ -184,6 +258,11 @@ pub struct WhisperSpeechEngine {
     /// one of whisper.cpp's own known non-speech placeholder captions - see
     /// `SpeechEngine::last_feed_was_non_speech_placeholder`'s own docs.
     last_feed_was_non_speech_placeholder: bool,
+    /// Phase 21: whether the most recent `feed_audio` call ran inference
+    /// because a natural pause was detected, rather than because the
+    /// buffer hit the fixed `CHUNK_SAMPLES` cap - see
+    /// `SpeechEngine::last_feed_was_vad_early_flush`'s own docs.
+    last_feed_was_vad_early_flush: bool,
 }
 
 impl WhisperSpeechEngine {
@@ -214,6 +293,7 @@ impl WhisperSpeechEngine {
             last_feed_triggered_inference: false,
             last_feed_was_silence: false,
             last_feed_was_non_speech_placeholder: false,
+            last_feed_was_vad_early_flush: false,
         })
     }
 
@@ -399,17 +479,31 @@ impl SpeechEngine for WhisperSpeechEngine {
 
     fn feed_audio(&mut self, samples: &[i16]) -> Result<Vec<TranscriptSegment>, SpeechEngineError> {
         self.buffer.extend_from_slice(samples);
+        // Phase 21: the hard cap is checked first and independently of
+        // `should_flush_early` - a window that has already reached
+        // `CHUNK_SAMPLES` flushes because of the cap, never mislabeled as
+        // pause-triggered just because its trailing audio also happens to
+        // be quiet.
         if self.buffer.len() >= CHUNK_SAMPLES {
+            self.last_feed_was_vad_early_flush = false;
+            self.run_inference()
+        } else if should_flush_early(&self.buffer) {
+            self.last_feed_was_vad_early_flush = true;
             self.run_inference()
         } else {
             self.last_feed_triggered_inference = false;
             self.last_feed_was_silence = false;
             self.last_feed_was_non_speech_placeholder = false;
+            self.last_feed_was_vad_early_flush = false;
             Ok(vec![])
         }
     }
 
     fn flush(&mut self) -> Result<Vec<TranscriptSegment>, SpeechEngineError> {
+        // An explicit, caller-requested flush (e.g. on stop_listening) is
+        // never a VAD-triggered one, regardless of what the buffer's
+        // trailing audio looks like.
+        self.last_feed_was_vad_early_flush = false;
         self.run_inference()
     }
 
@@ -427,6 +521,10 @@ impl SpeechEngine for WhisperSpeechEngine {
 
     fn last_feed_was_non_speech_placeholder(&self) -> bool {
         self.last_feed_was_non_speech_placeholder
+    }
+
+    fn last_feed_was_vad_early_flush(&self) -> bool {
+        self.last_feed_was_vad_early_flush
     }
 
     fn discard_buffered_audio(&mut self) {
@@ -492,6 +590,83 @@ mod tests {
     fn rms_level_of_an_empty_buffer_is_zero_not_a_panic() {
         assert_eq!(rms_level(&[]), 0.0);
         assert!(is_silence(&[]));
+    }
+
+    // --- Phase 21: VAD-triggered early flush - has_trailing_pause and
+    // should_flush_early, fully testable without a real model file ------
+
+    fn tone(sample_count: usize) -> Vec<i16> {
+        (0..sample_count)
+            .map(|i| if i % 2 == 0 { i16::MAX } else { i16::MIN })
+            .collect()
+    }
+
+    fn silence(sample_count: usize) -> Vec<i16> {
+        vec![0i16; sample_count]
+    }
+
+    #[test]
+    fn trailing_pause_never_fires_on_a_buffer_shorter_than_the_trailing_window() {
+        let mut buffer = silence(TRAILING_SILENCE_SAMPLES - 1);
+        assert!(
+            !has_trailing_pause(&buffer),
+            "too short to confirm a real pause"
+        );
+        buffer.clear();
+        assert!(!has_trailing_pause(&buffer));
+    }
+
+    #[test]
+    fn trailing_pause_is_false_when_the_buffer_ends_in_real_audio() {
+        let buffer = tone(TRAILING_SILENCE_SAMPLES * 3);
+        assert!(!has_trailing_pause(&buffer));
+    }
+
+    #[test]
+    fn trailing_pause_is_true_when_the_buffer_ends_in_a_real_quiet_stretch() {
+        let mut buffer = tone(TRAILING_SILENCE_SAMPLES * 3);
+        buffer.extend(silence(TRAILING_SILENCE_SAMPLES));
+        assert!(
+            has_trailing_pause(&buffer),
+            "speech followed by a genuine trailing pause must be detected"
+        );
+    }
+
+    #[test]
+    fn trailing_pause_ignores_silence_that_is_not_at_the_very_end() {
+        // Silence up front, then real audio right up to the end - the
+        // *trailing* window is what matters, not the buffer as a whole.
+        let mut buffer = silence(TRAILING_SILENCE_SAMPLES * 3);
+        buffer.extend(tone(TRAILING_SILENCE_SAMPLES));
+        assert!(!has_trailing_pause(&buffer));
+    }
+
+    #[test]
+    fn should_flush_early_requires_the_minimum_buffered_duration_even_with_a_real_pause() {
+        // A pause occurring almost immediately (buffer well under
+        // MIN_VAD_FLUSH_SAMPLES) must not fragment the window.
+        let short_buffer = silence(TRAILING_SILENCE_SAMPLES + 100);
+        assert!(short_buffer.len() < MIN_VAD_FLUSH_SAMPLES);
+        assert!(has_trailing_pause(&short_buffer));
+        assert!(!should_flush_early(&short_buffer));
+    }
+
+    #[test]
+    fn should_flush_early_is_false_with_enough_audio_but_no_pause() {
+        let buffer = tone(MIN_VAD_FLUSH_SAMPLES + TRAILING_SILENCE_SAMPLES);
+        assert!(!should_flush_early(&buffer));
+    }
+
+    #[test]
+    fn should_flush_early_fires_once_both_conditions_are_met() {
+        let mut buffer = tone(MIN_VAD_FLUSH_SAMPLES);
+        buffer.extend(silence(TRAILING_SILENCE_SAMPLES));
+        assert!(should_flush_early(&buffer));
+    }
+
+    #[test]
+    fn should_flush_early_never_fires_on_an_empty_buffer() {
+        assert!(!should_flush_early(&[]));
     }
 
     // --- Phase 14: whisper.cpp's own non-speech placeholder captions,
