@@ -36,6 +36,21 @@ pub struct TranscriptSegment {
     pub speaker_id: Option<String>,
 }
 
+/// One-shot, stateless re-transcription result from
+/// [`SpeechEngine::transcribe_once`] (Phase 24.3's dual-tier Whisper).
+/// Deliberately smaller than [`TranscriptSegment`]: a fresh, isolated
+/// decode of already-captured audio can only ever know text/confidence/
+/// language - it has no `id`/`sequence` of its own (the caller is
+/// correcting a specific segment that already has one) and no new timing
+/// (the audio's `start_ms`/`end_ms` were already fixed when the fast tier
+/// first captured it).
+#[derive(Debug, Clone, PartialEq)]
+pub struct QualityTranscript {
+    pub text: String,
+    pub confidence: ConfidenceResult,
+    pub language: Option<String>,
+}
+
 #[derive(Debug, Error)]
 pub enum SpeechEngineError {
     #[error("speech engine not initialized")]
@@ -181,6 +196,44 @@ pub trait SpeechEngine: Send + Sync {
     /// "never distort in-flight state" discipline
     /// `discard_buffered_audio`/the VAD gate already follow.
     fn set_language(&mut self, _language: &str) {}
+
+    /// Phase 24.3 (true dual-tier Whisper): decode `audio` - raw mono
+    /// PCM16 at this engine's own `required_sample_rate_hz()`, exactly the
+    /// same format `feed_audio` expects - as one complete, isolated
+    /// utterance, with no buffering and no effect on any window this
+    /// engine may separately be accumulating via `feed_audio`. Intended
+    /// for a *second*, independently-running engine (e.g. a larger,
+    /// slower Whisper model) given the exact audio a first, faster engine
+    /// already finalized a window from, to produce a higher-quality
+    /// re-transcription of speech the operator has already seen - never
+    /// used as this engine's own primary live-transcription path.
+    ///
+    /// `Ok(None)` (the default here) means this engine cannot do one-shot
+    /// re-transcription at all - true of every engine except
+    /// `WhisperSpeechEngine`, and also a legitimate real outcome for it
+    /// (silence, or one of whisper.cpp's own non-speech placeholders -
+    /// see `last_feed_was_silence`/`last_feed_was_non_speech_placeholder`
+    /// for the equivalent distinction on the buffered path). A caller must
+    /// never treat `Ok(None)` as an error.
+    fn transcribe_once(
+        &self,
+        _audio: &[i16],
+    ) -> Result<Option<QualityTranscript>, SpeechEngineError> {
+        Ok(None)
+    }
+
+    /// Phase 24.3: takes (removes) the raw audio this engine buffered
+    /// toward its most recent *final* window, if it still has it - the
+    /// same audio a caller would hand to a second engine's
+    /// `transcribe_once` above. `None` by default; only an engine that
+    /// actually retains this (`WhisperSpeechEngine`) overrides it. Takes
+    /// rather than borrows so a caller can hand the audio off to another
+    /// thread (the quality worker) without holding this engine's own lock
+    /// for the duration - and so a second call before the next final
+    /// window returns `None`, never the same audio twice.
+    fn take_last_final_window_audio(&mut self) -> Option<Vec<i16>> {
+        None
+    }
 }
 
 #[cfg(test)]

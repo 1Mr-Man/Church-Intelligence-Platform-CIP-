@@ -88,6 +88,25 @@
 //! superseded by its window's final segment; nothing downstream ever
 //! treats an interim segment as authoritative.
 //!
+//! ## Dual-tier re-transcription (Phase 24.3)
+//!
+//! Everything above describes this engine's own live buffering/decoding of
+//! one continuous audio stream. Separately, [`SpeechEngine::transcribe_once`]
+//! and [`SpeechEngine::take_last_final_window_audio`] let a **second**,
+//! independently-constructed `WhisperSpeechEngine` instance (a different,
+//! typically larger and slower model, loaded from
+//! `AppConfig::whisper_quality_model_path`) re-decode the exact same raw
+//! audio a first, faster instance already finalized a window from, with no
+//! buffering, no window-boundary logic, and no effect on either instance's
+//! own live state. `apps/desktop/src-tauri/src/commands.rs`'s quality
+//! worker is the real caller: it takes the fast engine's
+//! `last_final_window_audio` right after a window finalizes and hands it to
+//! the quality engine's `transcribe_once` on a separate thread, so a slower
+//! model's decode time never blocks the live pipeline. See
+//! `docs/phase-24-3-audit.md` for the full design, including why the
+//! quality tier's output becomes a *new*, linked transcript segment rather
+//! than an in-place correction of the original.
+//!
 //! ## Language (Phase 12)
 //!
 //! Defaults to `"en"`, preserving this engine's exact pre-Phase-12
@@ -101,7 +120,7 @@
 //! an honest report of what happened, never a blind echo of the request -
 //! this matters most for `"auto"`, where the two can genuinely differ.
 
-use cip_core_ai::{SpeechEngine, SpeechEngineError, TranscriptSegment};
+use cip_core_ai::{QualityTranscript, SpeechEngine, SpeechEngineError, TranscriptSegment};
 use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
 use std::path::Path;
 use uuid::Uuid;
@@ -327,6 +346,19 @@ pub struct WhisperSpeechEngine {
     /// window regardless of how many more `feed_audio` calls arrive before
     /// the window closes for real.
     window_interim_decoded: bool,
+    /// Phase 24.3 (true dual-tier Whisper): the raw i16 audio this engine
+    /// buffered toward its most recently *finalized* window, retained
+    /// exactly as fed (already at `SAMPLE_RATE_HZ`, since a caller must
+    /// resample to `required_sample_rate_hz()` before calling `feed_audio`
+    /// at all) so a second, independently-running engine's
+    /// `transcribe_once` can re-decode the identical audio - never a
+    /// re-recording, never resampled again, never merged with any other
+    /// window's audio. Set in [`Self::run_inference`] immediately alongside
+    /// the same clear/take of `self.buffer` an interim decode never
+    /// performs, so it only ever reflects a genuine final window. `None`
+    /// once [`SpeechEngine::take_last_final_window_audio`] has taken it, or
+    /// before any window has ever finalized.
+    last_final_window_audio: Option<Vec<i16>>,
 }
 
 impl WhisperSpeechEngine {
@@ -360,6 +392,7 @@ impl WhisperSpeechEngine {
             last_feed_was_vad_early_flush: false,
             window_id: None,
             window_interim_decoded: false,
+            last_final_window_audio: None,
         })
     }
 
@@ -541,13 +574,20 @@ impl WhisperSpeechEngine {
         // failing) never leaves stale audio stuck in the buffer forever,
         // retried on every subsequent call. `audio_f32` owns its own copy,
         // so clearing `self.buffer` immediately after building it is safe.
-        let audio_f32: Vec<f32> = self
-            .buffer
+        // Phase 24.3: `self.buffer` is both cleared and *retained* here -
+        // `mem::replace` (not `.clear()`) hands the exact raw i16 samples
+        // just decoded to `last_final_window_audio`, preserving
+        // `self.buffer`'s pre-allocated capacity for the next window
+        // exactly like `.clear()` did, while giving a second engine's
+        // `transcribe_once` the identical audio this decode is about to
+        // run on - never a re-recording, never resampled twice.
+        let raw_audio = std::mem::replace(&mut self.buffer, Vec::with_capacity(CHUNK_SAMPLES));
+        let audio_f32: Vec<f32> = raw_audio
             .iter()
             .map(|s| f32::from(*s) / f32::from(i16::MAX))
             .collect();
         self.elapsed_ms += duration_ms;
-        self.buffer.clear();
+        self.last_final_window_audio = Some(raw_audio);
         self.last_feed_triggered_inference = true;
         let window_id = self.window_id.take().unwrap_or_else(Uuid::new_v4);
         self.window_interim_decoded = false;
@@ -736,6 +776,45 @@ impl SpeechEngine for WhisperSpeechEngine {
 
     fn set_language(&mut self, language: &str) {
         self.requested_language = language.to_string();
+    }
+
+    /// Phase 24.3: the exact same real `decode_pass` call
+    /// `run_inference`/`try_interim_decode` use, just given `audio`
+    /// directly rather than reading it from `self.buffer` - this engine
+    /// never buffers or mutates any of its own live-window state
+    /// (`self.buffer`/`self.elapsed_ms`/`self.sequence`/`self.window_id`)
+    /// for a `transcribe_once` call, so it is safe to call from a second,
+    /// independently-running `WhisperSpeechEngine` instance (a genuinely
+    /// separate `WhisperContext`/model) without disturbing whatever window
+    /// that instance may itself be accumulating via its own `feed_audio`.
+    fn transcribe_once(
+        &self,
+        audio: &[i16],
+    ) -> Result<Option<QualityTranscript>, SpeechEngineError> {
+        if audio.is_empty() || is_silence(audio) {
+            return Ok(None);
+        }
+        let audio_f32: Vec<f32> = audio
+            .iter()
+            .map(|s| f32::from(*s) / f32::from(i16::MAX))
+            .collect();
+        let outcome = Self::decode_pass(&self.ctx, &self.requested_language, &audio_f32)?;
+        match outcome {
+            DecodeOutcome::Empty | DecodeOutcome::Placeholder => Ok(None),
+            DecodeOutcome::Text {
+                text,
+                confidence,
+                language,
+            } => Ok(Some(QualityTranscript {
+                text,
+                confidence,
+                language: Some(language),
+            })),
+        }
+    }
+
+    fn take_last_final_window_audio(&mut self) -> Option<Vec<i16>> {
+        self.last_final_window_audio.take()
     }
 }
 

@@ -14,6 +14,11 @@ export const AppEvents = {
   AudioStarted: "AUDIO_STARTED",
   AudioStopped: "AUDIO_STOPPED",
   TranscriptUpdated: "TRANSCRIPT_UPDATED",
+  /** Phase 24.3 (true dual-tier Whisper): a quality-tier re-transcription
+   * of an already-final segment was persisted as its own new, linked
+   * segment - payload is `TranscriptCorrected`. Never replaces the
+   * original segment's own `TranscriptUpdated` event/text. */
+  TranscriptCorrected: "TRANSCRIPT_CORRECTED",
 
   ScriptureDetected: "SCRIPTURE_DETECTED",
   ScriptureUpdated: "SCRIPTURE_UPDATED",

@@ -263,6 +263,31 @@ pub fn list_transcript_segments(
     Ok(rows)
 }
 
+/// Phase 24.3 (true dual-tier Whisper): records that `corrected_segment_id`
+/// (a real `transcript_segments` row the caller has already persisted) is a
+/// quality-tier re-transcription of `original_segment_id` (also already
+/// persisted). Never mutates either segment's own row - see
+/// `database/migrations/0019_transcript_corrections.sql`'s own docs for why
+/// this is a separate link table rather than an in-place edit.
+pub fn persist_transcript_correction(
+    conn: &Connection,
+    original_segment_id: Uuid,
+    corrected_segment_id: Uuid,
+) -> Result<(), PersistError> {
+    conn.execute(
+        "INSERT INTO transcript_corrections
+            (id, original_segment_id, corrected_segment_id, created_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![
+            Uuid::new_v4().to_string(),
+            original_segment_id.to_string(),
+            corrected_segment_id.to_string(),
+            Utc::now().to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
 // --- scripture_detections -----------------------------------------------
 
 /// Persist a validated detection - see module docs for which
@@ -1898,6 +1923,28 @@ mod tests {
             .query_row("SELECT count(*) FROM transcript_segments", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn persists_a_transcript_correction_linking_two_already_persisted_segments() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let original = sample_transcript_segment("Turn to Romans ate.", 0);
+        let corrected = sample_transcript_segment("Turn to Romans eight.", 1);
+        persist_transcript_segment(&conn, session.id, &original).unwrap();
+        persist_transcript_segment(&conn, session.id, &corrected).unwrap();
+
+        persist_transcript_correction(&conn, original.id, corrected.id).unwrap();
+
+        let (linked_original, linked_corrected): (String, String) = conn
+            .query_row(
+                "SELECT original_segment_id, corrected_segment_id FROM transcript_corrections",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(linked_original, original.id.to_string());
+        assert_eq!(linked_corrected, corrected.id.to_string());
     }
 
     #[test]

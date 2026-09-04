@@ -248,21 +248,25 @@ Recommendations, in order of what to actually install:
   Yoruba and Hausa are real, selectable options; Igbo is not, because
   whisper.cpp itself has no Igbo vocabulary.
 
-**What this project does not have, and is explicitly deferring, not
-silently omitting:** CIP holds exactly one active `WhisperSpeechEngine`
-built from exactly one loaded model file (`AppState.speech_engine`,
-constructed once at startup and held for the process's life). There is no
-mechanism today for running a fast low-latency model and a separate
-high-quality model concurrently and reconciling their output - the
-architecture a genuine "fast detector + high-quality transcript" split
-would require. Building that is real, non-trivial work (a second
-`WhisperContext`, a policy for which output the pipeline trusts and when,
-and - like Phase 21's deliberately-deferred audio-overlapping windows -
-no real microphone audio in this environment to validate the reconciliation
-against) and is out of this phase's scope. The single-model
-`base.en`/`small.en`/`large-v3-turbo` recommendations above are the real,
-available accuracy levers today; a true dual-tier engine is future work,
-not implemented here.
+**Dual-tier Whisper (Phase 24.3): available, entirely optional.** CIP's
+live pipeline still runs one fast, low-latency `WhisperSpeechEngine`
+(`AppState.speech_engine`) for real-time transcription/detection,
+unchanged. An operator who additionally installs a second, typically
+larger model at `AppConfig::whisper_quality_model_path` (via System
+Diagnostics' "Select Quality-Tier Model File…", or
+`CIP_WHISPER_QUALITY_MODEL_PATH`) gets a second, independent
+`WhisperSpeechEngine` (`AppState.speech_quality_engine`) that re-decodes
+the exact raw audio of each window the fast tier already finalized, on
+its own thread, and never blocks or slows the fast tier - a full quality-
+job queue simply drops the newest job. The quality tier's output never
+edits the original transcript in place (see `docs/phase-24-3-audit.md`
+for why); it lands as its own new, final segment, re-runs Bible
+detection (the existing suggestion-dedup window handles the overlap with
+whatever the fast tier already found), and the Live Transcript panel
+marks the original line with a small "corrected below" badge. Installing
+no quality model (the default) costs nothing and changes nothing about
+the fast tier's own behavior. See `docs/phase-24-3-audit.md` for the full
+design and its honest, real-hardware-confirmation gap.
 
 ### Model licensing
 

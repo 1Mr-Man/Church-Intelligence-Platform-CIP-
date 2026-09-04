@@ -135,6 +135,68 @@ fn create_speech_engine(config: &AppConfig) -> (Box<dyn SpeechEngine>, state::Sp
     result
 }
 
+/// Phase 24.3 (true dual-tier Whisper): choose a second, independent
+/// `SpeechEngine` from `AppConfig::whisper_quality_model_path` - mirrors
+/// `create_speech_engine` exactly, including "missing/invalid model is
+/// never fatal" (a `NullSpeechEngine` fallback), except it deliberately
+/// skips the tiny-class-model accuracy warning: an operator who never
+/// installs a quality model simply never gets the quality tier, which is
+/// not a misconfiguration worth logging about. This is a genuinely
+/// separate `WhisperContext`/model instance from `create_speech_engine`'s,
+/// never the same one reused - see `docs/phase-24-3-audit.md`.
+#[cfg_attr(not(feature = "whisper"), allow(unused_variables))]
+fn create_quality_speech_engine(
+    config: &AppConfig,
+) -> (Box<dyn SpeechEngine>, state::SpeechQualityDiagnostics) {
+    let feature_compiled = cfg!(feature = "whisper");
+    #[cfg(feature = "whisper")]
+    let result: (Box<dyn SpeechEngine>, state::SpeechQualityDiagnostics) = {
+        let model_path = &config.whisper_quality_model_path;
+        match cip_ai_speech::WhisperSpeechEngine::load(model_path) {
+            Ok(engine) => {
+                log::info!(target: LogCategory::Speech.target(), "loaded local quality-tier speech model from {}", model_path.display());
+                (
+                    Box::new(engine),
+                    state::SpeechQualityDiagnostics {
+                        feature_compiled,
+                        model_load_attempted: true,
+                        model_loaded: true,
+                        model_load_error: None,
+                        ..Default::default()
+                    },
+                )
+            }
+            Err(e) => {
+                log::info!(
+                    target: LogCategory::Speech.target(),
+                    "quality-tier speech model not available ({e}); dual-tier re-transcription is unavailable until one is configured - the fast tier is unaffected"
+                );
+                (
+                    Box::new(cip_ai_speech::NullSpeechEngine),
+                    state::SpeechQualityDiagnostics {
+                        feature_compiled,
+                        model_load_attempted: true,
+                        model_loaded: false,
+                        model_load_error: Some(e.to_string()),
+                        ..Default::default()
+                    },
+                )
+            }
+        }
+    };
+    #[cfg(not(feature = "whisper"))]
+    let result: (Box<dyn SpeechEngine>, state::SpeechQualityDiagnostics) = {
+        (
+            Box::new(cip_ai_speech::NullSpeechEngine),
+            state::SpeechQualityDiagnostics {
+                feature_compiled,
+                ..Default::default()
+            },
+        )
+    };
+    result
+}
+
 /// Choose an `EmbeddingEngine` (Phase 4.4): `CandleEmbeddingEngine` if the
 /// `semantic-search` feature is compiled in *and* both the model weights
 /// and tokenizer files are actually present at their configured paths,
@@ -462,6 +524,8 @@ pub fn run() {
             let audio_engine: Box<dyn cip_core_service::AudioEngine> =
                 Box::new(cip_integrations_audio::CpalAudioEngine::new());
             let (speech_engine, speech_diagnostics) = create_speech_engine(&config);
+            let (speech_quality_engine, speech_quality_diagnostics) =
+                create_quality_speech_engine(&config);
 
             // Phase 2.2: a fourth independent Music read path, dedicated
             // to acoustic analysis - same "every independent read path
@@ -496,6 +560,8 @@ pub fn run() {
                 audio_engine,
                 speech_engine,
                 speech_diagnostics,
+                speech_quality_engine,
+                speech_quality_diagnostics,
                 acoustic_music_engine,
                 acoustic_recognizer,
                 embedding_engine,
@@ -518,6 +584,7 @@ pub fn run() {
             commands::get_congregant_companion_status,
             commands::get_pilot_diagnostics,
             commands::install_whisper_model,
+            commands::install_whisper_quality_model,
             commands::get_speech_language_capabilities,
             commands::set_speech_language,
             commands::get_embedding_capabilities,

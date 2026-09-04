@@ -8,5 +8,5 @@ mod speech_engine;
 mod suggestion;
 
 pub use embedding_engine::{EmbeddingEngine, EmbeddingEngineError};
-pub use speech_engine::{SpeechEngine, SpeechEngineError, TranscriptSegment};
+pub use speech_engine::{QualityTranscript, SpeechEngine, SpeechEngineError, TranscriptSegment};
 pub use suggestion::{Suggestion, SuggestionKind, SuggestionStatus};

@@ -15,6 +15,12 @@ pub enum AppEvent {
     AudioStarted,
     AudioStopped,
     TranscriptUpdated,
+    /// Phase 24.3 (true dual-tier Whisper): a quality-tier re-transcription
+    /// of an already-final segment was persisted as its own new, linked
+    /// segment - never a replacement of `TranscriptUpdated`'s original
+    /// event for that segment, which stays exactly as first emitted. See
+    /// `docs/phase-24-3-audit.md`.
+    TranscriptCorrected,
 
     ScriptureDetected,
     ScriptureUpdated,
@@ -186,6 +192,7 @@ impl AppEvent {
             AppEvent::AudioStarted => "AUDIO_STARTED",
             AppEvent::AudioStopped => "AUDIO_STOPPED",
             AppEvent::TranscriptUpdated => "TRANSCRIPT_UPDATED",
+            AppEvent::TranscriptCorrected => "TRANSCRIPT_CORRECTED",
 
             AppEvent::ScriptureDetected => "SCRIPTURE_DETECTED",
             AppEvent::ScriptureUpdated => "SCRIPTURE_UPDATED",
@@ -295,6 +302,7 @@ mod tests {
             AppEvent::AudioStarted,
             AppEvent::AudioStopped,
             AppEvent::TranscriptUpdated,
+            AppEvent::TranscriptCorrected,
             AppEvent::ScriptureDetected,
             AppEvent::ScriptureUpdated,
             AppEvent::ScriptureConfirmed,

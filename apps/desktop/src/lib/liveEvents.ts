@@ -29,6 +29,7 @@ import type {
   SermonState,
   Suggestion,
   ThemeCandidate,
+  TranscriptCorrected,
   TranscriptSegment,
 } from "../domain";
 import { isTauriRuntime } from "./runtime";
@@ -42,6 +43,14 @@ function listenSafe<T>(event: string, handler: (payload: T) => void): Promise<Un
 
 export function onTranscriptUpdated(handler: (segment: TranscriptSegment) => void): Promise<UnlistenFn> {
   return listenSafe<TranscriptSegment>(AppEvents.TranscriptUpdated, handler);
+}
+
+/** Phase 24.3 (true dual-tier Whisper): a quality-tier re-transcription of
+ * an already-final segment arrived as its own new, linked segment. */
+export function onTranscriptCorrected(
+  handler: (payload: TranscriptCorrected) => void,
+): Promise<UnlistenFn> {
+  return listenSafe<TranscriptCorrected>(AppEvents.TranscriptCorrected, handler);
 }
 
 export function onScriptureDetected(handler: (detection: ScriptureDetection) => void): Promise<UnlistenFn> {

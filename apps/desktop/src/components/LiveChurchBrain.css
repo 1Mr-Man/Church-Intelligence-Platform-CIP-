@@ -411,6 +411,20 @@
   opacity: 0.75;
 }
 
+/* Phase 24.3 (true dual-tier Whisper): marks an original transcript line
+   that a slower, higher-quality model has since re-transcribed - the
+   correction itself is a new line further down the list, this badge only
+   points at it. */
+.live-brain__quality-badge {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.75rem;
+  background: var(--status-good-border, #16a34a);
+  color: #fff;
+  opacity: 0.85;
+  cursor: help;
+}
+
 .live-brain__confirmation-badge {
   font-size: 0.7rem;
   padding: 0.1rem 0.4rem;

@@ -24,6 +24,20 @@ export interface TranscriptSegment {
 }
 
 /**
+ * Payload for the `TRANSCRIPT_CORRECTED` event (Phase 24.3, true dual-tier
+ * Whisper). `correctedSegment` is a genuine new, final `TranscriptSegment`
+ * (its own `id`, already routed through the same detection/persistence
+ * pipeline every other final segment uses) - `originalSegmentId` only
+ * links it back to the fast-tier segment it re-transcribes. The original
+ * segment's own earlier `TRANSCRIPT_UPDATED` event/text is never replaced
+ * or edited - see `docs/phase-24-3-audit.md` for why.
+ */
+export interface TranscriptCorrected {
+  originalSegmentId: string;
+  correctedSegment: TranscriptSegment;
+}
+
+/**
  * The provider/adaptor contract for speech-to-text. Mirrors `SpeechEngine`
  * in `core/ai`. The frontend never talks to an engine directly - it calls
  * `start_listening`/`stop_listening` and receives `TRANSCRIPT_UPDATED`

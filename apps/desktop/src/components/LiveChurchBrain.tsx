@@ -176,6 +176,13 @@ export function LiveChurchBrain() {
   // the same window, or cleared once that window's real final segment
   // arrives (see `onTranscriptUpdated` below).
   const [interimTranscript, setInterimTranscript] = useState<TranscriptSegment | null>(null);
+  // Phase 24.3 (true dual-tier Whisper): maps an original segment's id to
+  // the quality-tier correction's own text, once one arrives - the
+  // corrected segment itself already appears in `transcript` as its own
+  // ordinary new final entry (via the same `onTranscriptUpdated` handler
+  // every final segment goes through); this map only drives the small
+  // "corrected" badge/tooltip on the *original* line, never replaces it.
+  const [correctedTextBySegmentId, setCorrectedTextBySegmentId] = useState<Record<string, string>>({});
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   // Approved but not yet prepared - a suggestion moves here (never
   // disappears) on approval, and out again once prepared. Kept distinct
@@ -445,6 +452,7 @@ export function LiveChurchBrain() {
       setSearchPreviews({});
       setTranscript([]);
       setInterimTranscript(null);
+      setCorrectedTextBySegmentId({});
       setTranscriptReceivedAt({});
       setTimeline([]);
       setActiveContext(null);
@@ -505,6 +513,13 @@ export function LiveChurchBrain() {
         setInterimTranscript(null);
         setTranscript((prev) => [...prev.slice(-(TRANSCRIPT_LIMIT - 1)), segment]);
         setTranscriptReceivedAt((prev) => ({ ...prev, [segment.id]: new Date().toISOString() }));
+      }),
+      // Phase 24.3 (true dual-tier Whisper): the corrected segment itself
+      // already lands in `transcript` as an ordinary new final entry via
+      // `onTranscriptUpdated` above - this only records the link so the
+      // *original* line can show a small "corrected" badge.
+      liveEvents.onTranscriptCorrected(({ originalSegmentId, correctedSegment }) => {
+        setCorrectedTextBySegmentId((prev) => ({ ...prev, [originalSegmentId]: correctedSegment.text }));
       }),
       liveEvents.onScriptureDetected(recordDetection),
       liveEvents.onScriptureUpdated(recordDetection),
@@ -1355,6 +1370,20 @@ export function LiveChurchBrain() {
                   &ldquo;{segment.text}&rdquo;
                   {segment.confidence && (
                     <span className="live-brain__confidence"> ({Math.round(segment.confidence.score * 100)}%)</span>
+                  )}
+                  {correctedTextBySegmentId[segment.id] && (
+                    // Phase 24.3: a quality-tier re-transcription of this
+                    // exact line arrived - it already appears below as its
+                    // own new, final entry (through the same event every
+                    // other final segment uses); this badge only points at
+                    // it, never edits the original text shown above.
+                    <span
+                      className="live-brain__quality-badge"
+                      title={`Quality tier re-transcribed this as: "${correctedTextBySegmentId[segment.id]}"`}
+                    >
+                      {" "}
+                      corrected below
+                    </span>
                   )}
                 </li>
               ))}

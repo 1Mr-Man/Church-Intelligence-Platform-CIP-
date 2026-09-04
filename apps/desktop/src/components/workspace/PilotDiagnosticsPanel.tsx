@@ -11,11 +11,10 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { getPilotDiagnostics, installWhisperModel } from "../../lib/commands";
-import type { PilotDiagnostics } from "../../config/appConfig";
+import { getPilotDiagnostics, installWhisperModel, installWhisperQualityModel } from "../../lib/commands";
+import type { PilotDiagnostics, WhisperModelDiagnostic } from "../../config/appConfig";
 
-function whisperModelSummary(diagnostics: PilotDiagnostics): string {
-  const model = diagnostics.whisperModel;
+function formatWhisperModelDiagnostic(model: WhisperModelDiagnostic): string {
   switch (model.status) {
     case "missing":
       return `Not found (expected at ${model.expectedPath})`;
@@ -26,6 +25,10 @@ function whisperModelSummary(diagnostics: PilotDiagnostics): string {
     default:
       return "Unknown";
   }
+}
+
+function whisperModelSummary(diagnostics: PilotDiagnostics): string {
+  return formatWhisperModelDiagnostic(diagnostics.whisperModel);
 }
 
 function formatMs(ms: number | null): string {
@@ -49,6 +52,8 @@ export function PilotDiagnosticsPanel() {
   const [loading, setLoading] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [installMessage, setInstallMessage] = useState<string | null>(null);
+  const [installingQuality, setInstallingQuality] = useState(false);
+  const [installQualityMessage, setInstallQualityMessage] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -89,6 +94,37 @@ export function PilotDiagnosticsPanel() {
           .finally(() => setInstalling(false));
       })
       .catch((e) => setInstallMessage(`Could not open file picker: ${String(e)}`));
+  }, [refresh]);
+
+  // Phase 24.3 (true dual-tier Whisper): identical flow to
+  // `selectModelFile` above, targeting the second, optional quality-tier
+  // model instead.
+  const selectQualityModelFile = useCallback(() => {
+    setInstallQualityMessage(null);
+    open({
+      title: "Select a quality-tier Whisper model file",
+      filters: [{ name: "Whisper model", extensions: ["bin", "gguf"] }],
+      multiple: false,
+      directory: false,
+    })
+      .then((selected) => {
+        if (!selected || Array.isArray(selected)) {
+          return;
+        }
+        setInstallingQuality(true);
+        return installWhisperQualityModel(selected)
+          .then((result) => {
+            const detail =
+              result.status === "present"
+                ? `${result.sizeBytes.toLocaleString()} bytes - ${result.sizeTierHint}`
+                : result.status;
+            setInstallQualityMessage(`Installed (${detail}). Restart CIP for it to take effect.`);
+            refresh();
+          })
+          .catch((e) => setInstallQualityMessage(`Install failed: ${String(e)}`))
+          .finally(() => setInstallingQuality(false));
+      })
+      .catch((e) => setInstallQualityMessage(`Could not open file picker: ${String(e)}`));
   }, [refresh]);
 
   return (
@@ -198,6 +234,38 @@ export function PilotDiagnosticsPanel() {
                 )}
               </div>
               {diagnostics.speech.lastError && <div>Last error: {diagnostics.speech.lastError}</div>}
+            </dd>
+          </div>
+          <div>
+            <dt>Quality-tier Whisper model (Phase 24.3, optional)</dt>
+            <dd>
+              {formatWhisperModelDiagnostic(diagnostics.whisperQualityModel)}
+              {diagnostics.speechQuality.featureCompiled && (
+                <div>
+                  <button type="button" onClick={selectQualityModelFile} disabled={installingQuality}>
+                    {installingQuality ? "Installing…" : "Select Quality-Tier Model File…"}
+                  </button>
+                  {installQualityMessage && <span> {installQualityMessage}</span>}
+                </div>
+              )}
+              <div>
+                A second, independent Whisper model run only to re-transcribe speech the
+                fast tier already showed live, for a slower but more accurate second look. Entirely
+                optional - never installing one leaves the fast tier working exactly as it always has.
+              </div>
+              {diagnostics.whisperQualityModel.status !== "missing" && (
+                <>
+                  <div>Quality engine ready: {diagnostics.speechQuality.engineReady ? "YES" : "NO"}</div>
+                  <div>
+                    Jobs: {diagnostics.speechQuality.jobsCompleted} completed / {diagnostics.speechQuality.jobsSubmitted}{" "}
+                    submitted
+                    {diagnostics.speechQuality.jobsDroppedBacklog > 0 && (
+                      <> ({diagnostics.speechQuality.jobsDroppedBacklog} dropped - quality worker still catching up)</>
+                    )}
+                  </div>
+                  {diagnostics.speechQuality.lastError && <div>Last error: {diagnostics.speechQuality.lastError}</div>}
+                </>
+              )}
             </dd>
           </div>
           <div>

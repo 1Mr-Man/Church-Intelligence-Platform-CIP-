@@ -628,6 +628,66 @@ pub fn install_whisper_model(_source_path: String) -> Result<WhisperModelDiagnos
     )
 }
 
+/// Phase 24.3 (true dual-tier Whisper): the quality-tier counterpart to
+/// `install_whisper_model` - identical in every way (real-load validation,
+/// atomic copy-then-rename, takes effect on next launch only) except it
+/// installs to `state.config.whisper_quality_model_path` instead. Never
+/// required for CIP to function: an operator who never calls this simply
+/// never gets the quality tier, exactly like never installing the fast
+/// tier's own model leaves manual/replay operation fully working.
+#[cfg(feature = "whisper")]
+#[tauri::command]
+pub fn install_whisper_quality_model(
+    state: State<'_, AppState>,
+    source_path: String,
+) -> Result<WhisperModelDiagnostic, String> {
+    ensure_admin_string_err(&state)?;
+    let source = std::path::PathBuf::from(&source_path);
+    let metadata =
+        std::fs::metadata(&source).map_err(|e| format!("cannot read \"{source_path}\": {e}"))?;
+    if !metadata.is_file() {
+        return Err(format!("\"{source_path}\" is not a regular file"));
+    }
+
+    cip_ai_speech::WhisperSpeechEngine::load(&source).map_err(|e| {
+        format!(
+            "\"{source_path}\" did not load as a valid Whisper model ({e}) - \
+             this is the same check CIP itself performs at startup, so this \
+             file would not have worked even if installed"
+        )
+    })?;
+
+    let dest = &state.config.whisper_quality_model_path;
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
+    }
+    let tmp_dest = dest.with_extension("bin.installing");
+    std::fs::copy(&source, &tmp_dest).map_err(|e| format!("could not copy model file: {e}"))?;
+    std::fs::rename(&tmp_dest, dest)
+        .map_err(|e| format!("could not finalize model install: {e}"))?;
+
+    log::info!(
+        target: LogCategory::Speech.target(),
+        "installed quality-tier Whisper model from {source_path} to {} - restart CIP for it to take effect",
+        dest.display()
+    );
+
+    Ok(diagnose_whisper_model(dest))
+}
+
+#[cfg(not(feature = "whisper"))]
+#[tauri::command]
+pub fn install_whisper_quality_model(
+    _source_path: String,
+) -> Result<WhisperModelDiagnostic, String> {
+    Err(
+        "this build was not compiled with the `whisper` feature, so there is no speech engine \
+         available to validate a model file against"
+            .to_string(),
+    )
+}
+
 // --- Phase 12: multi-language Whisper ---------------------------------------
 //
 // Which language a service is being preached in is a live-workflow choice
@@ -1410,6 +1470,24 @@ pub struct SpeechRuntimeDiagnostics {
     pub vad_early_flushes: u64,
 }
 
+/// Phase 24.3 (true dual-tier Whisper): what the running process actually
+/// observed about the quality tier - mirrors `state::SpeechQualityDiagnostics`
+/// one-to-one, the same relationship `SpeechRuntimeDiagnostics` above has to
+/// `state::SpeechDiagnostics`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeechQualityRuntimeDiagnostics {
+    pub feature_compiled: bool,
+    pub model_load_attempted: bool,
+    pub model_loaded: bool,
+    pub model_load_error: Option<String>,
+    pub engine_ready: bool,
+    pub jobs_submitted: u64,
+    pub jobs_dropped_backlog: u64,
+    pub jobs_completed: u64,
+    pub last_error: Option<String>,
+}
+
 /// Phase 3.8.7.3: the speech pipeline's operator-visible backlog state,
 /// derived purely from `queue_pending_ms` against fixed thresholds - see
 /// `classify_overload`. Never persisted or set directly; always computed
@@ -1514,6 +1592,12 @@ pub struct PilotDiagnostics {
     pub machine: MachineDiagnostic,
     pub whisper_model: WhisperModelDiagnostic,
     pub speech: SpeechRuntimeDiagnostics,
+    /// Phase 24.3 (true dual-tier Whisper): the second, optional
+    /// quality-tier model - `Missing` (the default, since this is entirely
+    /// opt-in) unless an operator has installed one via
+    /// `install_whisper_quality_model`.
+    pub whisper_quality_model: WhisperModelDiagnostic,
+    pub speech_quality: SpeechQualityRuntimeDiagnostics,
     pub audio_devices: Vec<AudioDevice>,
     pub audio: AudioEngineStatus,
     /// Every display this process can detect. `len() >= 2` is a necessary
@@ -1537,6 +1621,7 @@ pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> Pilo
     };
 
     let whisper_model = diagnose_whisper_model(&state.config.whisper_model_path);
+    let whisper_quality_model = diagnose_whisper_model(&state.config.whisper_quality_model_path);
 
     let speech = {
         let diag = state
@@ -1582,6 +1667,25 @@ pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> Pilo
             silent_windows_skipped: diag.silent_windows_skipped,
             non_speech_placeholders_skipped: diag.non_speech_placeholders_skipped,
             vad_early_flushes: diag.vad_early_flushes,
+        }
+    };
+
+    let speech_quality = {
+        let diag = state
+            .speech_quality_diagnostics
+            .lock()
+            .expect("speech_quality_diagnostics mutex poisoned")
+            .clone();
+        SpeechQualityRuntimeDiagnostics {
+            feature_compiled: diag.feature_compiled,
+            model_load_attempted: diag.model_load_attempted,
+            model_loaded: diag.model_loaded,
+            model_load_error: diag.model_load_error,
+            engine_ready: state.speech_quality_ready,
+            jobs_submitted: diag.jobs_submitted,
+            jobs_dropped_backlog: diag.jobs_dropped_backlog,
+            jobs_completed: diag.jobs_completed,
+            last_error: diag.last_error,
         }
     };
 
@@ -1640,6 +1744,8 @@ pub fn get_pilot_diagnostics(app: AppHandle, state: State<'_, AppState>) -> Pilo
         machine,
         whisper_model,
         speech,
+        whisper_quality_model,
+        speech_quality,
         audio_devices,
         audio,
         displays,
@@ -2073,12 +2179,31 @@ pub fn start_listening(
         diag.queue_pending_ms = 0;
         diag.queue_high_water_ms = 0;
     }
+    // Phase 24.3 (true dual-tier Whisper): only ever spawned when a
+    // quality model actually loaded (`speech_quality_ready`, cached once at
+    // construction like `speech_ready`) - an operator who never installs
+    // one gets no quality channel/worker at all, not a permanently-empty
+    // one. Bounded and small: unlike the fast tier's continuous audio-chunk
+    // stream, a quality job only arrives once per fast-tier *final window*
+    // (every few seconds at most), so a handful of queued jobs is already
+    // generous headroom for a slower model to catch up - see
+    // `spawn_quality_worker`'s own docs for what happens when it can't.
+    const QUALITY_CHANNEL_CAPACITY: usize = 4;
+    let quality_tx = if state.speech_quality_ready {
+        let (quality_tx, quality_rx) = mpsc::sync_channel::<QualityJob>(QUALITY_CHANNEL_CAPACITY);
+        spawn_quality_worker(app.clone(), quality_rx);
+        Some(quality_tx)
+    } else {
+        None
+    };
+
     spawn_speech_worker(
         app.clone(),
         service_id,
         speech_rx,
         worker_pending_ms,
         generation,
+        quality_tx,
     );
 
     let sink: AudioChunkSink = Arc::new(move |chunk: AudioChunk| {
@@ -2393,12 +2518,129 @@ fn resample_pcm16(samples: &[i16], from_hz: u32, to_hz: u32) -> Vec<i16> {
 /// for the full design and why a plain bounded/drop-newest channel alone
 /// was rejected. `generation` is this listening session's id (Finding 4) -
 /// passed through unchanged to `handle_audio_chunk`.
+/// Phase 24.3 (true dual-tier Whisper): one fast-tier final window's raw
+/// audio, handed to the quality worker for a slower, higher-quality
+/// re-decode. `original_segment_id`/`start_ms`/`end_ms`/`speaker_id` come
+/// straight from the fast tier's already-persisted `TranscriptSegment` -
+/// the quality worker never invents timing or identity, only text/
+/// confidence/language (from `SpeechEngine::transcribe_once`).
+struct QualityJob {
+    service_id: Uuid,
+    original_segment_id: Uuid,
+    start_ms: u64,
+    end_ms: u64,
+    speaker_id: Option<String>,
+    audio: Vec<i16>,
+}
+
+/// Payload for [`AppEvent::TranscriptCorrected`].
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TranscriptCorrectedPayload {
+    original_segment_id: Uuid,
+    corrected_segment: TranscriptSegment,
+}
+
+/// Phase 24.3: the quality-tier counterpart to `spawn_speech_worker` -
+/// runs on its own dedicated thread, reading `QualityJob`s from a bounded
+/// channel (`start_listening` only creates it, and only spawns this worker,
+/// when `state.speech_quality_ready`). Deliberately much simpler than the
+/// fast tier's worker: no windowing, no VAD, no backpressure state machine -
+/// each job is one complete, already-captured window, and a slow quality
+/// model falling behind just means jobs pile up against the channel's fixed
+/// capacity until `handle_audio_chunk`'s `try_send` starts dropping newest
+/// jobs (see its own docs) rather than blocking the fast tier or audio
+/// capture. `finalize_bible_only`/`finalize_and_route_segment` are reused
+/// completely unchanged - the corrected segment is a genuine new final
+/// segment that goes through the exact same detection/persistence/routing
+/// pipeline every other final segment does, per the operator's own choice
+/// (`docs/phase-24-3-audit.md`) to also re-run Bible detection on the
+/// corrected text: the existing 60s suggestion-dedup window
+/// (`persistence::has_recent_detection_for_reference`) naturally suppresses
+/// a redundant suggestion when the quality tier only confirms what the fast
+/// tier already found, with zero new dedup logic needed.
+fn spawn_quality_worker(app: AppHandle, rx: mpsc::Receiver<QualityJob>) {
+    std::thread::spawn(move || {
+        while let Ok(job) = rx.recv() {
+            let state = app.state::<AppState>();
+
+            let outcome = {
+                let engine = state
+                    .speech_quality_engine
+                    .lock()
+                    .expect("speech_quality_engine mutex poisoned");
+                engine.transcribe_once(&job.audio)
+            };
+
+            let quality_transcript = match outcome {
+                Ok(Some(qt)) => qt,
+                Ok(None) => continue,
+                Err(e) => {
+                    log::error!(target: LogCategory::Speech.target(), "quality-tier transcribe_once failed: {e}");
+                    let mut diag = state
+                        .speech_quality_diagnostics
+                        .lock()
+                        .expect("speech_quality_diagnostics mutex poisoned");
+                    diag.last_error = Some(e.to_string());
+                    continue;
+                }
+            };
+            if quality_transcript.text.trim().is_empty() {
+                continue;
+            }
+
+            let sequence = state.transcript_sequence.fetch_add(1, Ordering::SeqCst);
+            let corrected = TranscriptSegment {
+                id: Uuid::new_v4(),
+                sequence,
+                text: quality_transcript.text,
+                is_final: true,
+                confidence: quality_transcript.confidence,
+                start_ms: job.start_ms,
+                end_ms: job.end_ms,
+                language: quality_transcript.language,
+                speaker_id: job.speaker_id.clone(),
+            };
+
+            finalize_bible_only(&app, &state, job.service_id, corrected.clone());
+            finalize_and_route_segment(&app, &state, job.service_id, corrected.clone());
+
+            {
+                let db = state.db.lock().expect("db connection poisoned");
+                if let Err(e) = persistence::persist_transcript_correction(
+                    &db,
+                    job.original_segment_id,
+                    corrected.id,
+                ) {
+                    log::error!(target: LogCategory::Database.target(), "failed to persist transcript correction link: {e}");
+                }
+            }
+
+            state
+                .speech_quality_diagnostics
+                .lock()
+                .expect("speech_quality_diagnostics mutex poisoned")
+                .jobs_completed += 1;
+
+            let _ = emit(
+                &app,
+                AppEvent::TranscriptCorrected,
+                TranscriptCorrectedPayload {
+                    original_segment_id: job.original_segment_id,
+                    corrected_segment: corrected,
+                },
+            );
+        }
+    });
+}
+
 fn spawn_speech_worker(
     app: AppHandle,
     service_id: Uuid,
     rx: mpsc::Receiver<AudioChunk>,
     pending_ms: Arc<AtomicU64>,
     generation: u64,
+    quality_tx: Option<mpsc::SyncSender<QualityJob>>,
 ) {
     std::thread::spawn(move || {
         // Phase 3.8.7.5 Part A: owned exclusively by this worker thread for
@@ -2492,6 +2734,7 @@ fn spawn_speech_worker(
                 generation,
                 &mut segmenter,
                 &mut window_had_suggestion,
+                quality_tx.as_ref(),
             );
         }
 
@@ -2543,10 +2786,11 @@ fn handle_audio_chunk(
     generation: u64,
     segmenter: &mut TranscriptSegmenter,
     window_had_suggestion: &mut bool,
+    quality_tx: Option<&mpsc::SyncSender<QualityJob>>,
 ) {
     let state = app.state::<AppState>();
 
-    let segments = {
+    let (segments, final_window_audio) = {
         let mut speech = state
             .speech_engine
             .lock()
@@ -2686,7 +2930,19 @@ fn handle_audio_chunk(
                         .expect("speech_diagnostics mutex poisoned")
                         .inferences_succeeded += 1;
                 }
-                segments
+                // Phase 24.3: only a genuine final window ever has raw
+                // audio worth handing to the quality tier - an interim
+                // decode's prefix would just be re-decoded again (wastefully,
+                // and prematurely) once its window actually finalizes.
+                // `take_last_final_window_audio` is a no-op default `None`
+                // for every engine except `WhisperSpeechEngine`, so this is
+                // free on any other engine.
+                let final_window_audio = if segments.iter().any(|s| s.is_final) {
+                    speech.take_last_final_window_audio()
+                } else {
+                    None
+                };
+                (segments, final_window_audio)
             }
             Err(e) => {
                 log::error!(target: LogCategory::Speech.target(), "speech engine error: {e}");
@@ -2719,6 +2975,11 @@ fn handle_audio_chunk(
         .speech_error
         .lock()
         .expect("speech_error mutex poisoned") = None;
+    // Phase 24.3: at most one final segment is ever produced per
+    // `handle_audio_chunk` call (a window either finalizes or it doesn't),
+    // so a single `Option` correctly correlates this call's captured audio
+    // with whichever segment in `segments` turns out to be final below.
+    let mut final_window_audio = final_window_audio;
 
     for segment in segments {
         // Phase 3.8.7.3 Finding 4: discard output from a listening session
@@ -2747,6 +3008,44 @@ fn handle_audio_chunk(
         // partial/interim guess) and what it deliberately does not do.
         if finalize_bible_only(app, &state, service_id, segment.clone()) {
             *window_had_suggestion = true;
+        }
+
+        // Phase 24.3: fan out this final window's raw audio to the quality
+        // tier, regardless of whether the fast tier's own detection above
+        // found anything - the whole point of a second, more accurate
+        // model is to catch what the fast tier missed, not only confirm
+        // what it already found. `try_send` (never blocking `send`) on a
+        // bounded channel: a quality worker that is still working through
+        // a backlog (a slower model, by design) simply drops this job
+        // rather than ever stalling the fast tier or audio capture - see
+        // `spawn_quality_worker`'s own docs. `quality_tx` is `None`
+        // whenever `start_listening` didn't spawn a quality worker at all
+        // (no quality model configured), the common case today.
+        if let (Some(tx), Some(audio)) = (quality_tx, final_window_audio.take()) {
+            let job = QualityJob {
+                service_id,
+                original_segment_id: segment.id,
+                start_ms: segment.start_ms,
+                end_ms: segment.end_ms,
+                speaker_id: segment.speaker_id.clone(),
+                audio,
+            };
+            match tx.try_send(job) {
+                Ok(()) => {
+                    state
+                        .speech_quality_diagnostics
+                        .lock()
+                        .expect("speech_quality_diagnostics mutex poisoned")
+                        .jobs_submitted += 1;
+                }
+                Err(_) => {
+                    state
+                        .speech_quality_diagnostics
+                        .lock()
+                        .expect("speech_quality_diagnostics mutex poisoned")
+                        .jobs_dropped_backlog += 1;
+                }
+            }
         }
 
         // Phase 3.8.7.5 Part A: accumulate this raw ~3s Whisper window into
@@ -8230,6 +8529,20 @@ mod tests {
                 silent_windows_skipped: 0,
                 non_speech_placeholders_skipped: 0,
                 vad_early_flushes: 0,
+            },
+            whisper_quality_model: WhisperModelDiagnostic::Missing {
+                expected_path: "/tmp/ggml-base.en.bin".to_string(),
+            },
+            speech_quality: SpeechQualityRuntimeDiagnostics {
+                feature_compiled: false,
+                model_load_attempted: false,
+                model_loaded: false,
+                model_load_error: None,
+                engine_ready: false,
+                jobs_submitted: 0,
+                jobs_dropped_backlog: 0,
+                jobs_completed: 0,
+                last_error: None,
             },
             audio_devices: Vec::new(),
             audio: AudioEngineStatus {

@@ -123,6 +123,18 @@ export function installWhisperModel(sourcePath: string): Promise<WhisperModelDia
 }
 
 /**
+ * Phase 24.3 (true dual-tier Whisper): the quality-tier counterpart to
+ * `installWhisperModel` - identical contract (real-load validation,
+ * atomic install, takes effect on next launch only), installs to
+ * `whisperQualityModelPath` instead. Entirely optional: never installing
+ * one just means the fast tier keeps working alone, exactly as it always
+ * has.
+ */
+export function installWhisperQualityModel(sourcePath: string): Promise<WhisperModelDiagnostic> {
+  return invokeCommand("install_whisper_quality_model", { sourcePath });
+}
+
+/**
  * Phase 12 (multi-language Whisper): current transcription-language
  * selection and what CIP actually supports - available without being
  * logged in as Admin (a live-workflow control, not configuration).

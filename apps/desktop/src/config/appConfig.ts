@@ -18,6 +18,13 @@ export interface AppConfig {
    * the UI so "speech unavailable" names where to put a model, not just
    * that one is missing. */
   whisperModelPath: string;
+  /** Phase 24.3 (true dual-tier Whisper): exact file path the optional
+   * second, quality-tier speech engine looks for a local Whisper model at -
+   * overridable via CIP_WHISPER_QUALITY_MODEL_PATH. Mirrors
+   * `whisperModelPath` exactly; unlike it, a missing file here is the
+   * expected default state, not something a "speech unavailable" notice
+   * needs to call out. */
+  whisperQualityModelPath: string;
   logDir: string;
 }
 
@@ -137,10 +144,39 @@ export interface SpeechRuntimeDiagnostics {
   vadEarlyFlushes: number;
 }
 
+/**
+ * Phase 24.3 (true dual-tier Whisper): what the running process actually
+ * observed about the second, optional quality-tier engine - mirrors
+ * `commands.rs`'s `SpeechQualityRuntimeDiagnostics` one-to-one, the same
+ * relationship `SpeechRuntimeDiagnostics` above has to the fast tier.
+ */
+export interface SpeechQualityRuntimeDiagnostics {
+  featureCompiled: boolean;
+  modelLoadAttempted: boolean;
+  modelLoaded: boolean;
+  modelLoadError: string | null;
+  engineReady: boolean;
+  /** Fast-tier final windows handed to the quality worker so far. */
+  jobsSubmitted: number;
+  /** Jobs dropped because the bounded quality channel was full - the
+   * quality worker (a slower model, by design) was still catching up.
+   * Never fatal, never blocks the fast tier. */
+  jobsDroppedBacklog: number;
+  /** Jobs that produced a real, non-empty correction routed through the
+   * pipeline as a new, linked transcript segment. */
+  jobsCompleted: number;
+  lastError: string | null;
+}
+
 export interface PilotDiagnostics {
   machine: MachineDiagnostic;
   whisperModel: WhisperModelDiagnostic;
   speech: SpeechRuntimeDiagnostics;
+  /** Phase 24.3: `{status: "missing", ...}` (the default) unless an
+   * operator has installed a second, quality-tier model via
+   * `installWhisperQualityModel`. */
+  whisperQualityModel: WhisperModelDiagnostic;
+  speechQuality: SpeechQualityRuntimeDiagnostics;
   audioDevices: Array<{ id: string; name: string; isDefault: boolean }>;
   audio: {
     isCapturing: boolean;

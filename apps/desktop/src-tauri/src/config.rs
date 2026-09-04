@@ -18,6 +18,19 @@ use thiserror::Error;
 /// verify one end to end.
 pub const WHISPER_MODEL_FILENAME: &str = "ggml-tiny.en.bin";
 
+/// Phase 24.3 (true dual-tier Whisper): the expected filename of a second,
+/// independent local ggml/gguf Whisper model - a larger, more accurate
+/// model than [`WHISPER_MODEL_FILENAME`]'s fast/tiny default, run
+/// concurrently to produce a slower, higher-quality re-transcription of
+/// speech the fast tier already showed the operator. Never bundled with
+/// CIP, never downloaded automatically, and entirely optional: an operator
+/// who never installs a file at `whisper_quality_model_path` simply never
+/// gets the quality tier - the fast tier alone keeps working exactly as it
+/// always has (see `docs/phase-24-3-audit.md`). `base.en`, not `tiny.en`,
+/// since a "quality" tier that defaulted to the same tiny-class model the
+/// fast tier already uses would add real CPU cost for no accuracy gain.
+pub const WHISPER_QUALITY_MODEL_FILENAME: &str = "ggml-base.en.bin";
+
 /// Expected subdirectory of `AppConfig::model_dir` a local acoustic
 /// (audio-fingerprint) model would be configured under, if one exists -
 /// the Phase 2.2 counterpart to `WHISPER_MODEL_FILENAME`. Unlike Whisper
@@ -160,6 +173,13 @@ pub struct AppConfig {
     /// (via `get_app_config`) so a "speech unavailable" notice can name the
     /// exact path it looked for, never a vague "not configured."
     pub whisper_model_path: PathBuf,
+    /// Phase 24.3: the exact file `create_quality_speech_engine` will try
+    /// to load a second, independent Whisper model from - mirrors
+    /// `whisper_model_path` exactly, including its `CIP_WHISPER_MODEL_PATH`
+    /// precedent (`CIP_WHISPER_QUALITY_MODEL_PATH` here). Missing/invalid
+    /// is never fatal: the quality tier is purely additive, see
+    /// `docs/phase-24-3-audit.md`.
+    pub whisper_quality_model_path: PathBuf,
     /// Phase 4.4: the exact file `create_embedding_engine` will try to load
     /// local embedding model weights from - mirrors `whisper_model_path`
     /// exactly, including its `CIP_EMBEDDING_MODEL_PATH` override.
@@ -193,6 +213,9 @@ impl AppConfig {
         let whisper_model_path = std::env::var("CIP_WHISPER_MODEL_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|_| model_dir.join(WHISPER_MODEL_FILENAME));
+        let whisper_quality_model_path = std::env::var("CIP_WHISPER_QUALITY_MODEL_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| model_dir.join(WHISPER_QUALITY_MODEL_FILENAME));
         let embedding_model_path = std::env::var("CIP_EMBEDDING_MODEL_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|_| model_dir.join(EMBEDDING_MODEL_FILENAME));
@@ -204,6 +227,7 @@ impl AppConfig {
             database_path: data_dir.join("cip.sqlite3"),
             model_dir,
             whisper_model_path,
+            whisper_quality_model_path,
             embedding_model_path,
             embedding_tokenizer_path,
             log_dir: data_dir.join("logs"),
@@ -281,6 +305,45 @@ mod tests {
         assert_eq!(
             config.whisper_model_path,
             PathBuf::from("/opt/models/my-whisper.bin"),
+            "an operator-supplied path must be used verbatim, never merged with model_dir"
+        );
+    }
+
+    /// Phase 24.3: mirrors `whisper_model_path_defaults_under_model_dir_when_unset`
+    /// for the second, quality-tier model.
+    #[test]
+    fn whisper_quality_model_path_defaults_under_model_dir_when_unset() {
+        // SAFETY: no other test in this crate reads or writes
+        // CIP_WHISPER_QUALITY_MODEL_PATH, so removing it here cannot race.
+        unsafe {
+            std::env::remove_var("CIP_WHISPER_QUALITY_MODEL_PATH");
+        }
+        let config =
+            AppConfig::from_data_dir(PathBuf::from("/tmp/cip-test-default-whisper-quality"));
+        assert_eq!(
+            config.whisper_quality_model_path,
+            PathBuf::from("/tmp/cip-test-default-whisper-quality/models/ggml-base.en.bin")
+        );
+    }
+
+    #[test]
+    fn whisper_quality_model_path_honors_the_env_override() {
+        // SAFETY: this test sets then immediately removes the var within
+        // its own body, and no other test in this crate touches it.
+        unsafe {
+            std::env::set_var(
+                "CIP_WHISPER_QUALITY_MODEL_PATH",
+                "/opt/models/my-whisper-quality.bin",
+            );
+        }
+        let config =
+            AppConfig::from_data_dir(PathBuf::from("/tmp/cip-test-override-whisper-quality"));
+        unsafe {
+            std::env::remove_var("CIP_WHISPER_QUALITY_MODEL_PATH");
+        }
+        assert_eq!(
+            config.whisper_quality_model_path,
+            PathBuf::from("/opt/models/my-whisper-quality.bin"),
             "an operator-supplied path must be used verbatim, never merged with model_dir"
         );
     }

@@ -174,6 +174,39 @@ pub struct SpeechDiagnostics {
     pub vad_early_flushes: u64,
 }
 
+/// Phase 24.3 (true dual-tier Whisper) counterpart to [`SpeechDiagnostics`]
+/// for the second, quality-tier engine - much smaller, since the quality
+/// worker's job arrival rate is bursty and bounded (one job per fast-tier
+/// final window, never per raw audio chunk) rather than continuous.
+#[derive(Debug, Default, Clone)]
+pub struct SpeechQualityDiagnostics {
+    /// Whether this binary was compiled with the `whisper` Cargo feature -
+    /// the quality engine uses the same `WhisperSpeechEngine` type as the
+    /// fast tier, so it shares the same feature gate.
+    pub feature_compiled: bool,
+    /// Whether `create_quality_speech_engine` attempted
+    /// `WhisperSpeechEngine::load` at startup (only happens when
+    /// `feature_compiled` is true).
+    pub model_load_attempted: bool,
+    pub model_loaded: bool,
+    pub model_load_error: Option<String>,
+    /// Total quality jobs handed to the bounded quality channel by
+    /// `handle_audio_chunk` (Phase 24.3) - incremented on a successful
+    /// `try_send`, regardless of whether the worker later produces a
+    /// correction.
+    pub jobs_submitted: u64,
+    /// Quality jobs dropped because the bounded channel was full - the
+    /// quality worker is still catching up on a backlog, or is simply
+    /// slower (by design: a larger model) than the fast tier's own window
+    /// cadence. Never fatal, never blocks the fast tier or audio capture -
+    /// see `docs/phase-24-3-audit.md`.
+    pub jobs_dropped_backlog: u64,
+    /// Quality jobs the worker actually re-decoded into a real, non-empty
+    /// correction that was routed through the pipeline.
+    pub jobs_completed: u64,
+    pub last_error: Option<String>,
+}
+
 /// Phase 4.4 counterpart to [`SpeechDiagnostics`], much smaller: there is
 /// no live per-chunk pipeline to instrument, only a one-time startup model
 /// load - the rest of what an operator needs (verse-embedding coverage) is
@@ -232,6 +265,18 @@ pub struct AppState {
     /// question whose answer never changes, so a status poll can never
     /// block behind a long-running Whisper inference holding that mutex.
     pub speech_ready: bool,
+    /// Phase 24.3 (true dual-tier Whisper): a second, independently
+    /// constructed `SpeechEngine` - typically a larger/slower Whisper
+    /// model loaded from `AppConfig::whisper_quality_model_path` - used
+    /// only for one-shot `transcribe_once` re-decodes of audio the fast
+    /// tier (`speech_engine` above) already finalized a window from. Never
+    /// fed live audio via `feed_audio`; never touched by the main speech
+    /// worker. See `commands::spawn_quality_worker`.
+    pub speech_quality_engine: Mutex<Box<dyn SpeechEngine>>,
+    /// Mirrors `speech_ready`'s own "cached once, never changes" rationale
+    /// for `speech_quality_engine`.
+    pub speech_quality_ready: bool,
+    pub speech_quality_diagnostics: Mutex<SpeechQualityDiagnostics>,
     pub active_service: Mutex<Option<ServiceSession>>,
     /// Monotonic counter for `TranscriptSegment.sequence`, shared across
     /// the real audio/speech pipeline and `process_test_transcript` so
@@ -431,6 +476,8 @@ impl AppState {
         audio_engine: Box<dyn AudioEngine>,
         speech_engine: Box<dyn SpeechEngine>,
         speech_diagnostics: SpeechDiagnostics,
+        speech_quality_engine: Box<dyn SpeechEngine>,
+        speech_quality_diagnostics: SpeechQualityDiagnostics,
         acoustic_music_engine: MusicIntelligenceEngine,
         acoustic_recognizer: Box<dyn AcousticMusicRecognizer>,
         embedding_engine: Box<dyn EmbeddingEngine>,
@@ -439,6 +486,7 @@ impl AppState {
         operator_account_store: Box<dyn cip_core_access::OperatorAccountStore>,
     ) -> Self {
         let speech_ready = speech_engine.is_ready();
+        let speech_quality_ready = speech_quality_engine.is_ready();
         let embedding_ready = embedding_engine.is_ready();
         Self {
             config,
@@ -454,6 +502,9 @@ impl AppState {
             audio_engine: Mutex::new(audio_engine),
             speech_engine: Mutex::new(speech_engine),
             speech_ready,
+            speech_quality_engine: Mutex::new(speech_quality_engine),
+            speech_quality_ready,
+            speech_quality_diagnostics: Mutex::new(speech_quality_diagnostics),
             active_service: Mutex::new(None),
             transcript_sequence: AtomicU64::new(0),
             listening_generation: AtomicU64::new(0),
