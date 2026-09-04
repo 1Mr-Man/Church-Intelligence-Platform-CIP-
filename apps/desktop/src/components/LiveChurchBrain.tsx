@@ -208,6 +208,14 @@ export function LiveChurchBrain() {
   // fabricated. `null` before the operator has ever previewed anything
   // this session.
   const [previewSelectionId, setPreviewSelectionId] = useState<string | null>(null);
+  // Phase 24.1: real `RenderedSlide`s for the Live/Preview stage's queue
+  // strip, keyed by prepared-item id - closes the gap Phase 24 documented
+  // (docs/phase-24-audit.md's "Known limitations"), where the queue
+  // thumbnail derived its text from raw `PresentationContent` rather than
+  // the actual render. Populated by the effect below as `preparedItems`
+  // changes; never fabricated when a fetch fails (that item just falls
+  // back to `LivePreviewStage`'s own raw-text approximation).
+  const [queueSlides, setQueueSlides] = useState<Record<string, RenderedSlide>>({});
   const [searchPreviews, setSearchPreviews] = useState<Record<string, PresentationPreview>>({});
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -600,6 +608,29 @@ export function LiveChurchBrain() {
     };
   }, [recordDetection]);
 
+  // Phase 24.1: fetch the real `RenderedSlide` for any prepared item the
+  // queue strip doesn't already have one for. Stale entries for items no
+  // longer prepared are never explicitly pruned - `LivePreviewStage` only
+  // ever reads `queueSlides[item.id]` for an `item` still present in
+  // `preparedItems`, and a service's prepared-item count is small enough
+  // that the orphaned entries are not a meaningful memory concern.
+  useEffect(() => {
+    const missingIds = preparedItems.map((item) => item.id).filter((id) => !(id in queueSlides));
+    if (missingIds.length === 0) return;
+    Promise.all(
+      missingIds.map((id) =>
+        commands
+          .getPreparedItemSlide(id)
+          .then((slide) => [id, slide] as const)
+          .catch(() => null),
+      ),
+    ).then((results) => {
+      const fetched = results.filter((r): r is readonly [string, RenderedSlide] => r !== null);
+      if (fetched.length === 0) return;
+      setQueueSlides((prev) => ({ ...prev, ...Object.fromEntries(fetched) }));
+    });
+  }, [preparedItems, queueSlides]);
+
   const withBusy = useCallback(async (key: string, action: () => Promise<void>) => {
     setBusy(key);
     setError(null);
@@ -988,6 +1019,7 @@ export function LiveChurchBrain() {
         activeSlide={activeSlide}
         previewSlide={previewSelectionId ? (previews[previewSelectionId]?.slide ?? null) : null}
         preparedItems={preparedItems}
+        queueSlides={queueSlides}
         activeDisplayItemId={activeDisplayItem?.id ?? null}
         busy={busy}
         onDisplayQueued={(id) => withBusy(`display-${id}`, async () => { await commands.displayPresentation(id); })}

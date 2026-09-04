@@ -246,6 +246,8 @@ export function ServiceReplay() {
   const anyScreenOpen = screens.some((s) => s.windowOpen);
   const [previews, setPreviews] = useState<Record<string, PresentationPreview>>({});
   const [previewSelectionId, setPreviewSelectionId] = useState<string | null>(null);
+  // Phase 24.1: see LiveChurchBrain.tsx's own identical field/effect.
+  const [queueSlides, setQueueSlides] = useState<Record<string, RenderedSlide>>({});
   const [deviceCount, setDeviceCount] = useState(0);
   const [workspaceBusy, setWorkspaceBusy] = useState<string | null>(null);
 
@@ -388,6 +390,24 @@ export function ServiceReplay() {
       subscriptions.forEach((p) => p.then((unlisten) => unlisten()));
     };
   }, []);
+
+  // Phase 24.1: see LiveChurchBrain.tsx's own identical effect.
+  useEffect(() => {
+    const missingIds = preparedItems.map((item) => item.id).filter((id) => !(id in queueSlides));
+    if (missingIds.length === 0) return;
+    Promise.all(
+      missingIds.map((id) =>
+        commands
+          .getPreparedItemSlide(id)
+          .then((slide) => [id, slide] as const)
+          .catch(() => null),
+      ),
+    ).then((results) => {
+      const fetched = results.filter((r): r is readonly [string, RenderedSlide] => r !== null);
+      if (fetched.length === 0) return;
+      setQueueSlides((prev) => ({ ...prev, ...Object.fromEntries(fetched) }));
+    });
+  }, [preparedItems, queueSlides]);
 
   const unifiedFeed = useMemo(
     () =>
@@ -907,6 +927,7 @@ export function ServiceReplay() {
         activeSlide={activeSlide}
         previewSlide={previewSelectionId ? (previews[previewSelectionId]?.slide ?? null) : null}
         preparedItems={preparedItems}
+        queueSlides={queueSlides}
         activeDisplayItemId={activeDisplayItem?.id ?? null}
         busy={workspaceBusy}
         onDisplayQueued={(id) => withWorkspaceBusy(`display-${id}`, async () => { await commands.displayPresentation(id); })}

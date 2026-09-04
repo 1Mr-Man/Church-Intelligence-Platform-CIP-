@@ -3877,6 +3877,33 @@ pub fn get_presentation_item(
         .map_err(log_and_return)
 }
 
+/// Re-renders an already-persisted item's slide purely for display, e.g.
+/// the operator's own queue-strip thumbnail (Phase 24.1, closing the gap
+/// `docs/phase-24-audit.md`'s "Known limitations" documented: the queue
+/// strip previously derived its thumbnail from raw `PresentationContent`
+/// text, not a real `RenderedSlide`). Never mutates status and works for
+/// any item regardless of status (`Prepared`, `Active`, or `Stopped`) -
+/// this is a read-only render, not a lifecycle transition. Reuses the
+/// exact same `render_content` the real display path
+/// (`display_presentation`/`get_presentation_display_state`) already
+/// calls, so there is still only one rendering system.
+#[tauri::command]
+pub fn get_prepared_item_slide(
+    item_id: String,
+    state: State<'_, AppState>,
+) -> Result<RenderedSlide, AppError> {
+    let id = parse_uuid(&item_id).map_err(log_and_return)?;
+    let db = state.db.lock().expect("db connection poisoned");
+    let item = persistence::get_presentation_item(&db, id)
+        .map_err(AppError::from)
+        .map_err(log_and_return)?;
+    drop(db);
+    render_content(&item.content)
+        .map_err(presentation::PresentationError::from)
+        .map_err(AppError::from)
+        .map_err(log_and_return)
+}
+
 /// Presentation History (Phase 3.6): every presentation item ever prepared
 /// for a given (possibly past, possibly the live) service, regardless of
 /// status - unlike `list_prepared_presentations` above, which is

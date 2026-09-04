@@ -45,6 +45,7 @@ import type {
   ProcessedSegment,
   ProductionIntegrationConfigInput,
   ProductionIntegrationStatus,
+  RenderedSlide,
   Role,
   RouteMode,
   ScriptureContext,
@@ -304,6 +305,14 @@ export function listPresentationHistory(serviceId: string): Promise<Presentation
 
 export function getPresentationItem(itemId: string): Promise<PresentationItem> {
   return invokeCommand("get_presentation_item", { itemId });
+}
+
+/** Re-renders an already-persisted item's slide purely for display (e.g. a
+ * queue-strip thumbnail) - works for any item regardless of status and
+ * never mutates anything. Reuses the same `render_content` the real
+ * display path already calls, so this is not a second rendering system. */
+export function getPreparedItemSlide(itemId: string): Promise<RenderedSlide> {
+  return invokeCommand("get_prepared_item_slide", { itemId });
 }
 
 /** Cancels ("retracts") a still-prepared item before it's ever displayed. */

@@ -552,6 +552,7 @@ pub fn run() {
             commands::create_manual_presentation,
             commands::list_prepared_presentations,
             commands::get_presentation_item,
+            commands::get_prepared_item_slide,
             commands::cancel_presentation,
             commands::open_presentation_display,
             commands::get_presentation_display_state,

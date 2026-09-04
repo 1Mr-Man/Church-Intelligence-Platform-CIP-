@@ -25,7 +25,17 @@
  * thumbnail sends it live immediately, exactly like `PresentationCard`'s
  * button does today; it is not a "select for preview" affordance, since
  * a prepared item has no separate re-renderable preview state to select
- * into without a new backend call this phase does not add.
+ * into.
+ *
+ * Phase 24.1: the queue strip's thumbnails now show each item's real
+ * `RenderedSlide` (fetched via `get_prepared_item_slide`, keyed by item
+ * id in `queueSlides`), not the raw-text approximation Phase 24 shipped -
+ * see docs/phase-24-audit.md's "Known limitations" for why that gap
+ * existed and docs/phase-24-1-audit.md for the fix. `get_prepared_item_slide`
+ * reuses the same `render_content` every other slide on screen is built
+ * from, so this is still not a second rendering system. A still-loading
+ * or failed fetch falls back to the raw-text heading/snippet rather than
+ * showing nothing.
  */
 import type { PresentationItem, RenderedSlide } from "../../domain";
 
@@ -33,6 +43,7 @@ export interface LivePreviewStageProps {
   activeSlide: RenderedSlide | null;
   previewSlide: RenderedSlide | null;
   preparedItems: PresentationItem[];
+  queueSlides: Record<string, RenderedSlide>;
   activeDisplayItemId: string | null;
   busy: string | null;
   onDisplayQueued: (itemId: string) => void;
@@ -67,6 +78,7 @@ export function LivePreviewStage({
   activeSlide,
   previewSlide,
   preparedItems,
+  queueSlides,
   activeDisplayItemId,
   busy,
   onDisplayQueued,
@@ -85,20 +97,26 @@ export function LivePreviewStage({
       </div>
       {preparedItems.length > 0 && (
         <div className="live-preview-stage__queue" role="list" aria-label="Prepared, ready to display">
-          {preparedItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="listitem"
-              className="live-preview-stage__queue-item"
-              disabled={!!activeDisplayItemId || busy === `display-${item.id}`}
-              title={activeDisplayItemId ? "Stop the currently active item before displaying another" : "Send this live"}
-              onClick={() => onDisplayQueued(item.id)}
-            >
-              <span className="live-preview-stage__queue-heading">{queueHeading(item)}</span>
-              {queueSnippet(item) && <span className="live-preview-stage__queue-snippet">{queueSnippet(item)}</span>}
-            </button>
-          ))}
+          {preparedItems.map((item) => {
+            const slide = queueSlides[item.id];
+            const heading = slide?.heading || queueHeading(item);
+            const snippet = slide ? slide.bodyLines.join(" ") : queueSnippet(item);
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="listitem"
+                className="live-preview-stage__queue-item"
+                disabled={!!activeDisplayItemId || busy === `display-${item.id}`}
+                title={activeDisplayItemId ? "Stop the currently active item before displaying another" : "Send this live"}
+                onClick={() => onDisplayQueued(item.id)}
+              >
+                <span className="live-preview-stage__queue-heading">{heading}</span>
+                {snippet && <span className="live-preview-stage__queue-snippet">{snippet}</span>}
+                {slide?.footer && <span className="live-preview-stage__queue-footer">{slide.footer}</span>}
+              </button>
+            );
+          })}
         </div>
       )}
     </section>

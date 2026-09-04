@@ -519,6 +519,11 @@
   -webkit-box-orient: vertical;
 }
 
+.live-preview-stage__queue-footer {
+  font-size: 0.68rem;
+  opacity: 0.55;
+}
+
 /* Presentation card (spec section 11/12 Priority 4) - the single most
    important church-facing surface in the app. Deliberately the largest,
    highest-contrast card in Operator Mode. PREPARED and ACTIVE are always
