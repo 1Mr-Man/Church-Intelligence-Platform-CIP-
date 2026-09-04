@@ -1,0 +1,83 @@
+{
+    "phase": "24.2",
+    "summary": "Environment A direct-binary proof that Phase 24.2 (real, bounded interim whisper.cpp decoding in WhisperSpeechEngine) is genuinely compiled into this rebuilt installer, with zero functional regression to every prior-phase Rust symbol.",
+    "gitCommit": "b668be596258fcaa0950bca5fe00a4a10542d004",
+    "gitCommitShort": "b668be5",
+    "gitCommitNote": "This is the source tree commit (Phase 24.2's own commit) this rebuild was performed against. Phase 24.2 touches ai/speech/src/whisper.rs, apps/desktop/src/components/LiveChurchBrain.tsx, apps/desktop/src/components/LiveChurchBrain.css, docs/live-speech.md, and adds docs/phase-24-2-audit.md. This is the second consecutive rebuild this session (following Phase 24.1's gitCommit 472b91a) - both closed real gaps identified by continuing directly from the operator's own follow-up direction.",
+    "buildScript": "scripts/build-windows-whisper.sh",
+    "buildLog": "ran directly in this session (not committed - ephemeral build log)",
+    "installer": {
+        "path": "release/windows/Church Intelligence Platform_0.1.0_x64-setup.exe",
+        "fileSizeBytes": 14404653,
+        "sha256": "7e531239ab18df0ed19f871ec2936c97a896a3a863c136506a80e172480b1bf1",
+        "builtAtUtc": "2026-09-04T10:20:58Z",
+        "target": "x86_64-pc-windows-gnu",
+        "ggmlTwoPassFixApplied": true,
+        "ggmlTwoPassFixNote": "First build attempt failed as expected on the known whisper-rs-sys ggml lib-name defect; the build script applied its established fix and the retry succeeded - the same harmless, unrelated build-toolchain quirk documented and handled identically in every prior whisper-enabled Windows rebuild this project has done.",
+        "pnpmBuildSucceeded": true,
+        "nsisPackagingSucceeded": true,
+        "runtimeDllsConfirmedByBuildScript": [
+            "libstdc++-6.dll",
+            "libgcc_s_seh-1.dll",
+            "libwinpthread-1.dll"
+        ]
+    },
+    "extraction": {
+        "method": "7z x",
+        "exitCode": 0,
+        "fileCount": 12,
+        "confirmedPresent": [
+            "cip-desktop.exe",
+            "WebView2Loader.dll",
+            "libstdc++-6.dll",
+            "libgcc_s_seh-1.dll",
+            "libwinpthread-1.dll",
+            "uninstall.exe"
+        ]
+    },
+    "symbolRegressionCheck": {
+        "method": "x86_64-w64-mingw32-strings cip-desktop.exe | grep -c <symbol>, run against the extracted installer's main executable. Every tripwire from Phase 24.1's own baseline (the most recent prior rebuild) was re-checked; all matched exactly with zero deviation.",
+        "tripwiresFromPriorPhases": {
+            "rejection_echo_count": 5,
+            "find_rejected_suggestion_for_reference": 1,
+            "record_rejection_echo": 1,
+            "silentWindowsSkipped": 1,
+            "audioErrorText": 1,
+            "speechErrorText": 1,
+            "enroll_acoustic_reference": 2,
+            "list_acoustic_enrollments": 2,
+            "remove_acoustic_reference": 2,
+            "whisper_full_with_state": 96,
+            "finalize_bible_fuller_context_retry": 2,
+            "persist_detections_and_suggestions": 1,
+            "build_bible_detection_analytics": 1,
+            "get_bible_detection_analytics": 2,
+            "OutcomeCounts": 1,
+            "retry_paraphrase_or_semantic_with_fuller_context": 1,
+            "normalize_word_token": 1,
+            "fuzzy_match_book": 1,
+            "canonicalize_book": 1,
+            "correct_scripture_context": 2,
+            "last_feed_was_vad_early_flush": 1,
+            "feed_audio": 4,
+            "classify_model_size_tier": 0,
+            "get_prepared_item_slide": 2
+        },
+        "tripwiresFromPriorPhasesDeviation": "None. All 24 pre-existing tripwire symbols matched their Phase 24.1 baseline count exactly.",
+        "newTripwiresThisPhase": {
+            "decode_pass": 1,
+            "try_interim_decode": 1,
+            "should_flush_early": 0,
+            "should_attempt_interim_decode": 0,
+            "note": "decode_pass and try_interim_decode (the two new functions the interim-decoding feature actually depends on) are confirmed present and compiled in. should_flush_early (pre-existing since Phase 21, never previously tracked as a tripwire in this project's evidence files) and should_attempt_interim_decode (new this phase) are both absent from the symbol table - expected release-mode optimizer inlining for a small, pure function called from only one or two call sites within the same file, the same established class of benign variance already documented for classify_model_size_tier (Phase 22), retry_paraphrase_or_semantic_with_fuller_context (Phase 22's own inlining), and should_flush_early/has_trailing_pause themselves (Phase 21's own evidence, though not re-verified as a tripwire until this build). Their correctness is proven instead by direct unit tests (4 new tests for should_attempt_interim_decode, all passing) rather than symbol presence."
+        }
+    },
+    "frontendTextSearchLimitation": "The frontend bundle is not searchable as plain strings inside cip-desktop.exe the same way Rust symbols are - the new interimTranscript state/effect in LiveChurchBrain.tsx and its rendering in the Live Transcript panel were not independently string-searched, consistent with every prior phase's methodology. Frontend correctness rests on npm run typecheck's success, the full 303/303 frontend test pass (unchanged), and real-browser-engine event-simulation verification using Tauri's own official @tauri-apps/api/mocks module (see docs/phase-24-2-audit.md), which confirmed the interim line appears on an is_final:false TRANSCRIPT_UPDATED event and is correctly replaced by the permanent, timestamped entry once that window's is_final:true event arrives.",
+    "architecturalSafetyNotes": [
+        "Zero new Tauri commands, zero new events, zero new migrations, zero schema changes.",
+        "decode_pass and try_interim_decode never mutate self.buffer/self.elapsed_ms/self.sequence - only run_inference (the pre-existing final-decode path, functionally unchanged) does, preserving the pre-existing buffer/clock-consumed-before-fallible-decode ordering that prevents a decode error from leaving stale audio stuck in the buffer forever.",
+        "commands.rs's real-time worker, core/ai's SpeechEngine trait, and every other domain contract crate (core/bible, core/sermon, core/music, core/presentation, core/service) are entirely untouched - the interim-segment handling this phase now actually exercises was already correct code, unexercised until this phase gave WhisperSpeechEngine something non-final to emit.",
+        "Every prior-phase command and symbol remains present and unregressed - zero deviation across all 24 pre-existing tripwires, confirming this phase's addition did not disturb any prior gate or feature."
+    ],
+    "environmentCStatus": "Not yet performed. A real operator watching the Live Transcript panel during an actual sentence on real hardware with a real Whisper model and confirming the interim line is legible and useful (not distracting, and correctly replaced once they pause) is required to close Environment C for this phase."
+}
