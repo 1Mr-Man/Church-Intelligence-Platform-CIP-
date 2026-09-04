@@ -19,8 +19,22 @@ Intelligence**, **Phase 2.5 - Sermon Intelligence Foundation**,
 **Phase 2.6 - Sermon Intelligence**, **Phase 2.7 - Content
 Intelligence**, **Phase 2.8 - Cross-Domain Intelligence**, and **Phase
 2.9 - Unified Operator Workspace**, **Phase 2.10 - Full Phase 2
-Validation & First-Use Readiness**, and **Phase 3.0 - First-Use
-Hardening**. A separate release-readiness milestone (not a new
+Validation & First-Use Readiness**, **Phase 3.0 - First-Use
+Hardening**, and a long subsequent arc of real-Windows-pilot-driven
+phases (3.1 through 3.8.7.x, then 4.1-4.4, then a series of numbered
+phases through **Phase 20**) that took the app from "runs in this
+container" to a genuine, repeatedly-rebuilt Windows installer -
+Whisper speech, live Bible/Sermon/Service/Music intelligence, presentation
+display, production integration (OBS/vMix), acoustic song recognition,
+multi-language speech, a Church Knowledge Base, detection-accuracy
+analytics, and (Phase 20, most recently) fuzzy near-miss book-name
+matching plus a fix to the manual Scripture-context correction field -
+see [`docs/`](docs/) for the individual phase reports (each phase has
+its own `docs/phase-N-*.md` write-up and, where applicable, a
+`pilot-evidence/N/` folder) and
+[`release/windows/release-manifest.json`](release/windows/release-manifest.json)
+for the authoritative, continuously-updated record of exactly what each
+Windows rebuild contains. A separate release-readiness milestone (not a new
 intelligence phase) subsequently replaced the tiny development Bible
 fixture with a real, complete, legally-documented 66-book production
 translation - see [`docs/bible-production-dataset.md`](docs/bible-production-dataset.md) -
@@ -423,18 +437,39 @@ functional; only two purely diagnostic ones (Content Registry,
 Intelligence Status) were collapsed by default. See
 [`docs/operator-workspace.md`](docs/operator-workspace.md).
 
-Still deliberately **not** implemented: a chosen/trained acoustic model
-(so real-world acoustic recognition accuracy remains unverified in this
-environment - see [`docs/acoustic-music.md`](docs/acoustic-music.md)'s
-"PROVEN vs NOT AVAILABLE" section), any semantic/LLM-based sermon
-understanding beyond deterministic phrase-anchored detection (see
+The narrative above stops at Phase 3.4; the project has since continued
+through a long real-Windows-pilot-driven arc (3.5 through 3.8.7.x, 4.1
+Paraphrase Detection, 4.2 Live Detection Performance/SIMD, 4.3 Instant
+Bible Detection, 4.4 True Semantic Bible Search, then Church Knowledge
+Base, Multi-language Whisper, Congregant Companion View, Roles &
+Permissions, Bible Translation Registry v2, Production Integration
+(OBS/vMix), Real Audio Fingerprinting, Operator Ergonomics, Reliability &
+Trust, Detection Accuracy Analytics, and - most recently - **Phase 20**'s
+fuzzy near-miss book-name matching and a manual Scripture-context
+correction fix) - each with its own `docs/phase-N-*.md` write-up, so this
+file is intentionally not rewritten phase-by-phase to keep pace; see
+[`release/windows/release-manifest.json`](release/windows/release-manifest.json)
+for the authoritative, continuously-updated statement of exactly what the
+current Windows installer contains and what remains unverified on real
+hardware.
+
+Still deliberately **not** implemented as of Phase 20: a chosen/trained
+acoustic model (so real-world acoustic recognition accuracy remains
+unverified in this environment - see
+[`docs/acoustic-music.md`](docs/acoustic-music.md)'s "PROVEN vs NOT
+AVAILABLE" section), any semantic/LLM-based sermon understanding beyond
+deterministic phrase-anchored detection (see
 [`docs/sermon-intelligence.md`](docs/sermon-intelligence.md)'s "NOT
-AVAILABLE" section), semantic/paraphrase Bible search, automatic bullet
+AVAILABLE" section), overlapping Whisper windows/VAD-triggered flush and
+interim (non-final) transcripts, fuzzy matching for multi-word/numbered
+Bible books (1/2/3 Samuel/Kings/Chronicles/Corinthians/Thessalonians/
+Timothy/Peter/John - see [`docs/phase-20-audit.md`](docs/phase-20-audit.md)),
+operator-adjustable detection-confidence thresholds, automatic bullet
 extraction, a web research engine, online Bible fallback, content
-generation, cloud sync, OBS/vMix integration, remote operator accounts, a
-mobile app, real display/projection output, and the full presentation
-designer (visual/typographic design beyond one deterministic template).
-Those are later phases.
+generation, cloud sync, remote operator accounts, a mobile app, real
+display/projection output, and the full presentation designer
+(visual/typographic design beyond one deterministic template). Those
+remain later-phase candidates.
 
 ## Repository layout
 
