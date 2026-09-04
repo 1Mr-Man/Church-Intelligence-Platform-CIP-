@@ -65,6 +65,31 @@ fn is_number_word(word: &str) -> bool {
     word == "hundred" || word_value(word).is_some()
 }
 
+/// Ordinal forms CIP needs to recognize, scoped to 1st-3rd only: every
+/// canonical Bible book numbering prefix (1/2/3 Samuel, Kings, Chronicles,
+/// Corinthians, Thessalonians, Timothy, Peter, John - see `book_alias.rs`)
+/// tops out at "3rd", since no book is ever numbered past three. A general
+/// ordinal parser (fourth, fifth, ... twentieth) would add real scope for
+/// no real gap it closes - chapter/verse numbers are always spoken as
+/// cardinals, never ordinals ("Romans eight twenty-eight", never "Romans
+/// eighth twenty-eighth"). Word forms ("first") were already reachable via
+/// per-book literal aliases in `book_alias.rs`; this is a general rule
+/// instead, so it also covers digit-suffix forms ("1st") that alias table
+/// never listed, and any future numbered-book alias no longer needs its
+/// own hand-written "first "/"second "/"third " entry.
+const ORDINALS: &[(&str, u32)] = &[
+    ("first", 1),
+    ("second", 2),
+    ("third", 3),
+    ("1st", 1),
+    ("2nd", 2),
+    ("3rd", 3),
+];
+
+fn ordinal_value(word: &str) -> Option<u32> {
+    ORDINALS.iter().find(|(w, _)| *w == word).map(|(_, v)| *v)
+}
+
 /// Combine a hyphen-split (or single-word) run of number words into one
 /// value, e.g. `["twenty", "eight"]` -> `28`, `["one", "hundred", "fifty"]`
 /// -> `150`. Returns `None` if any part isn't a recognized number word.
@@ -98,9 +123,12 @@ fn normalize_word_token(token: &str) -> String {
 
     let lower = trimmed.to_lowercase();
     if is_number_word(&lower) {
-        if let Some(n) = words_to_number(&[lower]) {
+        if let Some(n) = words_to_number(std::slice::from_ref(&lower)) {
             return n.to_string();
         }
+    }
+    if let Some(n) = ordinal_value(&lower) {
+        return n.to_string();
     }
 
     token.to_string()
@@ -155,5 +183,39 @@ mod tests {
         let once = normalize_text("Romans chapter eight verse twenty-eight");
         let twice = normalize_text(&once);
         assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn converts_ordinal_word_forms_to_digits() {
+        assert_eq!(
+            normalize_text("First Corinthians 13:4"),
+            "1 Corinthians 13:4"
+        );
+        assert_eq!(
+            normalize_text("Second Timothy chapter 3"),
+            "2 Timothy chapter 3"
+        );
+        assert_eq!(normalize_text("Third John 4"), "3 John 4");
+    }
+
+    #[test]
+    fn converts_digit_suffix_ordinal_forms_to_digits() {
+        // A form the per-book literal aliases in book_alias.rs never
+        // listed - Whisper's own text normalization can plausibly produce
+        // "1st"/"2nd"/"3rd" for spoken "first"/"second"/"third".
+        assert_eq!(normalize_text("1st Corinthians 13:4"), "1 Corinthians 13:4");
+        assert_eq!(
+            normalize_text("2nd Timothy chapter 3"),
+            "2 Timothy chapter 3"
+        );
+        assert_eq!(normalize_text("3rd John 4"), "3 John 4");
+    }
+
+    #[test]
+    fn never_touches_ordinals_past_third() {
+        // No canonical Bible book is ever numbered past 3, so "fourth" is
+        // deliberately left unconverted rather than guessed at.
+        assert_eq!(normalize_text("fourth"), "fourth");
+        assert_eq!(normalize_text("4th"), "4th");
     }
 }
