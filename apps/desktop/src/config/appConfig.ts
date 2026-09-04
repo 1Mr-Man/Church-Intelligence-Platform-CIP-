@@ -216,3 +216,12 @@ export interface BackupReport {
   backupPath: string;
   sizeBytes: number;
 }
+
+/** Phase 25 (Session Black Box): frontend mirror of `commands.rs`'s
+ * `SessionReportExport`, via `export_session_report`. The frontend never
+ * reads the exported JSON's own content - only where it landed on disk,
+ * mirroring `BackupReport`'s own shape exactly. */
+export interface SessionReportExport {
+  reportPath: string;
+  sizeBytes: number;
+}

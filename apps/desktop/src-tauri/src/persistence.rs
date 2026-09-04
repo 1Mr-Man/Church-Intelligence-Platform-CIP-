@@ -288,6 +288,58 @@ pub fn persist_transcript_correction(
     Ok(())
 }
 
+/// One `transcript_corrections` row, joined with both segments' own text -
+/// Phase 25 (Session Black Box) reads this so an operator's exported
+/// report shows what changed without cross-referencing two id lists.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptCorrection {
+    pub id: Uuid,
+    pub original_segment_id: Uuid,
+    pub original_text: String,
+    pub corrected_segment_id: Uuid,
+    pub corrected_text: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Every quality-tier correction linked to a segment of `service_id`,
+/// oldest first. Joins through `transcript_segments` since
+/// `transcript_corrections` itself carries no `service_id` column (see
+/// that table's own migration docs) - `original`/`corrected` are always
+/// real rows by the time a link exists (`spawn_quality_worker` persists
+/// the corrected segment first), so an inner join never silently drops a
+/// correction.
+pub fn list_transcript_corrections(
+    conn: &Connection,
+    service_id: Uuid,
+) -> Result<Vec<TranscriptCorrection>, PersistError> {
+    let mut stmt = conn.prepare(
+        "SELECT tc.id, tc.original_segment_id, orig.text, tc.corrected_segment_id, corr.text, tc.created_at
+         FROM transcript_corrections tc
+         JOIN transcript_segments orig ON orig.id = tc.original_segment_id
+         JOIN transcript_segments corr ON corr.id = tc.corrected_segment_id
+         WHERE orig.service_id = ?1
+         ORDER BY tc.created_at ASC",
+    )?;
+    let rows = stmt
+        .query_map(params![service_id.to_string()], |row| {
+            Ok(TranscriptCorrection {
+                id: Uuid::parse_str(&row.get::<_, String>(0)?).unwrap_or_else(|_| Uuid::nil()),
+                original_segment_id: Uuid::parse_str(&row.get::<_, String>(1)?)
+                    .unwrap_or_else(|_| Uuid::nil()),
+                original_text: row.get(2)?,
+                corrected_segment_id: Uuid::parse_str(&row.get::<_, String>(3)?)
+                    .unwrap_or_else(|_| Uuid::nil()),
+                corrected_text: row.get(4)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now()),
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 // --- scripture_detections -----------------------------------------------
 
 /// Persist a validated detection - see module docs for which
@@ -1945,6 +1997,50 @@ mod tests {
             .unwrap();
         assert_eq!(linked_original, original.id.to_string());
         assert_eq!(linked_corrected, corrected.id.to_string());
+    }
+
+    #[test]
+    fn lists_transcript_corrections_with_both_segments_own_text_joined_in() {
+        let conn = migrated_conn();
+        let session = seeded_service(&conn);
+        let original = sample_transcript_segment("Turn to Romans ate.", 0);
+        let corrected = sample_transcript_segment("Turn to Romans eight.", 1);
+        persist_transcript_segment(&conn, session.id, &original).unwrap();
+        persist_transcript_segment(&conn, session.id, &corrected).unwrap();
+        persist_transcript_correction(&conn, original.id, corrected.id).unwrap();
+
+        let corrections = list_transcript_corrections(&conn, session.id).unwrap();
+        assert_eq!(corrections.len(), 1);
+        assert_eq!(corrections[0].original_segment_id, original.id);
+        assert_eq!(corrections[0].original_text, "Turn to Romans ate.");
+        assert_eq!(corrections[0].corrected_segment_id, corrected.id);
+        assert_eq!(corrections[0].corrected_text, "Turn to Romans eight.");
+    }
+
+    #[test]
+    fn lists_transcript_corrections_scoped_to_their_own_service() {
+        let conn = migrated_conn();
+        let service_a = seeded_service(&conn);
+        let service_b = seeded_service(&conn);
+        let orig_a = sample_transcript_segment("Romans ate.", 0);
+        let corr_a = sample_transcript_segment("Romans eight.", 1);
+        persist_transcript_segment(&conn, service_a.id, &orig_a).unwrap();
+        persist_transcript_segment(&conn, service_a.id, &corr_a).unwrap();
+        persist_transcript_correction(&conn, orig_a.id, corr_a.id).unwrap();
+
+        assert_eq!(
+            list_transcript_corrections(&conn, service_a.id)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            list_transcript_corrections(&conn, service_b.id)
+                .unwrap()
+                .len(),
+            0,
+            "a correction from another service must never leak into this one's report"
+        );
     }
 
     #[test]

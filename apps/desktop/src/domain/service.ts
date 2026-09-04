@@ -163,9 +163,23 @@ export interface LiveDiagnosticsSnapshot {
   overloadEvents: number;
   audioMsDroppedOverload: number;
   lastTranscriptPipelineDurationMs: number | null;
+  /** Phase 25 (Session Black Box): the real error text from the most
+   * recent `feed_audio` failure, if any. */
+  speechLastError: string | null;
+  /** Phase 25: the last audio-engine failure, if any. */
+  audioLastError: string | null;
   embeddingFeatureCompiled: boolean;
   embeddingModelLoaded: boolean;
   embeddingReady: boolean;
+  /** Phase 25: the optional quality-tier engine (Phase 24.3) - `false`
+   * unless an operator installed a second model. */
+  qualityFeatureCompiled: boolean;
+  qualityModelLoaded: boolean;
+  qualityJobsSubmitted: number;
+  qualityJobsDroppedBacklog: number;
+  qualityJobsCompleted: number;
+  qualityConsecutiveJobsDropped: number;
+  qualityLastError: string | null;
 }
 
 /** The complete post-service report for one service, as returned by

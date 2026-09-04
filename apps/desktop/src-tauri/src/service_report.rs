@@ -28,7 +28,7 @@
 //! per-service precision that doesn't exist.
 
 use crate::persistence::{self, PersistError};
-use crate::state::{EmbeddingDiagnostics, SpeechDiagnostics};
+use crate::state::{EmbeddingDiagnostics, SpeechDiagnostics, SpeechQualityDiagnostics};
 use crate::timeline;
 use chrono::{DateTime, Utc};
 use cip_core_ai::SuggestionStatus;
@@ -90,9 +90,31 @@ pub struct LiveDiagnosticsSnapshot {
     pub overload_events: u64,
     pub audio_ms_dropped_overload: u64,
     pub last_transcript_pipeline_duration_ms: Option<u64>,
+    /// Phase 25 (Session Black Box): the real error text from the most
+    /// recent `feed_audio` failure, if any - retained even after a later
+    /// success, mirroring `SpeechDiagnostics.last_error`'s own docs.
+    pub speech_last_error: Option<String>,
+    /// Phase 25: the last audio-engine failure, if any, since the last
+    /// successful `start_listening`/chunk - mirrors `AppState.audio_error`.
+    pub audio_last_error: Option<String>,
     pub embedding_feature_compiled: bool,
     pub embedding_model_loaded: bool,
     pub embedding_ready: bool,
+    /// Phase 25: the optional quality-tier engine (Phase 24.3) - `false`
+    /// unless an operator installed a second model. Mirrors
+    /// `SpeechQualityDiagnostics`'s own fields exactly; see that struct's
+    /// docs for what each counts.
+    pub quality_feature_compiled: bool,
+    pub quality_model_loaded: bool,
+    pub quality_jobs_submitted: u64,
+    pub quality_jobs_dropped_backlog: u64,
+    pub quality_jobs_completed: u64,
+    /// Phase 24.3.2's streak counter, as it stood the moment this report
+    /// was generated - not itself the derived label
+    /// (`commands::classify_quality_backlog`), since this module holds no
+    /// dependency on `commands.rs`'s own types.
+    pub quality_consecutive_jobs_dropped: u64,
+    pub quality_last_error: Option<String>,
 }
 
 /// The complete post-service report for one service - every field is data
@@ -117,12 +139,15 @@ pub struct ServiceReport {
 /// Pure aggregation: reads back already-persisted rows for `service_id`
 /// and a snapshot of the live diagnostics structs already tracked in
 /// `AppState`, and assembles them. Never writes anything.
+#[allow(clippy::too_many_arguments)]
 pub fn build_service_report(
     conn: &Connection,
     service_id: Uuid,
     speech_diagnostics: &SpeechDiagnostics,
+    speech_quality_diagnostics: &SpeechQualityDiagnostics,
     embedding_diagnostics: &EmbeddingDiagnostics,
     embedding_ready: bool,
+    audio_error: Option<String>,
 ) -> Result<ServiceReport, PersistError> {
     let service = persistence::get_service(conn, service_id)?;
 
@@ -176,9 +201,18 @@ pub fn build_service_report(
         audio_ms_dropped_overload: speech_diagnostics.audio_ms_dropped_overload,
         last_transcript_pipeline_duration_ms: speech_diagnostics
             .last_transcript_pipeline_duration_ms,
+        speech_last_error: speech_diagnostics.last_error.clone(),
+        audio_last_error: audio_error,
         embedding_feature_compiled: embedding_diagnostics.feature_compiled,
         embedding_model_loaded: embedding_diagnostics.model_loaded,
         embedding_ready,
+        quality_feature_compiled: speech_quality_diagnostics.feature_compiled,
+        quality_model_loaded: speech_quality_diagnostics.model_loaded,
+        quality_jobs_submitted: speech_quality_diagnostics.jobs_submitted,
+        quality_jobs_dropped_backlog: speech_quality_diagnostics.jobs_dropped_backlog,
+        quality_jobs_completed: speech_quality_diagnostics.jobs_completed,
+        quality_consecutive_jobs_dropped: speech_quality_diagnostics.consecutive_jobs_dropped,
+        quality_last_error: speech_quality_diagnostics.last_error.clone(),
     };
 
     Ok(ServiceReport {
@@ -266,8 +300,10 @@ mod tests {
             &conn,
             service.id,
             &SpeechDiagnostics::default(),
+            &SpeechQualityDiagnostics::default(),
             &EmbeddingDiagnostics::default(),
             false,
+            None,
         )
         .unwrap();
 
@@ -305,8 +341,10 @@ mod tests {
             &conn,
             service.id,
             &SpeechDiagnostics::default(),
+            &SpeechQualityDiagnostics::default(),
             &EmbeddingDiagnostics::default(),
             false,
+            None,
         )
         .unwrap();
 
@@ -349,8 +387,10 @@ mod tests {
             &conn,
             service.id,
             &SpeechDiagnostics::default(),
+            &SpeechQualityDiagnostics::default(),
             &EmbeddingDiagnostics::default(),
             false,
+            None,
         )
         .unwrap();
 
@@ -377,8 +417,10 @@ mod tests {
             &conn,
             service.id,
             &SpeechDiagnostics::default(),
+            &SpeechQualityDiagnostics::default(),
             &EmbeddingDiagnostics::default(),
             false,
+            None,
         )
         .unwrap();
 
@@ -405,8 +447,10 @@ mod tests {
             &conn,
             service.id,
             &SpeechDiagnostics::default(),
+            &SpeechQualityDiagnostics::default(),
             &EmbeddingDiagnostics::default(),
             false,
+            None,
         )
         .unwrap();
 
@@ -427,13 +471,57 @@ mod tests {
             &conn,
             service.id,
             &speech,
+            &SpeechQualityDiagnostics::default(),
             &EmbeddingDiagnostics::default(),
             true,
+            None,
         )
         .unwrap();
 
         assert_eq!(report.live_diagnostics.avg_inference_duration_ms, Some(300));
         assert!(report.live_diagnostics.embedding_ready);
+    }
+
+    #[test]
+    fn live_diagnostics_carries_quality_tier_and_audio_error_fields() {
+        let conn = open_test_db();
+        let service = persist_test_service(&conn);
+        let quality = SpeechQualityDiagnostics {
+            feature_compiled: true,
+            model_loaded: true,
+            jobs_submitted: 9,
+            jobs_dropped_backlog: 2,
+            jobs_completed: 7,
+            consecutive_jobs_dropped: 1,
+            last_error: Some("quality decode failed".to_string()),
+            ..SpeechQualityDiagnostics::default()
+        };
+
+        let report = build_service_report(
+            &conn,
+            service.id,
+            &SpeechDiagnostics::default(),
+            &quality,
+            &EmbeddingDiagnostics::default(),
+            false,
+            Some("no audio device found".to_string()),
+        )
+        .unwrap();
+
+        assert!(report.live_diagnostics.quality_feature_compiled);
+        assert!(report.live_diagnostics.quality_model_loaded);
+        assert_eq!(report.live_diagnostics.quality_jobs_submitted, 9);
+        assert_eq!(report.live_diagnostics.quality_jobs_dropped_backlog, 2);
+        assert_eq!(report.live_diagnostics.quality_jobs_completed, 7);
+        assert_eq!(report.live_diagnostics.quality_consecutive_jobs_dropped, 1);
+        assert_eq!(
+            report.live_diagnostics.quality_last_error.as_deref(),
+            Some("quality decode failed")
+        );
+        assert_eq!(
+            report.live_diagnostics.audio_last_error.as_deref(),
+            Some("no audio device found")
+        );
     }
 
     #[test]
@@ -445,8 +533,10 @@ mod tests {
             &conn,
             service.id,
             &SpeechDiagnostics::default(),
+            &SpeechQualityDiagnostics::default(),
             &EmbeddingDiagnostics::default(),
             false,
+            None,
         )
         .unwrap();
 
@@ -478,8 +568,10 @@ mod tests {
             &conn,
             service.id,
             &SpeechDiagnostics::default(),
+            &SpeechQualityDiagnostics::default(),
             &EmbeddingDiagnostics::default(),
             false,
+            None,
         )
         .unwrap();
 
@@ -512,8 +604,10 @@ mod tests {
             &conn,
             service_a.id,
             &SpeechDiagnostics::default(),
+            &SpeechQualityDiagnostics::default(),
             &EmbeddingDiagnostics::default(),
             false,
+            None,
         )
         .unwrap();
 

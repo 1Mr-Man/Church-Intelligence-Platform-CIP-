@@ -36,6 +36,7 @@ import {
   enrollAcousticReference,
   getAppConfig,
   getChurchKnowledgeBase,
+  exportSessionReport,
   getCongregantCompanionStatus,
   getCurrentOperator,
   getIntelligenceCapabilities,
@@ -895,6 +896,28 @@ describe("commands.ts Tauri IPC guard", () => {
     isTauriMock.mockReturnValue(false);
 
     await expect(getServiceReport("service-1")).rejects.toBeInstanceOf(TauriUnavailableError);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  // --- session black box export (Phase 25) ---------------------------------
+
+  it("exportSessionReport calls export_session_report with the service id and destination dir", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValue({});
+
+    await exportSessionReport("service-1", "/tmp/exports");
+
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("export_session_report", {
+      serviceId: "service-1",
+      destinationDir: "/tmp/exports",
+    });
+  });
+
+  it("rejects exportSessionReport outside the Tauri runtime, without calling invoke()", async () => {
+    isTauriMock.mockReturnValue(false);
+
+    await expect(exportSessionReport("service-1", "/tmp/exports")).rejects.toBeInstanceOf(TauriUnavailableError);
     expect(invokeMock).not.toHaveBeenCalled();
   });
 

@@ -3868,20 +3868,131 @@ pub fn get_service_report(
         .lock()
         .expect("speech_diagnostics mutex poisoned")
         .clone();
+    let speech_quality_diagnostics = state
+        .speech_quality_diagnostics
+        .lock()
+        .expect("speech_quality_diagnostics mutex poisoned")
+        .clone();
     let embedding_diagnostics = state
         .embedding_diagnostics
         .lock()
         .expect("embedding diagnostics lock poisoned")
         .clone();
+    let audio_error = state
+        .audio_error
+        .lock()
+        .expect("audio_error mutex poisoned")
+        .clone();
     crate::service_report::build_service_report(
         &db,
         id,
         &speech_diagnostics,
+        &speech_quality_diagnostics,
         &embedding_diagnostics,
         state.embedding_ready,
+        audio_error,
     )
     .map_err(AppError::from)
     .map_err(log_and_return)
+}
+
+// --- Phase 25 (Session Black Box) ---------------------------------------
+//
+// The operator's own request: "after testing I should be able to download
+// a file that will report everything that happens during the testing
+// period ... so that you'll not be guessing when I give a half report."
+// `export_session_report` bundles the same data `get_service_report`
+// already aggregates plus the full transcript, full timeline, every
+// suggestion, and every quality-tier correction (see
+// `session_report.rs`'s own module docs) into one JSON file on disk -
+// the same `destination_dir` pattern `backup_database` above already
+// established.
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionReportExport {
+    pub report_path: String,
+    pub size_bytes: u64,
+}
+
+#[tauri::command]
+pub fn export_session_report(
+    service_id: String,
+    destination_dir: String,
+    state: State<'_, AppState>,
+) -> Result<SessionReportExport, AppError> {
+    let id = parse_uuid(&service_id).map_err(log_and_return)?;
+    let destination_dir = require_non_empty(&destination_dir, "destinationDir")
+        .map_err(log_and_return)?
+        .to_string();
+    let dest_dir = std::path::PathBuf::from(&destination_dir);
+    std::fs::create_dir_all(&dest_dir)
+        .map_err(|e| {
+            AppError::InvalidInput(format!(
+                "cannot create export directory {}: {e}",
+                dest_dir.display()
+            ))
+        })
+        .map_err(log_and_return)?;
+
+    let speech_diagnostics = state
+        .speech_diagnostics
+        .lock()
+        .expect("speech_diagnostics mutex poisoned")
+        .clone();
+    let speech_quality_diagnostics = state
+        .speech_quality_diagnostics
+        .lock()
+        .expect("speech_quality_diagnostics mutex poisoned")
+        .clone();
+    let embedding_diagnostics = state
+        .embedding_diagnostics
+        .lock()
+        .expect("embedding diagnostics lock poisoned")
+        .clone();
+    let audio_error = state
+        .audio_error
+        .lock()
+        .expect("audio_error mutex poisoned")
+        .clone();
+
+    let report = {
+        let db = state.db.lock().expect("db connection poisoned");
+        crate::session_report::build_session_report(
+            &db,
+            id,
+            &speech_diagnostics,
+            &speech_quality_diagnostics,
+            &embedding_diagnostics,
+            state.embedding_ready,
+            audio_error,
+            env!("CARGO_PKG_VERSION").to_string(),
+            env!("CIP_GIT_COMMIT").to_string(),
+        )
+        .map_err(AppError::from)
+        .map_err(log_and_return)?
+    };
+
+    let json = serde_json::to_string_pretty(&report)
+        .map_err(|e| AppError::InvalidInput(format!("could not serialize session report: {e}")))
+        .map_err(log_and_return)?;
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let short_id = &service_id[..service_id.len().min(8)];
+    let report_path = dest_dir.join(format!("cip-session-report-{short_id}-{timestamp}.json"));
+    std::fs::write(&report_path, &json)
+        .map_err(|e| {
+            AppError::InvalidInput(format!(
+                "could not write session report to {}: {e}",
+                report_path.display()
+            ))
+        })
+        .map_err(log_and_return)?;
+
+    Ok(SessionReportExport {
+        report_path: report_path.display().to_string(),
+        size_bytes: json.len() as u64,
+    })
 }
 
 /// Detection Accuracy Analytics (Phase 17): read-only, cross-service

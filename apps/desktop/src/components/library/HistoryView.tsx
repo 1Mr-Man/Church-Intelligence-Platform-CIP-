@@ -15,6 +15,7 @@
  * live - the historical item this button reads from is never touched.
  */
 import { useEffect, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import type {
   BibleDetectionAnalytics,
   ContentCandidate,
@@ -93,6 +94,30 @@ export function HistoryView() {
       .getServiceReport(service.id)
       .then(setReport)
       .catch((e) => setError(String(e)));
+  };
+
+  // Phase 25 (Session Black Box): the operator's own request - after a
+  // real test, download one file that reports everything CIP observed
+  // during that service, to hand back alongside their own transcript/notes
+  // instead of describing what happened from memory.
+  const exportSessionReport = (service: ServiceSession) => {
+    setError(null);
+    setNotice(null);
+    open({ title: "Choose where to save the session report", directory: true, multiple: false })
+      .then((selectedDir) => {
+        if (!selectedDir || Array.isArray(selectedDir)) {
+          return;
+        }
+        setBusy("export-session-report");
+        return commands
+          .exportSessionReport(service.id, selectedDir)
+          .then((result) =>
+            setNotice(`Session report saved to ${result.reportPath} (${result.sizeBytes.toLocaleString()} bytes).`),
+          )
+          .catch((e) => setError(String(e)))
+          .finally(() => setBusy(null));
+      })
+      .catch((e) => setError(`Could not open folder picker: ${String(e)}`));
   };
 
   const reuse = (item: PresentationItem) => {
@@ -334,9 +359,22 @@ export function HistoryView() {
         </>
       ) : (
         <>
-          {report && (
+          {report && selected && (
             <section className="library-panel">
-              <h2>Service Report</h2>
+              <div className="library-page__header">
+                <h2>Service Report</h2>
+                <button
+                  type="button"
+                  disabled={busy === "export-session-report"}
+                  onClick={() => exportSessionReport(selected)}
+                >
+                  {busy === "export-session-report" ? "Exporting..." : "Export Session Report (Black Box)"}
+                </button>
+              </div>
+              <p className="live-brain__hint">
+                Downloads one JSON file with the full transcript, timeline, suggestions, and corrections from this
+                service - hand it back alongside your own notes so a diagnosis never has to guess at what happened.
+              </p>
               <p className="library-card__meta">
                 {report.durationMinutes !== null
                   ? `Duration: ${report.durationMinutes.toFixed(1)} min`

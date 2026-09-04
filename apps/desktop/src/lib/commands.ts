@@ -13,7 +13,14 @@
  * raw `TypeError` from a missing `window.__TAURI_INTERNALS__`.
  */
 import { invoke } from "@tauri-apps/api/core";
-import type { AppConfig, AppEnvironment, BackupReport, PilotDiagnostics, WhisperModelDiagnostic } from "../config/appConfig";
+import type {
+  AppConfig,
+  AppEnvironment,
+  BackupReport,
+  PilotDiagnostics,
+  SessionReportExport,
+  WhisperModelDiagnostic,
+} from "../config/appConfig";
 import type { ContentCandidate } from "../domain/contentIntelligence";
 import type {
   AcousticEnrollment,
@@ -240,6 +247,18 @@ export function getService(serviceId: string): Promise<ServiceSession> {
  * not represent. */
 export function getServiceReport(serviceId: string): Promise<ServiceReport> {
   return invokeCommand("get_service_report", { serviceId });
+}
+
+/**
+ * Phase 25 (Session Black Box): bundles the full transcript, full
+ * timeline, every suggestion, every quality-tier correction, and the
+ * Phase 5.1 report's own aggregation for `serviceId` into one JSON file
+ * written to `destinationDir` (created if needed) - so an operator who
+ * just ran a real test can hand the file back alongside their own notes,
+ * instead of describing from memory what happened.
+ */
+export function exportSessionReport(serviceId: string, destinationDir: string): Promise<SessionReportExport> {
+  return invokeCommand("export_session_report", { serviceId, destinationDir });
 }
 
 export function approveSuggestion(suggestionId: string): Promise<Suggestion> {
