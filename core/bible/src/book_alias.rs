@@ -243,6 +243,113 @@ pub fn book_by_code(code: &str) -> Option<&'static CanonicalBook> {
         .find(|book| book.code.eq_ignore_ascii_case(code))
 }
 
+/// Classic Levenshtein (single-character insert/delete/substitute) edit
+/// distance between two strings, operating on `char`s so it stays correct
+/// for non-ASCII input rather than silently truncating/miscounting it.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev_row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.iter().enumerate() {
+        let mut curr_row = vec![i + 1; b.len() + 1];
+        for (j, cb) in b.iter().enumerate() {
+            let cost = if ca == cb { 0 } else { 1 };
+            curr_row[j + 1] = (prev_row[j] + cost)
+                .min(prev_row[j + 1] + 1)
+                .min(curr_row[j] + 1);
+        }
+        prev_row = curr_row;
+    }
+    prev_row[b.len()]
+}
+
+/// The maximum edit distance a near-miss book name may still be trusted
+/// at, scaled to how long the canonical name is - a 1-character slip in a
+/// 4-letter name ("Ruth" -> "Ruht") is proportionally a much bigger change
+/// than the same slip in a 10-letter name ("Revelation" -> "Revelaton"),
+/// so a single fixed distance would either reject obvious short-name typos
+/// or accept wild long-name guesses.
+fn max_allowed_distance(canonical_len: usize) -> usize {
+    match canonical_len {
+        0..=5 => 1,
+        6..=9 => 2,
+        _ => 3,
+    }
+}
+
+/// Fuzzy (near-miss) match a single spoken/transcribed word against the
+/// canonical, single-word Bible book names - the tolerant counterpart to
+/// [`canonicalize_book`] for when Whisper mis-transcribes a book name
+/// closely enough that no exact alias matches at all (e.g. `"Roman"` for
+/// `"Romans"`, `"Corinthans"` for `"Corinthians"`, `"Revelations"` for
+/// `"Revelation"`).
+///
+/// Deliberately scoped to books whose canonical `name` has no internal
+/// space - `"1 Corinthians"`, `"2 Timothy"`, `"Song of Solomon"`, and
+/// every other multi-word name are excluded, since fuzzy-matching a single
+/// mis-heard word against a multi-word name (or worse, guessing which of
+/// two numbered variants, `"1 John"` vs `"2 John"`, a bare near-miss word
+/// meant) is a fundamentally different, higher-risk problem than this
+/// function solves - those books are already reachable through
+/// [`canonicalize_book`]'s exact alias table (`"1 cor"`, `"2 tim"`, ...),
+/// so this only needs to cover the remaining gap: an *exact* spelling
+/// this codebase doesn't already know, for a book with only one plausible
+/// referent.
+///
+/// Returns `None` - never guesses - when: the input is too short to
+/// fuzzy-match reliably (under 4 characters), no book comes within its
+/// length-scaled distance budget ([`max_allowed_distance`]), or more than
+/// one book ties for the closest match (an ambiguous near-miss, e.g. a
+/// word equidistant from two different short book names, must never be
+/// silently resolved to either).
+///
+/// Callers must always try [`canonicalize_book`] first - this function
+/// does not check for an exact match itself, so calling it on text that
+/// already resolves exactly would still return a (correct, but redundant
+/// and unnecessarily uncertain-looking) fuzzy result.
+pub fn fuzzy_match_book(input: &str) -> Option<(&'static CanonicalBook, f32)> {
+    let needle = normalize_token(input);
+    if needle.chars().count() < 4 || !needle.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+
+    let mut best: Option<(&'static CanonicalBook, usize)> = None;
+    let mut best_is_unique = true;
+
+    for book in BOOKS {
+        if book.name.contains(' ') {
+            continue;
+        }
+        let canonical = normalize_token(book.name);
+        let distance = levenshtein(&needle, &canonical);
+        if distance > max_allowed_distance(canonical.chars().count()) {
+            continue;
+        }
+        match &best {
+            None => {
+                best = Some((book, distance));
+                best_is_unique = true;
+            }
+            Some((_, best_distance)) if distance < *best_distance => {
+                best = Some((book, distance));
+                best_is_unique = true;
+            }
+            Some((_, best_distance)) if distance == *best_distance => {
+                best_is_unique = false;
+            }
+            _ => {}
+        }
+    }
+
+    let (book, distance) = best?;
+    if !best_is_unique {
+        return None;
+    }
+    let canonical_len = normalize_token(book.name).chars().count().max(1);
+    let similarity = 1.0 - (distance as f32 / canonical_len.max(needle.chars().count()) as f32);
+    Some((book, similarity))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,5 +414,87 @@ mod tests {
     fn a_code_not_listed_as_its_own_alias_still_resolves() {
         assert_eq!(canonicalize_book("1SA").unwrap().code, "1SA");
         assert_eq!(canonicalize_book("SNG").unwrap().code, "SNG");
+    }
+
+    // --- Phase 20: fuzzy_match_book ---------------------------------
+
+    #[test]
+    fn fuzzy_matches_a_plausible_near_miss_spelling() {
+        // "Roman" for "Romans" - a real shape of Whisper mishearing a
+        // trailing "s".
+        let (book, similarity) = fuzzy_match_book("Roman").unwrap();
+        assert_eq!(book.code, "ROM");
+        assert!(similarity > 0.5, "similarity was {similarity}");
+    }
+
+    #[test]
+    fn fuzzy_matches_a_plural_confusion() {
+        let (book, _) = fuzzy_match_book("Revelations").unwrap();
+        assert_eq!(book.code, "REV");
+    }
+
+    #[test]
+    fn fuzzy_matches_a_single_dropped_letter() {
+        // "Galatins" is "Galatians" missing one internal "a".
+        let (book, _) = fuzzy_match_book("Galatins").unwrap();
+        assert_eq!(book.code, "GAL");
+    }
+
+    #[test]
+    fn fuzzy_match_is_case_insensitive() {
+        assert_eq!(fuzzy_match_book("ROMAN").unwrap().0.code, "ROM");
+        assert_eq!(fuzzy_match_book("roman").unwrap().0.code, "ROM");
+    }
+
+    #[test]
+    fn refuses_to_fuzzy_match_input_under_four_characters() {
+        // Too short to fuzzy-match reliably, even though "Amo" is only one
+        // deletion away from "Amos" - a 3-character needle is close to
+        // almost every short book name at once.
+        assert!(fuzzy_match_book("Amo").is_none());
+        assert!(fuzzy_match_book("").is_none());
+    }
+
+    #[test]
+    fn refuses_to_fuzzy_match_non_alphabetic_input() {
+        assert!(fuzzy_match_book("1234").is_none());
+        assert!(fuzzy_match_book("8:28").is_none());
+    }
+
+    #[test]
+    fn never_fuzzy_matches_a_multi_word_canonical_name() {
+        // "1 Corinthians"/"2 Corinthians" both contain a space, so the
+        // bare word "corinthians" - which would otherwise be a plausible
+        // near-miss of either - is deliberately never fuzzy-matched: see
+        // fuzzy_match_book's own doc comment for why guessing between two
+        // numbered variants is out of scope here.
+        assert!(fuzzy_match_book("corinthians").is_none());
+        assert!(fuzzy_match_book("thessalonians").is_none());
+    }
+
+    #[test]
+    fn single_character_typos_of_single_word_names_never_resolve_to_the_wrong_book() {
+        // A systematic sweep: for every book with a single-word canonical
+        // name, dropping its last letter (a plausible "Whisper cut it
+        // short" mishearing) either resolves back to that exact book, or
+        // is honestly refused (e.g. an ambiguous near-tie, or now too
+        // short) - it must never resolve to a *different* book.
+        for book in BOOKS {
+            if book.name.contains(' ') {
+                continue;
+            }
+            let mut truncated = book.name.to_lowercase();
+            truncated.pop();
+            if truncated.chars().count() < 4 {
+                continue;
+            }
+            if let Some((matched, _)) = fuzzy_match_book(&truncated) {
+                assert_eq!(
+                    matched.code, book.code,
+                    "{truncated:?} (from {:?}) incorrectly matched {} instead",
+                    book.name, matched.code
+                );
+            }
+        }
     }
 }

@@ -303,6 +303,9 @@ fn process_transcript_segment_inner(
             ReferenceKind::Chapter => resolve_chapter(translation_id, provider, context, candidate),
             ReferenceKind::Direct => resolve_direct(translation_id, provider, context, candidate),
             ReferenceKind::Verse => resolve_bare_verse(provider, context, candidate),
+            ReferenceKind::FuzzyBook => {
+                resolve_fuzzy_book(translation_id, provider, context, candidate)
+            }
             // detect_candidates never emits these - see ReferenceKind docs.
             ReferenceKind::Sequential
             | ReferenceKind::Ambiguous
@@ -517,6 +520,10 @@ fn confidence_for_kind(kind: ReferenceKind) -> ConfidenceResult {
         // the real cosine-similarity score rather than calling this
         // function - a fixed score here would misrepresent it.
         ReferenceKind::Semantic => (0.1, "unexpected: semantic match scored elsewhere"),
+        // Never reached: resolve_fuzzy_book builds its own ConfidenceResult
+        // from the real fuzzy-match similarity score rather than calling
+        // this function - a fixed score here would misrepresent it.
+        ReferenceKind::FuzzyBook => (0.1, "unexpected: fuzzy book match scored elsewhere"),
     };
     ConfidenceResult::new(score, ConfidenceSource::Heuristic, Some(reason.to_string()))
 }
@@ -602,6 +609,69 @@ fn resolve_direct(
         _ => ScriptureDetection::unresolved(
             candidate.raw_text.clone(),
             "verse not found in Bible data",
+        ),
+    }
+}
+
+/// A near-miss book name immediately followed by a real chapter:verse shape
+/// (Phase 20, e.g. `"Roman 8:28"` -> Romans 8:28) - re-validates the guess
+/// against `provider` exactly like [`resolve_direct`] does for an exact
+/// citation ("do not trust the parser alone" applies at least as strongly
+/// to a fuzzy book-name guess as to an exact one), but deliberately never
+/// calls `context.resolve()`: a near-miss book name is not an explicit
+/// citation, so - exactly like `try_paraphrase`/`try_semantic` - it must
+/// never become the trusted active context a later bare `"verse N"` would
+/// silently inherit. Confidence is derived directly from
+/// [`DetectedCandidate::fuzzy_score`] rather than [`confidence_for_kind`]'s
+/// fixed per-kind scores, since those describe an *exact* match's
+/// trustworthiness and would misrepresent a near-miss guess.
+fn resolve_fuzzy_book(
+    translation_id: &str,
+    provider: &dyn BibleProvider,
+    context: &DefaultScriptureContextManager,
+    candidate: &DetectedCandidate,
+) -> ScriptureDetection {
+    let (Some(book), Some(chapter), Some(verse), Some(fuzzy_score)) = (
+        candidate.partial.book.clone(),
+        candidate.partial.chapter,
+        candidate.partial.verse_start,
+        candidate.fuzzy_score,
+    ) else {
+        return ScriptureDetection::unresolved(
+            candidate.raw_text.clone(),
+            "incomplete fuzzy book reference",
+        );
+    };
+
+    let reference = ScriptureReference::single(translation_id, &book, chapter, verse);
+    match provider.get_verse(&reference) {
+        Ok(Some(_)) => {
+            let reference_display = reference.to_string();
+            // A near-miss book name is never as trustworthy as an exact
+            // citation, even once the chapter/verse it names are confirmed
+            // real - dampened so this can never out-rank a genuine `Direct`
+            // match, and so a low `fuzzy_score` (a distant near-miss) never
+            // reads as confident just because the verse happened to exist.
+            let score = (fuzzy_score * 0.85).clamp(0.0, 1.0);
+            ScriptureDetection {
+                kind: ReferenceKind::FuzzyBook,
+                reference: Some(reference),
+                context: context.active_context(),
+                candidates: Vec::new(),
+                confidence: ConfidenceResult::new(
+                    score,
+                    ConfidenceSource::Heuristic,
+                    Some(format!(
+                        "book name matched approximately, not exactly ({:.0}% similarity); {reference_display} validated",
+                        fuzzy_score * 100.0
+                    )),
+                ),
+                raw_text: candidate.raw_text.clone(),
+            }
+        }
+        _ => ScriptureDetection::unresolved(
+            candidate.raw_text.clone(),
+            format!("fuzzy book guess {book} {chapter}:{verse} is not a real verse"),
         ),
     }
 }
@@ -928,6 +998,61 @@ mod tests {
             result.detections[0].reference.as_ref().unwrap().to_string(),
             "ROM 8:28"
         );
+    }
+
+    // Phase 20: fuzzy book-name matching.
+    #[test]
+    fn fuzzy_book_name_resolves_to_a_real_verse_with_dampened_confidence() {
+        let provider = FakeBibleProvider::kjv_fixture();
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        let result = process(&provider, &mut context, "Roman 8:28");
+
+        assert_eq!(result.detections.len(), 1);
+        let detection = &result.detections[0];
+        assert_eq!(detection.kind, ReferenceKind::FuzzyBook);
+        assert_eq!(
+            detection.reference.as_ref().unwrap().to_string(),
+            "ROM 8:28"
+        );
+        assert_eq!(
+            result.suggestions.len(),
+            1,
+            "a validated fuzzy match still produces a suggestion"
+        );
+        // Dampened below Direct's fixed 0.97, never as trustworthy as an
+        // exact citation, but still real (not the 0.1 "unresolved" floor).
+        assert!(detection.confidence.score > 0.1);
+        assert!(detection.confidence.score < 0.97);
+    }
+
+    #[test]
+    fn fuzzy_book_name_never_establishes_active_context() {
+        // Unlike a real Chapter/Direct citation, a near-miss book-name
+        // guess must never become the trusted active context a later bare
+        // "verse N" would silently inherit.
+        let provider = FakeBibleProvider::kjv_fixture();
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        process(&provider, &mut context, "Roman 8:28");
+        assert!(context.active_context().is_none());
+    }
+
+    #[test]
+    fn fuzzy_book_name_with_a_nonexistent_verse_is_unresolved() {
+        let provider = FakeBibleProvider::kjv_fixture();
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        // ROM 8:99 doesn't exist in the fixture - the fuzzy book guess
+        // must still be re-validated, exactly like an exact citation.
+        let result = process(&provider, &mut context, "Roman 8:99");
+        assert_eq!(result.detections[0].kind, ReferenceKind::Unresolved);
+        assert!(result.suggestions.is_empty());
+    }
+
+    #[test]
+    fn an_exact_reference_is_never_reclassified_as_fuzzy() {
+        let provider = FakeBibleProvider::kjv_fixture();
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        let result = process(&provider, &mut context, "Romans 8:28");
+        assert_eq!(result.detections[0].kind, ReferenceKind::Direct);
     }
 
     // 5. Verse inheritance.

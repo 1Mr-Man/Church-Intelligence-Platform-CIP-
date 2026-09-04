@@ -29,9 +29,10 @@ use cip_core_ai::{
     SpeechEngineError, Suggestion, SuggestionKind, SuggestionStatus, TranscriptSegment,
 };
 use cip_core_bible::{
-    book_alias::BOOKS, check_bible_integrity, search_bible as dispatch_bible_search, BibleBook,
-    BibleSearchResult, BibleTranslation, IntegrityReport, PartialScriptureReference, ReferenceKind,
-    ScriptureContext, ScriptureContextManager, ScriptureReference,
+    book_alias::BOOKS, canonicalize_book, check_bible_integrity,
+    search_bible as dispatch_bible_search, BibleBook, BibleSearchResult, BibleTranslation,
+    IntegrityReport, PartialScriptureReference, ReferenceKind, ScriptureContext,
+    ScriptureContextManager, ScriptureReference,
 };
 use cip_core_confidence::{ConfidenceResult, ConfidenceSource};
 use cip_core_content::{ContentMetadata, ContentRegistryError, ContentStatus, ContentType};
@@ -4513,11 +4514,17 @@ pub fn resolve_ambiguous_reference(
 }
 
 /// Operator correction of the active Scripture context (section 22) - "CIP
-/// misunderstood the pastor." Validated exactly like an automatically
-/// detected chapter reference would be (the book+chapter must be real),
-/// then takes effect for subsequent bare-verse fragments the same way an
-/// automatic chapter detection would. Never rewrites historical
-/// transcript content - only the *context*, going forward, changes.
+/// misunderstood the pastor." Accepts whatever book text the operator
+/// actually types - the full name ("John"), a common abbreviation ("Jn",
+/// "1 Cor"), or the raw stable code ("JHN") - resolved through the same
+/// `canonicalize_book` alias table the live detector itself uses (see
+/// `core/bible/src/book_alias.rs`), rather than requiring the exact
+/// database book code the operator has no reason to know. Validated
+/// exactly like an automatically detected chapter reference would be (the
+/// book+chapter must be real), then takes effect for subsequent bare-verse
+/// fragments the same way an automatic chapter detection would. Never
+/// rewrites historical transcript content - only the *context*, going
+/// forward, changes.
 #[tauri::command]
 pub fn correct_scripture_context(
     book: String,
@@ -4525,8 +4532,15 @@ pub fn correct_scripture_context(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ScriptureContext, AppError> {
-    let book = require_non_empty(&book, "book").map_err(log_and_return)?;
+    let book_input = require_non_empty(&book, "book").map_err(log_and_return)?;
     let service_id = current_service_id(&state).map_err(log_and_return)?;
+
+    let canonical = canonicalize_book(&book_input).ok_or_else(|| {
+        log_and_return(AppError::InvalidInput(format!(
+            "not a recognized Bible book: {book_input}"
+        )))
+    })?;
+    let book = canonical.code.to_string();
 
     state
         .bible_provider

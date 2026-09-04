@@ -150,6 +150,13 @@ fn finding_for_detection(
                 format!("{reference} (paraphrase, not cited)"),
             )
         }
+        ReferenceKind::FuzzyBook => {
+            let reference = detection.reference.as_ref()?;
+            (
+                AssertionLevel::Suggested,
+                format!("{reference} (book name matched approximately, not exactly)"),
+            )
+        }
         ReferenceKind::Semantic => {
             let reference = detection.reference.as_ref()?;
             (

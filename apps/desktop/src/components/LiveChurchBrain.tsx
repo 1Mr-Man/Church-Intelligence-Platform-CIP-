@@ -1149,12 +1149,15 @@ export function LiveChurchBrain() {
 
         <details className="live-brain__manual-entry">
           <summary>Correct active context</summary>
-          <p className="live-brain__hint">If CIP misunderstood the pastor, set the correct book and chapter here.</p>
+          <p className="live-brain__hint">
+            If CIP misunderstood the pastor, set the correct book and chapter here. Any form works - the full name
+            ("John"), a common abbreviation ("Jn", "1 Cor"), or the book code ("JHN").
+          </p>
           <div className="live-brain__row">
             <input
               value={correctionBook}
               onChange={(e) => setCorrectionBook(e.target.value)}
-              placeholder="e.g. ROM"
+              placeholder="e.g. John, Jn, or 1 Cor"
               aria-label="Correction book"
             />
             <input
@@ -1170,7 +1173,7 @@ export function LiveChurchBrain() {
               onClick={() =>
                 withBusy("correct-context", async () => {
                   const chapter = Number.parseInt(correctionChapter, 10);
-                  const corrected = await commands.correctScriptureContext(correctionBook.trim().toUpperCase(), chapter);
+                  const corrected = await commands.correctScriptureContext(correctionBook.trim(), chapter);
                   setActiveContext(corrected);
                   setCorrectionBook("");
                   setCorrectionChapter("");

@@ -82,6 +82,23 @@ pub enum ReferenceKind {
     /// otherwise, exactly as it always has. Always `Pending` and always
     /// requires operator approval - never auto-projected.
     Semantic,
+    /// A real citation shape (a word immediately followed by a
+    /// chapter:verse or chapter-verse pattern) was found, but the word
+    /// itself didn't match any known book name or alias exactly - it came
+    /// close enough, per [`crate::book_alias::fuzzy_match_book`], to a
+    /// single unambiguous book name to be worth surfacing (e.g. "Roman
+    /// 8:28" -> Romans 8:28, a plausible Whisper mishearing of the
+    /// trailing "s"). This *is* produced directly by [`detect_candidates`]
+    /// (unlike `Paraphrase`/`Semantic`, which are pipeline-level
+    /// fallbacks) because it's still fundamentally the same syntactic
+    /// citation shape, just with a tolerant book-name match - but it is
+    /// never as trustworthy as an exact `Direct` match, so it always
+    /// carries a real, non-`Unresolved` reference yet a deliberately
+    /// dampened confidence score. Always `Pending` and always requires
+    /// operator approval - never auto-projected, and never mutates the
+    /// active Scripture context the way a real citation would (see
+    /// `core/service`'s `resolve_fuzzy_book`).
+    FuzzyBook,
 }
 
 impl ReferenceKind {
@@ -98,20 +115,31 @@ impl ReferenceKind {
             ReferenceKind::Unresolved => "UNRESOLVED_REFERENCE",
             ReferenceKind::Paraphrase => "PARAPHRASE_REFERENCE",
             ReferenceKind::Semantic => "SEMANTIC_REFERENCE",
+            ReferenceKind::FuzzyBook => "FUZZY_BOOK_REFERENCE",
         }
     }
 }
 
 /// One syntactically-detected reference candidate, in the order it appeared
 /// in the source text.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Eq` was dropped from this derive when `fuzzy_score: Option<f32>` was
+/// added (Phase 20) - `f32` implements only `PartialEq`, not `Eq`.
+#[derive(Debug, Clone, PartialEq)]
 pub struct DetectedCandidate {
-    /// Always `Direct`, `Chapter`, or `Verse` - see [`ReferenceKind`] docs.
+    /// Always `Direct`, `Chapter`, `Verse`, or `FuzzyBook` - see
+    /// [`ReferenceKind`] docs.
     pub kind: ReferenceKind,
     pub partial: PartialScriptureReference,
     /// The exact substring that produced this candidate, kept for
     /// diagnostics/audit - never re-parsed.
     pub raw_text: String,
+    /// Only present for `FuzzyBook`: the book-name similarity score
+    /// [`crate::book_alias::fuzzy_match_book`] returned (`0.0..=1.0`),
+    /// carried through so the caller can derive an honestly dampened
+    /// confidence rather than reusing a fixed exact-match score. Always
+    /// `None` for every other kind.
+    pub fuzzy_score: Option<f32>,
 }
 
 fn book_pattern() -> Regex {
@@ -188,6 +216,21 @@ fn overlaps(range: &(usize, usize), point: usize) -> bool {
     point >= range.0 && point < range.1
 }
 
+/// Every alphabetic word in the text, independent of any book/alias
+/// vocabulary - the fuzzy-book pass's starting point, since it has to
+/// consider words `BOOK_PATTERN` didn't already match.
+static WORD_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\b[a-z]+\b").unwrap());
+
+/// The two-number shapes only (chapter *and* verse both present) -
+/// `SHAPES`' first four entries. The fuzzy-book pass deliberately never
+/// considers the chapter-only shapes (`SHAPES[4..]`): a near-miss book
+/// name paired with only a chapter number would have no verse to suggest
+/// and, per [`ReferenceKind::FuzzyBook`]'s docs, must never be trusted
+/// enough to establish the active Scripture context the way a real
+/// citation does - so a chapter-only fuzzy "match" would do nothing at
+/// all except risk a false positive for no benefit.
+const FUZZY_SHAPES: usize = 4;
+
 /// Find every Bible reference candidate in `text`, in order. `text` should
 /// already be normalized via [`crate::normalize::normalize_text`].
 pub fn detect_candidates(text: &str) -> Vec<DetectedCandidate> {
@@ -224,6 +267,63 @@ pub fn detect_candidates(text: &str) -> Vec<DetectedCandidate> {
                     kind: shape.kind,
                     partial,
                     raw_text: text[start..end].to_string(),
+                    fuzzy_score: None,
+                },
+            ));
+            consumed.push((start, end));
+            break;
+        }
+    }
+
+    // Fuzzy-book pass (Phase 20): for every word `BOOK_PATTERN` didn't
+    // already claim, try a near-miss match against the single-word
+    // canonical book names, but only trust it enough to emit a candidate
+    // when it's also immediately followed by a real chapter:verse shape -
+    // the same precision guard the exact pass gets from `BOOK_PATTERN`
+    // itself. A fuzzy-matched word with no citation shape after it is far
+    // too weak a signal on its own to ever surface.
+    for word_match in WORD_PATTERN.find_iter(text) {
+        if consumed
+            .iter()
+            .any(|range| overlaps(range, word_match.start()))
+        {
+            continue;
+        }
+        let word = word_match.as_str();
+        if crate::book_alias::canonicalize_book(word).is_some() {
+            // An exact match `BOOK_PATTERN` should already have claimed -
+            // never let the fuzzy pass re-guess a word an exact alias
+            // already owns cleanly.
+            continue;
+        }
+        let Some((book, score)) = crate::book_alias::fuzzy_match_book(word) else {
+            continue;
+        };
+        let rest = &text[word_match.end()..];
+
+        for shape in &SHAPES[..FUZZY_SHAPES] {
+            let Some(captures) = shape.pattern.captures(rest) else {
+                continue;
+            };
+            let full_match = captures.get(0).unwrap();
+            let start = word_match.start();
+            let end = word_match.end() + full_match.end();
+
+            let chapter: u32 = captures[1].parse().unwrap_or(0);
+            let verse: u32 = captures[2].parse().unwrap_or(0);
+
+            candidates.push((
+                start,
+                DetectedCandidate {
+                    kind: ReferenceKind::FuzzyBook,
+                    partial: PartialScriptureReference {
+                        book: Some(book.code.to_string()),
+                        chapter: Some(chapter),
+                        verse_start: Some(verse),
+                        verse_end: None,
+                    },
+                    raw_text: text[start..end].to_string(),
+                    fuzzy_score: Some(score),
                 },
             ));
             consumed.push((start, end));
@@ -252,6 +352,7 @@ pub fn detect_candidates(text: &str) -> Vec<DetectedCandidate> {
                     verse_end: None,
                 },
                 raw_text: full_match.as_str().to_string(),
+                fuzzy_score: None,
             },
         ));
     }
@@ -372,5 +473,52 @@ mod tests {
     #[test]
     fn plain_prose_produces_no_candidates() {
         assert!(detect_candidates("Let us pray together this morning.").is_empty());
+    }
+
+    // --- Phase 20: fuzzy-book detection -----------------------------
+
+    #[test]
+    fn detects_a_fuzzy_near_miss_book_name_with_chapter_and_verse() {
+        let c = only("Roman 8:28");
+        assert_eq!(c.kind, ReferenceKind::FuzzyBook);
+        assert_eq!(c.partial.book.as_deref(), Some("ROM"));
+        assert_eq!(c.partial.chapter, Some(8));
+        assert_eq!(c.partial.verse_start, Some(28));
+        assert!(c.fuzzy_score.unwrap() > 0.5);
+    }
+
+    #[test]
+    fn exact_book_matches_never_produce_a_duplicate_fuzzy_candidate() {
+        // "Romans" canonicalizes exactly, so the fuzzy pass must never
+        // also emit a second, redundant candidate for the same text.
+        let candidates = detect_candidates("Romans 8:28");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].kind, ReferenceKind::Direct);
+        assert!(candidates[0].fuzzy_score.is_none());
+    }
+
+    #[test]
+    fn a_near_miss_book_name_with_no_following_chapter_verse_produces_nothing() {
+        // A fuzzy book-name guess alone, with no citation shape after it,
+        // is far too weak a signal to ever surface - see FuzzyBook's docs
+        // on why this never establishes context the way a real chapter
+        // reference does.
+        assert!(detect_candidates("Roman was a great empire.").is_empty());
+        assert!(detect_candidates("Roman 8").is_empty());
+    }
+
+    #[test]
+    fn an_unrelated_word_never_fuzzy_matches() {
+        assert!(detect_candidates("Pizza 8:28").is_empty());
+    }
+
+    #[test]
+    fn fuzzy_book_detection_composes_with_an_exact_reference_in_the_same_segment() {
+        let candidates = detect_candidates("Compare Roman 8:28 with John 3:16.");
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].kind, ReferenceKind::FuzzyBook);
+        assert_eq!(candidates[0].partial.book.as_deref(), Some("ROM"));
+        assert_eq!(candidates[1].kind, ReferenceKind::Direct);
+        assert_eq!(candidates[1].partial.book.as_deref(), Some("JHN"));
     }
 }

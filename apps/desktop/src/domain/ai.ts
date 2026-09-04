@@ -88,6 +88,11 @@ export interface Suggestion {
  * and `"semantic"` (Phase 4.4) are never citations - both are guesses
  * (lexical/keyword overlap, and embedding-based meaning similarity,
  * respectively) that the segment's wording is likely based on a specific
+ * verse. `"fuzzy_book"` (Phase 20) *is* a citation shape (a word
+ * immediately followed by a real chapter:verse pattern) but the word
+ * itself only near-missed a known book name/alias - see
+ * `core/bible::book_alias::fuzzy_match_book`'s doc comment for exactly
+ * what it will and won't guess.
  * verse; both carry the same `pending`-suggestion guarantees as every
  * other kind, never auto-approved or auto-projected.
  */
@@ -99,7 +104,8 @@ export type ReferenceKind =
   | "ambiguous"
   | "unresolved"
   | "paraphrase"
-  | "semantic";
+  | "semantic"
+  | "fuzzy_book";
 
 /**
  * One reference candidate after context resolution and Bible validation -
