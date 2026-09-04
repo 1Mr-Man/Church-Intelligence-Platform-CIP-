@@ -1,0 +1,83 @@
+{
+    "phase": "24.1",
+    "summary": "Environment A direct-binary proof that Phase 24.1 (get_prepared_item_slide - real RenderedSlide rendering for the Live/Preview stage's queue strip) is genuinely compiled into this rebuilt installer, with zero functional regression to every prior-phase Rust symbol.",
+    "gitCommit": "472b91aa462cf92da0009865126664dc1bf71ea7",
+    "gitCommitShort": "472b91a",
+    "gitCommitNote": "This is the source tree commit (Phase 24.1's own commit) the Phase 24.1 rebuild was performed against. Phase 24.1 touches apps/desktop/src-tauri/src/commands.rs, apps/desktop/src-tauri/src/lib.rs, apps/desktop/src/lib/commands.ts, apps/desktop/src/components/LiveChurchBrain.tsx, apps/desktop/src/components/servicereplay/ServiceReplay.tsx, apps/desktop/src/components/workspace/LivePreviewStage.tsx, apps/desktop/src/components/workspace/workspace.css, and adds docs/phase-24-1-audit.md. Phases 23 and 24 (the layout shell and the dual Live/Preview panel this phase extends) were both frontend-only and never triggered a Windows rebuild; this is the first rebuild since Phase 22 (gitCommit 3837816).",
+    "buildScript": "scripts/build-windows-whisper.sh",
+    "buildLog": "ran directly in this session (not committed - ephemeral build log)",
+    "installer": {
+        "path": "release/windows/Church Intelligence Platform_0.1.0_x64-setup.exe",
+        "fileSizeBytes": 14396227,
+        "sha256": "2b16b218d0307d3ca9c45b405902dffd800fcf20e892e95cc34e78a4a9ef85bb",
+        "builtAtUtc": "2026-09-04T09:09:52Z",
+        "target": "x86_64-pc-windows-gnu",
+        "ggmlTwoPassFixApplied": true,
+        "ggmlTwoPassFixNote": "First build attempt failed as expected on the known whisper-rs-sys ggml lib-name defect; the build script applied its established fix and the retry succeeded - the same harmless, unrelated build-toolchain quirk documented and handled identically in every prior whisper-enabled Windows rebuild this project has done.",
+        "pnpmBuildSucceeded": true,
+        "nsisPackagingSucceeded": true,
+        "runtimeDllsConfirmedByBuildScript": [
+            "libstdc++-6.dll",
+            "libgcc_s_seh-1.dll",
+            "libwinpthread-1.dll"
+        ]
+    },
+    "extraction": {
+        "method": "7z x",
+        "exitCode": 0,
+        "fileCount": 12,
+        "confirmedPresent": [
+            "cip-desktop.exe",
+            "WebView2Loader.dll",
+            "libstdc++-6.dll",
+            "libgcc_s_seh-1.dll",
+            "libwinpthread-1.dll",
+            "uninstall.exe"
+        ]
+    },
+    "symbolRegressionCheck": {
+        "method": "x86_64-w64-mingw32-strings cip-desktop.exe | grep -c <symbol>, run against the extracted installer's main executable. Every tripwire from Phase 22's own baseline (the most recent prior rebuild) was re-checked; all matched exactly with zero deviation.",
+        "tripwiresFromPriorPhases": {
+            "rejection_echo_count": 5,
+            "find_rejected_suggestion_for_reference": 1,
+            "record_rejection_echo": 1,
+            "silentWindowsSkipped": 1,
+            "audioErrorText": 1,
+            "speechErrorText": 1,
+            "enroll_acoustic_reference": 2,
+            "list_acoustic_enrollments": 2,
+            "remove_acoustic_reference": 2,
+            "whisper_full_with_state": 96,
+            "finalize_bible_fuller_context_retry": 2,
+            "persist_detections_and_suggestions": 1,
+            "build_bible_detection_analytics": 1,
+            "get_bible_detection_analytics": 2,
+            "OutcomeCounts": 1,
+            "retry_paraphrase_or_semantic_with_fuller_context": 1,
+            "normalize_word_token": 1,
+            "fuzzy_match_book": 1,
+            "canonicalize_book": 1,
+            "correct_scripture_context": 2,
+            "last_feed_was_vad_early_flush": 1,
+            "feed_audio": 4,
+            "classify_model_size_tier": 0
+        },
+        "tripwiresFromPriorPhasesDeviation": "None. All 22 pre-existing tripwire symbols matched their Phase 22 baseline count exactly, including classify_model_size_tier (0 - already established in Phase 22's own evidence as expected optimizer inlining, not a regression) and retry_paraphrase_or_semantic_with_fuller_context (1 - already established in Phase 22's own evidence as the new baseline after that phase's own benign inlining variance).",
+        "newTripwireThisPhase": {
+            "get_prepared_item_slide": 2,
+            "note": "2 occurrences confirmed: the mangled Rust symbol (_ZN15cip_desktop_lib8commands23get_prepared_item_slide...) proving the command function itself is compiled in, plus its literal command-name string inside the generated Tauri invoke-handler dispatch table (visible directly adjacent to get_presentation_item and cancel_presentation in the extracted command-name string), proving it is actually registered and reachable from the frontend's invoke() call, not merely present as dead code."
+        },
+        "renderContentStillPresent": {
+            "render_content": 1,
+            "note": "cip_presentation_renderer::render_content's mangled symbol is present, confirming get_prepared_item_slide reuses the same single rendering pipeline display_presentation and get_presentation_display_state already call, not a second implementation."
+        }
+    },
+    "frontendTextSearchLimitation": "The frontend bundle is not searchable as plain strings inside cip-desktop.exe the same way Rust symbols are - the new queueSlides state/effect in LiveChurchBrain.tsx/ServiceReplay.tsx and LivePreviewStage.tsx's updated queue-card rendering were not independently string-searched, consistent with every prior phase's methodology. Frontend correctness rests on npm run typecheck's success, the full 303/303 frontend test pass (unchanged from Phase 24), and real-browser-engine visual verification with a mocked get_prepared_item_slide response (see docs/phase-24-1-audit.md) confirming the queue strip's cards render real wrapped body text and footer, not the prior raw-text approximation.",
+    "architecturalSafetyNotes": [
+        "One new Tauri command (get_prepared_item_slide), zero new events, zero new migrations, zero schema changes.",
+        "get_prepared_item_slide never mutates PresentationItem status and has no effect on prepare_presentation, display_presentation, cancel_presentation, or any other presentation lifecycle command - it is a pure read + re-render, reusing render_content exactly as display_presentation and get_presentation_display_state already do.",
+        "Every other domain contract crate (core/bible, core/sermon, core/music, core/service) is entirely untouched.",
+        "Every prior-phase command and symbol remains present and unregressed - zero deviation across all 22 pre-existing tripwires, confirming this phase's addition did not disturb any prior gate or feature."
+    ],
+    "environmentCStatus": "Not yet performed. A real operator preparing several items during an actual service and confirming the queue strip's cards show the same wrapped text/footer the real Display action would show is required to close Environment C for this phase."
+}
