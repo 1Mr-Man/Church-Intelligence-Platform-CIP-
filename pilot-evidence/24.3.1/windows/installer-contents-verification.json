@@ -1,0 +1,88 @@
+{
+    "phase": "24.3.1",
+    "summary": "Environment A direct-binary proof that Phase 24.3.1 (quality-tier language-conditioning fix: SpeechEngine::transcribe_once now accepts a language_hint from the fast tier's own real per-window detection) is genuinely compiled into this rebuilt installer, with zero functional regression to every prior-phase Rust symbol.",
+    "gitCommit": "8dfc7c5d3fe91331ee194ed04653a8c2c0b6acbb",
+    "gitCommitShort": "8dfc7c5",
+    "gitCommitNote": "This is the source tree commit (Phase 24.3.1's own commit) this rebuild was performed against. Phase 24.3.1 touches core/ai/src/speech_engine.rs (transcribe_once signature), ai/speech/src/whisper.rs (WhisperSpeechEngine's implementation + module docs), and apps/desktop/src-tauri/src/commands.rs (QualityJob.language_hint, wired from segment.language through to transcribe_once). No frontend files, no migrations, no new commands/events. This is the fourth consecutive rebuild this session (following Phase 24.1's gitCommit 472b91a, Phase 24.2's gitCommit b668be5, and Phase 24.3's gitCommit c9f3ef0) - all four closed real gaps identified by continuing directly from the operator's own follow-up direction.",
+    "buildScript": "scripts/build-windows-whisper.sh",
+    "buildLog": "ran directly in this session (not committed - ephemeral build log)",
+    "installer": {
+        "path": "release/windows/Church Intelligence Platform_0.1.0_x64-setup.exe",
+        "fileSizeBytes": 14412722,
+        "sha256": "ca982fcbe3c761424b5f20f41e5d688676e304c051730ca24e63c313ada8b8ca",
+        "builtAtUtc": "2026-09-04T14:28:00Z",
+        "target": "x86_64-pc-windows-gnu",
+        "ggmlTwoPassFixApplied": true,
+        "ggmlTwoPassFixNote": "First build attempt failed as expected on the known whisper-rs-sys ggml lib-name defect; the build script applied its established fix and the retry succeeded - the same harmless, unrelated build-toolchain quirk documented and handled identically in every prior whisper-enabled Windows rebuild this project has done.",
+        "pnpmBuildSucceeded": true,
+        "nsisPackagingSucceeded": true,
+        "runtimeDllsConfirmedByBuildScript": [
+            "libstdc++-6.dll",
+            "libgcc_s_seh-1.dll",
+            "libwinpthread-1.dll"
+        ]
+    },
+    "extraction": {
+        "method": "7z x",
+        "exitCode": 0,
+        "fileCount": 12,
+        "confirmedPresent": [
+            "cip-desktop.exe",
+            "WebView2Loader.dll",
+            "libstdc++-6.dll",
+            "libgcc_s_seh-1.dll",
+            "libwinpthread-1.dll",
+            "uninstall.exe"
+        ]
+    },
+    "symbolRegressionCheck": {
+        "method": "x86_64-w64-mingw32-strings cip-desktop.exe | grep -c <symbol>, run against the extracted installer's main executable. Every tripwire from Phase 24.3's own baseline (the most recent prior rebuild) was re-checked, including the one Phase 24.3 investigated and confirmed benign (retry_paraphrase_or_semantic_with_fuller_context).",
+        "tripwiresFromPriorPhases": {
+            "rejection_echo_count": 5,
+            "find_rejected_suggestion_for_reference": 1,
+            "record_rejection_echo": 1,
+            "silentWindowsSkipped": 1,
+            "audioErrorText": 1,
+            "speechErrorText": 1,
+            "enroll_acoustic_reference": 2,
+            "list_acoustic_enrollments": 2,
+            "remove_acoustic_reference": 2,
+            "whisper_full_with_state": 96,
+            "finalize_bible_fuller_context_retry": 2,
+            "persist_detections_and_suggestions": 1,
+            "build_bible_detection_analytics": 1,
+            "get_bible_detection_analytics": 2,
+            "OutcomeCounts": 1,
+            "retry_paraphrase_or_semantic_with_fuller_context": 2,
+            "normalize_word_token": 1,
+            "fuzzy_match_book": 1,
+            "canonicalize_book": 1,
+            "correct_scripture_context": 2,
+            "last_feed_was_vad_early_flush": 1,
+            "feed_audio": 4,
+            "classify_model_size_tier": 0,
+            "get_prepared_item_slide": 2,
+            "decode_pass": 1,
+            "try_interim_decode": 1,
+            "should_flush_early": 0,
+            "should_attempt_interim_decode": 0,
+            "transcribe_once": 3,
+            "take_last_final_window_audio": 2,
+            "spawn_quality_worker": 3,
+            "persist_transcript_correction": 1,
+            "install_whisper_quality_model": 2
+        },
+        "tripwiresFromPriorPhasesDeviation": "None. All 33 pre-existing tripwire symbols matched their Phase 24.3 baseline count exactly, including retry_paraphrase_or_semantic_with_fuller_context (2, matching Phase 24.3's own investigated baseline - the two genuinely distinct functions sharing a short name, unchanged again this phase).",
+        "newTripwiresThisPhase": {
+            "note": "Phase 24.3.1 changes an existing function's signature (transcribe_once gained a language_hint parameter) rather than adding new functions - transcribe_once's own presence (count 3, unchanged from Phase 24.3's baseline) already confirms the modified function compiled into this build. No new symbol names were introduced this phase to track as fresh tripwires."
+        }
+    },
+    "frontendTextSearchLimitation": "Not applicable this phase - Phase 24.3.1 touches zero frontend files (confirmed by `git show --stat` on the phase's own commit). npm run typecheck and npm run build were both run and passed clean against the unchanged frontend source, confirming nothing frontend-visible was affected.",
+    "architecturalSafetyNotes": [
+        "Zero changes to any existing Tauri command's signature or behavior, zero changes to any existing event's payload shape, zero new migrations, zero new commands, zero new events.",
+        "The language_hint parameter only affects the one transcribe_once call it is passed to - WhisperSpeechEngine.requested_language (this instance's own set_language-configured default, governing every other decode) is never mutated by it.",
+        "When the fast tier reports no language for a window, language_hint is None and the quality tier falls back to exactly its Phase 24.3 prior behavior (self.requested_language) - this fix can only make the two tiers agree more often, never introduce a new disagreement.",
+        "Every prior-phase command and symbol remains present and unregressed - all 33 tripwires matched exactly, zero deviation this rebuild (an improvement over Phase 24.3's own rebuild, which had one investigated-and-confirmed-benign deviation)."
+    ],
+    "environmentCStatus": "Not yet performed. This fix makes the still-real-hardware-unconfirmed dual-tier pipeline more correct once it is confirmed on real hardware - it does not itself close Environment C for the quality tier. See docs/phase-24-3-audit.md's and docs/phase-24-3-1-audit.md's own Known Limitations."
+}
