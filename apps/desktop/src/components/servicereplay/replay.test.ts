@@ -81,6 +81,29 @@ describe("segmentTranscript", () => {
     expect(segments.map((s) => s.text)).toEqual(["Good morning church.", "Today's message is on faithfulness."]);
   });
 
+  it("supports minute:second timestamps without hours and skips human-readable time labels", () => {
+    const text = [
+      "0:00",
+      "0 seconds",
+      "Went during my own time in the secondary school.",
+      "",
+      "0:13",
+      "13 seconds",
+      "It does not matter how good you are in all subjects.",
+      "",
+      "1:04",
+      "1 minute, 4 seconds",
+      "Seniority counted very much.",
+    ].join("\n");
+
+    const segments = segmentTranscript(text);
+    expect(segments).toEqual([
+      { sequence: 0, timestampLabel: "0:00", text: "Went during my own time in the secondary school." },
+      { sequence: 1, timestampLabel: "0:13", text: "It does not matter how good you are in all subjects." },
+      { sequence: 2, timestampLabel: "1:04", text: "Seniority counted very much." },
+    ]);
+  });
+
   it("does not mistake a single ordinary timestamp mention for a cue transcript", () => {
     // Only one cue-like line (and it's not a standalone line, it's part of
     // a sentence) - must fall back to ordinary paragraph/sentence chunking.

@@ -42,8 +42,16 @@ const MAX_CHUNK_CHARS = 220;
  * the ENTIRE remaining line to be just the timecode(s), so an ordinary
  * sentence that merely mentions a time is never mistaken for a cue
  * marker. */
-const CUE_LINE =
-  /^(\d{1,2}:\d{2}:\d{2}(?:[.,]\d{1,3})?)\s*(?:-->|[-–—])?\s*(\d{1,2}:\d{2}:\d{2}(?:[.,]\d{1,3})?)?:?$/;
+const TIME_VALUE = "\\d{1,2}(?::\\d{2}){1,2}(?:[.,]\\d{1,3})?";
+const CUE_LINE = new RegExp(
+  `^(${TIME_VALUE})\\s*(?:-->|[-–—])?\\s*(?:(${TIME_VALUE}))?\\s*:?$`,
+);
+
+function looksLikeTimestampLabel(line: string): boolean {
+  return /^\d+\s*(?:seconds?|minutes?|mins?|secs?)\b(?:\s*(?:,|and)\s*\d+\s*(?:seconds?|minutes?|mins?|secs?))?$/i.test(
+    line,
+  );
+}
 
 function parseTimestampCues(text: string): ReplaySegment[] | null {
   const lines = text.split(/\r?\n/);
@@ -68,6 +76,7 @@ function parseTimestampCues(text: string): ReplaySegment[] | null {
       currentLabel = match[2] ? `${match[1]}–${match[2]}` : match[1];
       buffer = [];
     } else if (currentLabel !== null) {
+      if (looksLikeTimestampLabel(line)) continue;
       buffer.push(rawLine.trim());
     }
     // Text encountered before any cue marker is seen is ignored - this is
