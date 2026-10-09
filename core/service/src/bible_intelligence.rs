@@ -63,6 +63,12 @@ const MIN_PARAPHRASE_SIGNIFICANT_WORDS: usize = 4;
 /// five actual matched words before surfacing a lexical paraphrase.
 const MIN_PARAPHRASE_MATCHED_WORDS: usize = 5;
 
+/// Fuller 12-20s transcript windows carry enough surrounding speech to
+/// support a slightly shorter lexical paraphrase. This keeps the live
+/// 3-second ASR path conservative while allowing a real paraphrase to be
+/// recovered when its words are distributed across the accumulated context.
+const MIN_CONTEXT_PARAPHRASE_MATCHED_WORDS: usize = 4;
+
 /// How much of a segment's significant vocabulary must be found in a
 /// candidate verse before it's trusted as a paraphrase of that verse,
 /// rather than a coincidental partial overlap. Deliberately high - see
@@ -255,9 +261,14 @@ pub fn retry_paraphrase_or_semantic_with_fuller_context(
     let mut detections = Vec::new();
     let mut suggestions = Vec::new();
 
-    if let Some(detection) =
-        try_paraphrase(translation_id, provider, &normalized, segment_text, context)
-    {
+    if let Some(detection) = try_paraphrase_with_minimum(
+        translation_id,
+        provider,
+        &normalized,
+        segment_text,
+        context,
+        MIN_CONTEXT_PARAPHRASE_MATCHED_WORDS,
+    ) {
         if let Some(suggestion) = suggestion_for(service_id, &detection) {
             suggestions.push(suggestion);
         }
@@ -393,6 +404,24 @@ fn try_paraphrase(
     raw_text: &str,
     context: &DefaultScriptureContextManager,
 ) -> Option<ScriptureDetection> {
+    try_paraphrase_with_minimum(
+        translation_id,
+        provider,
+        normalized_text,
+        raw_text,
+        context,
+        MIN_PARAPHRASE_MATCHED_WORDS,
+    )
+}
+
+fn try_paraphrase_with_minimum(
+    translation_id: &str,
+    provider: &dyn BibleProvider,
+    normalized_text: &str,
+    raw_text: &str,
+    context: &DefaultScriptureContextManager,
+    minimum_matched_words: usize,
+) -> Option<ScriptureDetection> {
     if paraphrase::significant_word_count(normalized_text) < MIN_PARAPHRASE_SIGNIFICANT_WORDS {
         return None;
     }
@@ -413,7 +442,7 @@ fn try_paraphrase(
     }
 
     let (score, matched_words, verse) = best?;
-    if score < MIN_PARAPHRASE_SCORE || matched_words < MIN_PARAPHRASE_MATCHED_WORDS {
+    if score < MIN_PARAPHRASE_SCORE || matched_words < minimum_matched_words {
         return None;
     }
 
@@ -1750,6 +1779,34 @@ mod tests {
         assert_eq!(result.detections[0].kind, ReferenceKind::Paraphrase);
         assert_eq!(
             result.detections[0].reference.as_ref().unwrap().to_string(),
+            "ROM 8:28"
+        );
+
+        // A shorter paraphrase is intentionally rejected in the raw
+        // 3-second path, but becomes eligible when the accumulated window is
+        // explicitly supplied as context.
+        let raw_short_paraphrase = process(
+            &provider,
+            &mut context,
+            "All things work together for good.",
+        );
+        assert!(raw_short_paraphrase.suggestions.is_empty());
+
+        let contextual_short_paraphrase = retry_paraphrase_or_semantic_with_fuller_context(
+            Uuid::new_v4(),
+            "All things work together for good.",
+            "KJV",
+            &provider,
+            &mut context,
+            None,
+        );
+        assert_eq!(contextual_short_paraphrase.suggestions.len(), 1);
+        assert_eq!(
+            contextual_short_paraphrase.detections[0]
+                .reference
+                .as_ref()
+                .unwrap()
+                .to_string(),
             "ROM 8:28"
         );
     }
