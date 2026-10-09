@@ -1487,6 +1487,10 @@ mod tests {
             "the whole, the power of God command was",
             "Smoke is supposed to be the glory of God.",
             "Tell you, but let me tell you right, do you know?",
+            // Regression cases from the 2026-10-09 13-minute service report.
+            "young man in Legos called",
+            "God is faithful, therefore I can",
+            "and God can walk together.",
         ] {
             let mut context = DefaultScriptureContextManager::new("KJV");
             let result = process(&provider, &mut context, text);
