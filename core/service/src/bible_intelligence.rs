@@ -58,6 +58,11 @@ use uuid::Uuid;
 /// ratio against some verse by sharing just one or two words.
 const MIN_PARAPHRASE_SIGNIFICANT_WORDS: usize = 4;
 
+/// A ratio alone is unsafe for short ASR fragments: four generic words can
+/// all appear in a verse and still produce a misleading 100% score. Require
+/// five actual matched words before surfacing a lexical paraphrase.
+const MIN_PARAPHRASE_MATCHED_WORDS: usize = 5;
+
 /// How much of a segment's significant vocabulary must be found in a
 /// candidate verse before it's trusted as a paraphrase of that verse,
 /// rather than a coincidental partial overlap. Deliberately high - see
@@ -396,17 +401,19 @@ fn try_paraphrase(
         .find_similar_verses(translation_id, normalized_text, MAX_PARAPHRASE_CANDIDATES)
         .ok()?;
 
-    let mut best: Option<(f32, cip_core_bible::BibleVerse)> = None;
+    let mut best: Option<(f32, usize, cip_core_bible::BibleVerse)> = None;
     for verse in candidates {
         let score = paraphrase::score_overlap(normalized_text, &verse.text);
-        let is_better = best.as_ref().map(|(s, _)| score > *s).unwrap_or(true);
+        let matched_words =
+            paraphrase::matched_significant_word_count(normalized_text, &verse.text);
+        let is_better = best.as_ref().map(|(s, _, _)| score > *s).unwrap_or(true);
         if is_better {
-            best = Some((score, verse));
+            best = Some((score, matched_words, verse));
         }
     }
 
-    let (score, verse) = best?;
-    if score < MIN_PARAPHRASE_SCORE {
+    let (score, matched_words, verse) = best?;
+    if score < MIN_PARAPHRASE_SCORE || matched_words < MIN_PARAPHRASE_MATCHED_WORDS {
         return None;
     }
 
@@ -1432,6 +1439,24 @@ mod tests {
             assert!(
                 result.suggestions.is_empty(),
                 "{text:?} must not trigger a paraphrase suggestion"
+            );
+        }
+
+        // Regression cases from the 2026-10-09 live service report. These
+        // are ASR fragments that previously became false-positive Scripture
+        // suggestions because a four-word overlap reached 75% or more.
+        for text in [
+            "Will the power of God is not visiting our generation?",
+            "Steve just going to see you.",
+            "the whole, the power of God command was",
+            "Smoke is supposed to be the glory of God.",
+            "Tell you, but let me tell you right, do you know?",
+        ] {
+            let mut context = DefaultScriptureContextManager::new("KJV");
+            let result = process(&provider, &mut context, text);
+            assert!(
+                result.suggestions.is_empty(),
+                "live-report ASR fragment {text:?} must not trigger a paraphrase suggestion"
             );
         }
     }

@@ -82,6 +82,18 @@ pub fn significant_word_count(text: &str) -> usize {
         .len()
 }
 
+/// Count the distinct significant query words that also occur in the verse.
+/// This is kept separate from [`score_overlap`] so callers can reject a
+/// perfect-looking ratio produced by only three or four generic words.
+pub fn matched_significant_word_count(query_text: &str, verse_text: &str) -> usize {
+    let query_words: HashSet<String> = significant_words(query_text).into_iter().collect();
+    if query_words.is_empty() {
+        return 0;
+    }
+    let verse_words: HashSet<String> = significant_words(verse_text).into_iter().collect();
+    query_words.intersection(&verse_words).count()
+}
+
 /// What fraction of `query_text`'s distinct significant words also appear
 /// (post-stemming) in `verse_text` - `0.0..=1.0`. Deliberately asymmetric:
 /// this is *recall of the query's vocabulary in the verse*, not similarity
@@ -93,8 +105,7 @@ pub fn score_overlap(query_text: &str, verse_text: &str) -> f32 {
     if query_words.is_empty() {
         return 0.0;
     }
-    let verse_words: HashSet<String> = significant_words(verse_text).into_iter().collect();
-    let matched = query_words.intersection(&verse_words).count();
+    let matched = matched_significant_word_count(query_text, verse_text);
     matched as f32 / query_words.len() as f32
 }
 
@@ -185,5 +196,14 @@ mod tests {
         // Repetition of the same significant word must not inflate the
         // count used to gate against short, trivially-matching utterances.
         assert_eq!(significant_word_count("good good good"), 1);
+    }
+
+    #[test]
+    fn matched_significant_word_count_is_distinct_and_stemmed() {
+        assert_eq!(
+            matched_significant_word_count("all things work together for good", ROM_8_28_BSB),
+            4
+        );
+        assert_eq!(matched_significant_word_count("good good", ROM_8_28_BSB), 1);
     }
 }
