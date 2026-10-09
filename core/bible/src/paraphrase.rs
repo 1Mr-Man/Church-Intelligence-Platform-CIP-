@@ -94,6 +94,31 @@ pub fn matched_significant_word_count(query_text: &str, verse_text: &str) -> usi
     query_words.intersection(&verse_words).count()
 }
 
+/// Return the longest contiguous run of significant, stemmed words shared by
+/// the query and verse. A short exact quotation is stronger evidence than the
+/// same number of unrelated words scattered across a verse.
+pub fn longest_significant_word_run(query_text: &str, verse_text: &str) -> usize {
+    let query_words = significant_words(query_text);
+    let verse_words = significant_words(verse_text);
+    if query_words.is_empty() || verse_words.is_empty() {
+        return 0;
+    }
+
+    let mut longest = 0;
+    for start in 0..query_words.len() {
+        let mut run = 0;
+        while start + run < query_words.len()
+            && verse_words
+                .windows(run + 1)
+                .any(|window| window == &query_words[start..=start + run])
+        {
+            run += 1;
+        }
+        longest = longest.max(run);
+    }
+    longest
+}
+
 /// What fraction of `query_text`'s distinct significant words also appear
 /// (post-stemming) in `verse_text` - `0.0..=1.0`. Deliberately asymmetric:
 /// this is *recall of the query's vocabulary in the verse*, not similarity
@@ -205,5 +230,20 @@ mod tests {
             4
         );
         assert_eq!(matched_significant_word_count("good good", ROM_8_28_BSB), 1);
+    }
+
+    #[test]
+    fn contiguous_runs_identify_short_exact_quotations() {
+        assert_eq!(
+            longest_significant_word_run(
+                "Precious in the sight of the Lord is the death of his saints",
+                "Precious in the sight of the Lord is the death of his saints"
+            ),
+            5
+        );
+        assert_eq!(
+            longest_significant_word_run("power God visiting generation", ROM_8_28_BSB),
+            1
+        );
     }
 }

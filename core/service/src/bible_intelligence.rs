@@ -63,6 +63,10 @@ const MIN_PARAPHRASE_SIGNIFICANT_WORDS: usize = 4;
 /// five actual matched words before surfacing a lexical paraphrase.
 const MIN_PARAPHRASE_MATCHED_WORDS: usize = 5;
 
+/// A contiguous run of four significant words is enough to recognize a
+/// short, exact quotation even when the verse contains many stopwords.
+const MIN_PARAPHRASE_QUOTE_RUN: usize = 4;
+
 /// Fuller 12-20s transcript windows carry enough surrounding speech to
 /// support a slightly shorter lexical paraphrase. This keeps the live
 /// 3-second ASR path conservative while allowing a real paraphrase to be
@@ -435,14 +439,17 @@ fn try_paraphrase_with_minimum(
         let score = paraphrase::score_overlap(normalized_text, &verse.text);
         let matched_words =
             paraphrase::matched_significant_word_count(normalized_text, &verse.text);
+        let quote_run = paraphrase::longest_significant_word_run(normalized_text, &verse.text);
         let is_better = best.as_ref().map(|(s, _, _)| score > *s).unwrap_or(true);
         if is_better {
-            best = Some((score, matched_words, verse));
+            best = Some((score, matched_words.max(quote_run), verse));
         }
     }
 
     let (score, matched_words, verse) = best?;
-    if score < MIN_PARAPHRASE_SCORE || matched_words < minimum_matched_words {
+    if score < MIN_PARAPHRASE_SCORE
+        || (matched_words < minimum_matched_words && matched_words < MIN_PARAPHRASE_QUOTE_RUN)
+    {
         return None;
     }
 
@@ -1782,15 +1789,23 @@ mod tests {
             "ROM 8:28"
         );
 
-        // A shorter paraphrase is intentionally rejected in the raw
-        // 3-second path, but becomes eligible when the accumulated window is
-        // explicitly supplied as context.
+        // A short but contiguous quotation is now eligible in the raw path;
+        // the quote-run guard distinguishes it from scattered generic ASR
+        // words. The same text remains eligible in the fuller-context path.
         let raw_short_paraphrase = process(
             &provider,
             &mut context,
             "All things work together for good.",
         );
-        assert!(raw_short_paraphrase.suggestions.is_empty());
+        assert_eq!(raw_short_paraphrase.suggestions.len(), 1);
+        assert_eq!(
+            raw_short_paraphrase.detections[0]
+                .reference
+                .as_ref()
+                .unwrap()
+                .to_string(),
+            "ROM 8:28"
+        );
 
         let contextual_short_paraphrase = retry_paraphrase_or_semantic_with_fuller_context(
             Uuid::new_v4(),
