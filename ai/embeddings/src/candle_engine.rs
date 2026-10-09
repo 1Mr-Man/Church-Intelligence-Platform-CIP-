@@ -23,7 +23,7 @@ use std::path::Path;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::bert::{BertModel, Config, HiddenAct, PositionEmbeddingType};
-use tokenizers::Tokenizer;
+use tokenizers::{PaddingParams, Tokenizer};
 
 use cip_core_ai::{EmbeddingEngine, EmbeddingEngineError};
 
@@ -101,14 +101,58 @@ impl CandleEmbeddingEngine {
         let model = BertModel::load(var_builder, &config)
             .map_err(|e| EmbeddingEngineError::EmbeddingFailed(e.to_string()))?;
 
-        let tokenizer = Tokenizer::from_file(tokenizer_path)
+        let mut tokenizer = Tokenizer::from_file(tokenizer_path)
             .map_err(|e| EmbeddingEngineError::EmbeddingFailed(e.to_string()))?;
+        tokenizer.with_padding(Some(PaddingParams::default()));
 
         Ok(Self {
             model,
             tokenizer,
             device,
         })
+    }
+
+    /// Embed a batch of texts in one BERT forward pass. This is used by
+    /// offline verse-embedding generation, where one-at-a-time inference is
+    /// needlessly expensive for a full Bible translation.
+    pub fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingEngineError> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let encodings = self
+            .tokenizer
+            .encode_batch(texts.to_vec(), true)
+            .map_err(|e| EmbeddingEngineError::EmbeddingFailed(e.to_string()))?;
+        let token_ids: Vec<Vec<u32>> = encodings.iter().map(|e| e.get_ids().to_vec()).collect();
+        let attention_masks: Vec<Vec<u32>> = encodings
+            .iter()
+            .map(|e| e.get_attention_mask().to_vec())
+            .collect();
+        let token_ids_tensor = Tensor::new(token_ids, &self.device)
+            .map_err(|e| EmbeddingEngineError::EmbeddingFailed(e.to_string()))?;
+        let token_type_ids = token_ids_tensor
+            .zeros_like()
+            .map_err(|e| EmbeddingEngineError::EmbeddingFailed(e.to_string()))?;
+        let attention_mask_tensor = Tensor::new(attention_masks.clone(), &self.device)
+            .map_err(|e| EmbeddingEngineError::EmbeddingFailed(e.to_string()))?;
+        let output = self
+            .model
+            .forward(&token_ids_tensor, &token_type_ids, Some(&attention_mask_tensor))
+            .map_err(|e| EmbeddingEngineError::EmbeddingFailed(e.to_string()))?;
+        let token_embeddings = output
+            .to_vec3::<f32>()
+            .map_err(|e| EmbeddingEngineError::EmbeddingFailed(e.to_string()))?;
+
+        let pooled_embeddings = token_embeddings
+            .into_iter()
+            .zip(attention_masks)
+            .map(|(embeddings, mask)| {
+                let mut pooled = mean_pool(&embeddings, &mask);
+                l2_normalize(&mut pooled);
+                pooled
+            })
+            .collect::<Vec<_>>();
+        Ok(pooled_embeddings)
     }
 }
 
