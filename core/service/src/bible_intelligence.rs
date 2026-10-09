@@ -67,11 +67,11 @@ const MIN_PARAPHRASE_MATCHED_WORDS: usize = 5;
 /// short, exact quotation even when the verse contains many stopwords.
 const MIN_PARAPHRASE_QUOTE_RUN: usize = 4;
 
-/// Fuller 12-20s transcript windows carry enough surrounding speech to
-/// support a slightly shorter lexical paraphrase. This keeps the live
-/// 3-second ASR path conservative while allowing a real paraphrase to be
-/// recovered when its words are distributed across the accumulated context.
-const MIN_CONTEXT_PARAPHRASE_MATCHED_WORDS: usize = 4;
+/// Fuller 12-20s transcript windows provide more vocabulary, but they also
+/// contain more opportunities for unrelated words to overlap a verse. Keep
+/// the same five-word lexical floor as the live path; the separate contiguous
+/// quote-run exception still recognizes a genuine short quotation.
+const MIN_CONTEXT_PARAPHRASE_MATCHED_WORDS: usize = MIN_PARAPHRASE_MATCHED_WORDS;
 
 /// How much of a segment's significant vocabulary must be found in a
 /// candidate verse before it's trusted as a paraphrase of that verse,
@@ -1499,6 +1499,30 @@ mod tests {
                 "live-report ASR fragment {text:?} must not trigger a paraphrase suggestion"
             );
         }
+    }
+
+    #[test]
+    fn fuller_context_does_not_accept_four_scattered_overlapping_words() {
+        let provider = FakeBibleProvider::new(&[(
+            "MAT",
+            5,
+            1,
+            "The people gathered and the teacher spoke to them about patience.",
+        )]);
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        let result = retry_paraphrase_or_semantic_with_fuller_context(
+            Uuid::new_v4(),
+            "The teacher mentioned patience while the gathered people considered kindness.",
+            "KJV",
+            &provider,
+            &mut context,
+            None,
+        );
+
+        assert!(
+            result.suggestions.is_empty(),
+            "four scattered overlapping words must not become a fuller-context suggestion"
+        );
     }
 
     // --- Phase 4.4: semantic (embedding-based) fallback ---
