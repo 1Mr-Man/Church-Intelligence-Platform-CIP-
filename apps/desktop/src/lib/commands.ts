@@ -17,6 +17,7 @@ import type {
   AppConfig,
   AppEnvironment,
   BackupReport,
+  EmbeddingCapabilities,
   PilotDiagnostics,
   SessionReportExport,
   WhisperModelDiagnostic,
@@ -111,6 +112,18 @@ export function appHealthCheck(): Promise<HealthReport> {
 /** Phase 3.2: hardware/model diagnostics for pilot setup - see `PilotDiagnostics`. */
 export function getPilotDiagnostics(): Promise<PilotDiagnostics> {
   return invokeCommand("get_pilot_diagnostics");
+}
+
+export function getEmbeddingCapabilities(): Promise<EmbeddingCapabilities> {
+  return invokeCommand("get_embedding_capabilities");
+}
+
+export function installEmbeddingModelFile(sourcePath: string): Promise<WhisperModelDiagnostic> {
+  return invokeCommand("install_embedding_model_file", { sourcePath });
+}
+
+export function installEmbeddingTokenizerFile(sourcePath: string): Promise<WhisperModelDiagnostic> {
+  return invokeCommand("install_embedding_tokenizer_file", { sourcePath });
 }
 
 /**

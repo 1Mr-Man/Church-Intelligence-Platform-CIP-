@@ -52,16 +52,23 @@ cip-ai-speech.workspace = true
 cip-ai-embeddings.workspace = true
 
 [features]
+# Semantic Bible search is part of the normal desktop build. The feature is
+# safe without model files: startup falls back to NullEmbeddingEngine until
+# the local model weights and tokenizer are installed. Keeping it enabled in
+# the default build ensures a configured installation can actually use
+# conceptual paraphrase detection instead of silently reporting that the
+# backend was not compiled.
+default = ["semantic-search"]
+
 # Off by default - see ai/speech's Cargo.toml and docs/live-speech.md for
 # why the real whisper.cpp backend is opt-in rather than a default build
 # dependency. Enable with `cargo tauri build --features whisper` once a
 # local model is actually configured.
 whisper = ["cip-ai-speech/whisper"]
-# Off by default - mirrors `whisper` exactly, see ai/embeddings's Cargo.toml
-# and docs/phase-4-4-semantic-bible-search.md for why the real candle
-# backend is opt-in rather than a default build dependency. Enable with
-# `cargo tauri build --features semantic-search` once a local embedding
-# model is actually configured.
+# The backend is compiled into the normal desktop build. Missing model files
+# remain non-fatal; the runtime uses NullEmbeddingEngine until provisioning
+# is complete. Use `--no-default-features` only for a deliberately minimal
+# build that does not need conceptual paraphrase detection.
 semantic-search = ["cip-ai-embeddings/semantic-search"]
 
 [dev-dependencies]

@@ -211,6 +211,20 @@ export interface PilotDiagnostics {
   database: DatabaseDiagnostic;
 }
 
+/** Runtime readiness for conceptual Bible paraphrase detection. */
+export interface EmbeddingCapabilities {
+  featureCompiled: boolean;
+  modelLoadAttempted: boolean;
+  modelLoaded: boolean;
+  modelLoadError: string | null;
+  engineReady: boolean;
+  modelId: string;
+  dimensions: number;
+  modelFile: WhisperModelDiagnostic;
+  tokenizerFile: WhisperModelDiagnostic;
+  verseEmbeddingCoverage: [number, number] | null;
+}
+
 /** Frontend mirror of `commands.rs`'s `BackupReport`, via `backup_database`. */
 export interface BackupReport {
   backupPath: string;

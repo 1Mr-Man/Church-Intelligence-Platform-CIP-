@@ -11,8 +11,15 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { getPilotDiagnostics, installWhisperModel, installWhisperQualityModel } from "../../lib/commands";
-import type { PilotDiagnostics, WhisperModelDiagnostic } from "../../config/appConfig";
+import {
+  getEmbeddingCapabilities,
+  getPilotDiagnostics,
+  installEmbeddingModelFile,
+  installEmbeddingTokenizerFile,
+  installWhisperModel,
+  installWhisperQualityModel,
+} from "../../lib/commands";
+import type { EmbeddingCapabilities, PilotDiagnostics, WhisperModelDiagnostic } from "../../config/appConfig";
 
 function formatWhisperModelDiagnostic(model: WhisperModelDiagnostic): string {
   switch (model.status) {
@@ -67,12 +74,18 @@ export function PilotDiagnosticsPanel() {
   const [installMessage, setInstallMessage] = useState<string | null>(null);
   const [installingQuality, setInstallingQuality] = useState(false);
   const [installQualityMessage, setInstallQualityMessage] = useState<string | null>(null);
+  const [embedding, setEmbedding] = useState<EmbeddingCapabilities | null>(null);
+  const [embeddingMessage, setEmbeddingMessage] = useState<string | null>(null);
+  const [installingEmbedding, setInstallingEmbedding] = useState(false);
 
   const refresh = useCallback(() => {
     setLoading(true);
     setError(null);
-    getPilotDiagnostics()
-      .then(setDiagnostics)
+    Promise.all([getPilotDiagnostics(), getEmbeddingCapabilities()])
+      .then(([pilot, embeddingCapabilities]) => {
+        setDiagnostics(pilot);
+        setEmbedding(embeddingCapabilities);
+      })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
   }, []);
@@ -80,6 +93,32 @@ export function PilotDiagnosticsPanel() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  const selectEmbeddingFile = useCallback(
+    (kind: "model" | "tokenizer") => {
+      setEmbeddingMessage(null);
+      open({
+        title: kind === "model" ? "Select embedding model weights" : "Select embedding tokenizer",
+        filters: [{ name: kind === "model" ? "Safetensors model" : "Tokenizer JSON", extensions: kind === "model" ? ["safetensors"] : ["json"] }],
+        multiple: false,
+        directory: false,
+      })
+        .then((selected) => {
+          if (!selected || Array.isArray(selected)) return;
+          setInstallingEmbedding(true);
+          const install = kind === "model" ? installEmbeddingModelFile(selected) : installEmbeddingTokenizerFile(selected);
+          return install
+            .then(() => {
+              setEmbeddingMessage("Installed. Restart CIP, then generate verse embeddings from the Bible tools.");
+              refresh();
+            })
+            .catch((e) => setEmbeddingMessage(`Install failed: ${String(e)}`))
+            .finally(() => setInstallingEmbedding(false));
+        })
+        .catch((e) => setEmbeddingMessage(`Could not open file picker: ${String(e)}`));
+    },
+    [refresh],
+  );
 
   const selectModelFile = useCallback(() => {
     setInstallMessage(null);
@@ -247,6 +286,30 @@ export function PilotDiagnosticsPanel() {
                 )}
               </div>
               {diagnostics.speech.lastError && <div>Last error: {diagnostics.speech.lastError}</div>}
+            </dd>
+          </div>
+          <div>
+            <dt>Semantic Bible search</dt>
+            <dd>
+              {!embedding ? "Unavailable" : embedding.engineReady ? "Ready" : embedding.featureCompiled ? "Model not loaded" : "Not compiled"}
+              {embedding && <div>Model: {embedding.modelId} ({embedding.dimensions} dimensions)</div>}
+              {embedding && <div>Weights: {formatWhisperModelDiagnostic(embedding.modelFile)}</div>}
+              {embedding && <div>Tokenizer: {formatWhisperModelDiagnostic(embedding.tokenizerFile)}</div>}
+              {embedding && embedding.verseEmbeddingCoverage && (
+                <div>Verse embeddings: {embedding.verseEmbeddingCoverage[0].toLocaleString()} / {embedding.verseEmbeddingCoverage[1].toLocaleString()}</div>
+              )}
+              {embedding && !embedding.engineReady && (
+                <div className="workspace-diagnostics__actions">
+                  <button type="button" onClick={() => selectEmbeddingFile("model")} disabled={installingEmbedding}>
+                    Select model.safetensors
+                  </button>
+                  <button type="button" onClick={() => selectEmbeddingFile("tokenizer")} disabled={installingEmbedding}>
+                    Select tokenizer.json
+                  </button>
+                </div>
+              )}
+              {embeddingMessage && <div>{embeddingMessage}</div>}
+              {embedding?.modelLoadError && <div>Load error: {embedding.modelLoadError}</div>}
             </dd>
           </div>
           <div>
