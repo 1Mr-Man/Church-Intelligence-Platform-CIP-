@@ -114,25 +114,54 @@ function App() {
   return (
     <>
       <OnboardingWalkthrough />
-      <nav className="app-nav" role="tablist" aria-label="CIP sections">
-        {SECTIONS.map((s) => (
-          <button key={s.id} type="button" aria-pressed={section === s.id} onClick={() => setSection(s.id)}>
-            {s.label}
-          </button>
-        ))}
-        <span className="app-nav__operator">
-          {currentOperator.displayName} ({currentOperator.role})
-          <button type="button" onClick={handleLogout}>
-            Log Out
-          </button>
-        </span>
-      </nav>
+      <a className="skip-link" href="#main-content">
+        Skip to workspace
+      </a>
+      <header className="app-nav">
+        <div className="app-nav__identity" aria-label="Church Intelligence Platform">
+          <span className="app-nav__mark" aria-hidden="true">C</span>
+          <span>
+            <strong>CIP</strong>
+            <small>Church Intelligence Platform</small>
+          </span>
+        </div>
+        <nav className="app-nav__sections" aria-label="CIP sections">
+          {SECTIONS.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              aria-current={section === s.id ? "page" : undefined}
+              onClick={() => setSection(s.id)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </nav>
+        <div className="app-nav__utilities">
+          <span className={`app-nav__status ${state?.health.databaseConnected ? "app-nav__status--ready" : ""}`}>
+            <span className="app-nav__status-dot" aria-hidden="true" />
+            {state?.health.databaseConnected ? "System ready" : "Connecting"}
+          </span>
+          <details className="app-nav__operator">
+            <summary>
+              <span className="app-nav__avatar" aria-hidden="true">{currentOperator.displayName.slice(0, 1).toUpperCase()}</span>
+              <span className="app-nav__operator-name">{currentOperator.displayName}</span>
+            </summary>
+            <div className="app-nav__operator-menu">
+              <span>{currentOperator.role}</span>
+              <button type="button" onClick={handleLogout}>Log out</button>
+            </div>
+          </details>
+        </div>
+      </header>
 
-      {section === "live" && <LiveChurchBrain />}
-      {section === "bible" && <BibleLibrary />}
-      {section === "music" && <MusicLibrary />}
-      {section === "history" && <HistoryView />}
-      {section === "replay" && <ServiceReplay />}
+      <div id="main-content" className="app-content">
+        {section === "live" && <LiveChurchBrain />}
+        {section === "bible" && <BibleLibrary />}
+        {section === "music" && <MusicLibrary />}
+        {section === "history" && <HistoryView />}
+        {section === "replay" && <ServiceReplay />}
+      </div>
 
       <details className="foundation-details">
         <summary>Foundation status (Phase 1.0 diagnostics)</summary>

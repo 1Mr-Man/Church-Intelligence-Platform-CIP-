@@ -38,22 +38,32 @@ export function BibleLibrary() {
   const [rangeTo, setRangeTo] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<BibleSearchResult[]>([]);
+  const [searchHasRun, setSearchHasRun] = useState(false);
   const [saved, setSaved] = useState<SavedScripture[]>([]);
   const [previews, setPreviews] = useState<Record<string, PresentationPreview>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [loadingBooks, setLoadingBooks] = useState(false);
 
   useEffect(() => {
-    commands.listBibleTranslations().then(setTranslations).catch(() => {});
-    commands.listSavedScriptures().then(setSaved).catch(() => {});
+    Promise.all([commands.listBibleTranslations(), commands.listSavedScriptures()])
+      .then(([availableTranslations, savedScriptures]) => {
+        setTranslations(availableTranslations);
+        setSaved(savedScriptures);
+      })
+      .catch((e) => setError(String(e)));
   }, []);
 
   useEffect(() => {
-    commands
-      .listBibleBooks(translationId || undefined)
+    setSelectedBook(null);
+    setSelectedChapter(null);
+    setChapterVerses([]);
+    setLoadingBooks(true);
+    commands.listBibleBooks(translationId || undefined)
       .then(setBooks)
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoadingBooks(false));
   }, [translationId]);
 
   const withBusy = async (key: string, action: () => Promise<void>) => {
@@ -81,10 +91,18 @@ export function BibleLibrary() {
 
   const runSearch = () => {
     if (!searchQuery.trim()) return;
+    setSearchHasRun(true);
     void withBusy("search", async () => {
       const results = await commands.searchBible(searchQuery.trim(), translationId || undefined);
       setSearchResults(results);
     });
+  };
+
+  const clearSearch = () => {
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchHasRun(false);
+    setError(null);
   };
 
   const saveVerse = (result: BibleSearchResult, verseEnd?: number) => {
@@ -174,7 +192,7 @@ export function BibleLibrary() {
         <p className="live-brain__hint">Cross-references are not available in this installed Bible dataset.</p>
         <div className="library-card__actions">
           <button type="button" disabled={isBusy(`preview-${result.reference}`)} onClick={() => preview(result.reference)}>
-            Preview
+            Preview slide
           </button>
           <button
             type="button"
@@ -182,14 +200,14 @@ export function BibleLibrary() {
             disabled={isBusy(`prepare-${result.reference}`)}
             onClick={() => prepare(result.reference)}
           >
-            Prepare
+            Prepare for display
           </button>
           <button
             type="button"
             disabled={isBusy(`save-${result.book}-${result.chapter}-${result.verse}`)}
             onClick={() => saveVerse(result)}
           >
-            Save
+            Save passage
           </button>
         </div>
         {previews[result.reference] && (
@@ -213,23 +231,29 @@ export function BibleLibrary() {
         <div>
           <p className="library-page__eyebrow">Bible Library</p>
           <h1>Scripture</h1>
+          <p className="library-page__intro">Browse, search, save, and prepare passages for your service.</p>
         </div>
-        <select value={translationId} onChange={(e) => setTranslationId(e.target.value)} aria-label="Translation">
+        <label className="library-select-field">
+          <span>Translation</span>
+          <select value={translationId} onChange={(e) => setTranslationId(e.target.value)} aria-label="Translation">
           <option value="">Default translation</option>
           {translations.map((t) => (
             <option key={t.id} value={t.id}>
               {t.name}
             </option>
           ))}
-        </select>
+          </select>
+        </label>
       </header>
 
-      {books.length > 0 ? (
+      {loadingBooks ? (
+        <p className="library-page__status-line" role="status">Loading Bible catalog&hellip;</p>
+      ) : books.length > 0 ? (
         <p className="library-page__status-line">
-          {books.length} book{books.length === 1 ? "" : "s"} available for search and browsing.
+          {books.length} books available <span aria-hidden="true">&middot;</span> {translationId || "default translation"}
         </p>
       ) : (
-        <p className="library-page__status-line">No Bible content installed for this translation yet.</p>
+        <p className="library-page__status-line">No Bible content is installed for this translation yet.</p>
       )}
 
       {error && (
@@ -240,19 +264,19 @@ export function BibleLibrary() {
       {status && <p className="library-page__notice">{status}</p>}
 
       <nav className="library-tabs" role="tablist" aria-label="Bible Library sections">
-        <button type="button" aria-pressed={tab === "browse"} onClick={() => setTab("browse")}>
+        <button type="button" role="tab" aria-selected={tab === "browse"} aria-pressed={tab === "browse"} onClick={() => setTab("browse")}>
           Browse
         </button>
-        <button type="button" aria-pressed={tab === "search"} onClick={() => setTab("search")}>
+        <button type="button" role="tab" aria-selected={tab === "search"} aria-pressed={tab === "search"} onClick={() => setTab("search")}>
           Search
         </button>
-        <button type="button" aria-pressed={tab === "saved"} onClick={() => setTab("saved")}>
+        <button type="button" role="tab" aria-selected={tab === "saved"} aria-pressed={tab === "saved"} onClick={() => setTab("saved")}>
           Saved ({saved.length})
         </button>
       </nav>
 
       {tab === "browse" && (
-        <section className="library-panel">
+        <section className="library-panel" role="tabpanel">
           {!selectedBook ? (
             <>
               <input
@@ -373,29 +397,37 @@ export function BibleLibrary() {
       )}
 
       {tab === "search" && (
-        <section className="library-panel">
-          <div className="live-brain__row">
+        <section className="library-panel" role="tabpanel">
+          <div className="library-search-bar">
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && runSearch()}
-              placeholder="e.g. Romans 8:28, Romans 8, or a phrase"
+              placeholder="Try Romans 8:28, John 3, or “peace”"
               aria-label="Bible search query"
             />
             <button type="button" className="op-button--primary" disabled={!searchQuery.trim() || isBusy("search")} onClick={runSearch}>
               Search
             </button>
+            {searchHasRun && <button type="button" onClick={clearSearch}>Clear</button>}
           </div>
-          {searchResults.length === 0 ? (
-            <p className="live-brain__hint">Search the complete Bible dataset by reference or text.</p>
+          {isBusy("search") ? (
+            <p className="library-page__empty" role="status">Searching Scripture&hellip;</p>
+          ) : searchHasRun && searchResults.length === 0 ? (
+            <p className="library-page__empty">No passages matched. Try a reference like <strong>Romans 8:28</strong> or a shorter phrase.</p>
+          ) : searchResults.length === 0 ? (
+            <p className="library-page__empty">Search the complete Bible by reference or phrase. Results stay scoped to the selected translation.</p>
           ) : (
-            <ul className="library-card-list">{searchResults.map(renderVerseCard)}</ul>
+            <>
+              <p className="library-page__result-count">{searchResults.length} result{searchResults.length === 1 ? "" : "s"}</p>
+              <ul className="library-card-list">{searchResults.map(renderVerseCard)}</ul>
+            </>
           )}
         </section>
       )}
 
       {tab === "saved" && (
-        <section className="library-panel">
+        <section className="library-panel" role="tabpanel">
           {saved.length === 0 ? (
             <p className="library-page__empty">
               Nothing saved yet. Save a verse or range from Browse or Search to build a reusable list here.

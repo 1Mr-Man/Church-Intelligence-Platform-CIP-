@@ -476,6 +476,7 @@ impl WhisperSpeechEngine {
             .and_then(whisper_rs::get_lang_str)
             .map(str::to_string)
             .unwrap_or_else(|| requested_language.to_string());
+        let detected_language = normalize_reported_language(requested_language, &detected_language);
 
         let num_segments = state
             .full_n_segments()
@@ -838,10 +839,47 @@ impl SpeechEngine for WhisperSpeechEngine {
     }
 }
 
+/// Keep transcript metadata inside CIP's supported language contract.
+///
+/// Whisper can identify many languages internally, but CIP deliberately
+/// offers only English, Yoruba, Hausa, and auto-detect. On short or noisy
+/// windows, auto-detection can confidently choose an unrelated language;
+/// publishing that raw code makes the transcript look multilingual when the
+/// application cannot actually offer or validate that language. Preserve a
+/// supported language that Whisper actually reported, and fall back to the
+/// operator's supported selection when the raw result is outside CIP's set.
+fn normalize_reported_language(requested: &str, detected: &str) -> String {
+    match detected {
+        "en" | "yo" | "ha" => detected.to_string(),
+        _ if matches!(requested, "en" | "yo" | "ha") => requested.to_string(),
+        _ => "auto".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn auto_detection_does_not_publish_unsupported_language_codes() {
+        assert_eq!(normalize_reported_language("auto", "km"), "auto");
+        assert_eq!(normalize_reported_language("auto", "ms"), "auto");
+    }
+
+    #[test]
+    fn auto_detection_preserves_supported_language_codes() {
+        assert_eq!(normalize_reported_language("auto", "en"), "en");
+        assert_eq!(normalize_reported_language("auto", "yo"), "yo");
+        assert_eq!(normalize_reported_language("auto", "ha"), "ha");
+    }
+
+    #[test]
+    fn explicit_language_selection_is_preserved_in_metadata() {
+        assert_eq!(normalize_reported_language("en", "km"), "en");
+        assert_eq!(normalize_reported_language("yo", "en"), "en");
+        assert_eq!(normalize_reported_language("ha", "vi"), "ha");
+    }
 
     // --- Phase 5.3 VAD gating: the pure classification functions, fully
     // testable without a real model file or `WhisperContext` -----------

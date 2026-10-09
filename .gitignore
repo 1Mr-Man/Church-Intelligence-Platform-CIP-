@@ -16,6 +16,11 @@ apps/desktop/src-tauri/gen/schemas/
 .idea/
 *.swp
 
+# Local environment secrets
+.env
+.env.*
+!.env.example
+
 # Local runtime data (dev/test SQLite files, logs) - never committed,
 # CIP is local-first and every install owns its own local database. Does
 # NOT apply to pilot-evidence/ - those *.log files are deliberately

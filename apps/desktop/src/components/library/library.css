@@ -7,36 +7,6 @@
    the same domain-color discipline `workspace.css` already established
    for the Attention Queue/Intelligence Feed. */
 
-.app-nav {
-  display: flex;
-  gap: 0.3rem;
-  padding: 0.6rem 1.5rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
-  position: sticky;
-  top: 0;
-  z-index: 5;
-}
-
-.app-nav button {
-  border: none;
-  background: transparent;
-  color: var(--text);
-  padding: 0.5rem 1rem;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 0.95rem;
-}
-
-.app-nav button:hover {
-  background: var(--bg-elevated-2);
-}
-
-.app-nav button[aria-pressed="true"] {
-  background: var(--accent);
-  color: #fff;
-}
-
 .library-page {
   max-width: 1180px;
   margin: 0 auto;
@@ -64,6 +34,28 @@
 .library-page__header h1 {
   margin: 0.1rem 0 0;
   font-size: 1.6rem;
+}
+
+.library-page__intro {
+  margin-top: 0.35rem;
+  color: var(--text);
+  font-size: 0.92rem;
+  max-width: 38rem;
+}
+
+.library-select-field {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 13rem;
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.library-select-field select {
+  min-width: 13rem;
 }
 
 .library-page__eyebrow {
@@ -110,6 +102,15 @@
   background: var(--bg-elevated);
 }
 
+.library-page__result-count {
+  margin: 0.8rem 0 0;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .library-tabs {
   display: flex;
   gap: 0.4rem;
@@ -130,6 +131,13 @@
   background: var(--status-scripture-bg);
   color: var(--status-scripture);
   font-weight: 700;
+}
+
+.library-tabs button:focus-visible,
+.library-book-tile:focus-visible,
+.library-chapter-tile:focus-visible {
+  outline: 2px solid var(--status-scripture);
+  outline-offset: 2px;
 }
 
 .library-panel {
@@ -155,6 +163,13 @@
   max-width: 24rem;
   padding: 0.45rem 0.65rem;
   margin: 0 0 0.75rem;
+}
+
+.library-book-filter:focus-visible,
+.library-select-field select:focus-visible {
+  outline: 2px solid var(--status-scripture);
+  outline-offset: 2px;
+  border-color: var(--status-scripture-border);
 }
 
 .library-book-grid,
@@ -190,6 +205,29 @@
   border-radius: 8px;
   padding: 0.6rem 0.9rem;
   margin: 0.75rem 0;
+}
+
+.library-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.library-search-bar input {
+  flex: 1 1 22rem;
+  min-width: 12rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.55rem;
+  background: var(--bg);
+  color: var(--text-h);
+}
+
+.library-search-bar input:focus-visible {
+  outline: 2px solid var(--status-scripture);
+  outline-offset: 2px;
+  border-color: var(--status-scripture-border);
 }
 
 .library-card-list {
@@ -257,8 +295,8 @@
   .library-page {
     padding: 1rem 1rem 3rem;
   }
-  .app-nav {
-    padding: 0.5rem 1rem;
-    overflow-x: auto;
+  .library-select-field,
+  .library-select-field select {
+    width: 100%;
   }
 }
