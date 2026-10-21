@@ -209,17 +209,16 @@ fn should_flush_early(buffer: &[i16]) -> bool {
     buffer.len() >= MIN_VAD_FLUSH_SAMPLES && has_trailing_pause(buffer)
 }
 
-/// Phase 24.2: whether the current window's one allotted interim decode
-/// (see the module docs' "Interim decoding" section) should be attempted
-/// right now, given the buffer's current length and whether this window
-/// has already had its attempt. Deliberately mirrors [`should_flush_early`]'s
-/// own style - a small, pure, independently-testable gate rather than
-/// inline logic buried in `feed_audio`. Callers (`feed_audio`) only ever
-/// reach this check once the hard-cap and VAD-flush checks have both
-/// already failed for the current call, so an interim attempt and a
-/// genuine flush never compete for the same window in the same call.
+/// Whether the current window's interim decode should be attempted. Interim
+/// decoding performs a second full whisper.cpp pass before the final window
+/// is ready. On the slowest supported machines that doubles queue pressure,
+/// so it stays disabled for live capture; final window decodes remain the
+/// authoritative transcript path.
+/// It remains a small, pure, independently-testable gate so the disabled
+/// policy is explicit rather than hidden inside `feed_audio`.
 fn should_attempt_interim_decode(buffer_len: usize, already_decoded_this_window: bool) -> bool {
-    !already_decoded_this_window && buffer_len >= MIN_VAD_FLUSH_SAMPLES
+    let _ = (buffer_len, already_decoded_this_window);
+    false
 }
 
 /// RMS energy of a PCM16 buffer, `0.0..=1.0` - the same formula
@@ -442,6 +441,18 @@ impl WhisperSpeechEngine {
         params.set_print_special(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
+        // Live transcription only needs the text of the current short audio
+        // window. Timestamps, decoder context, and non-speech placeholder
+        // search add measurable CPU work without improving the operator's
+        // live result; timestamps are already supplied by CIP's audio
+        // window bookkeeping and placeholders are filtered below as well.
+        // The quality tier reuses this decoder but still gets its accuracy
+        // advantage from the larger model, not from redundant timestamps.
+        params.set_no_context(true);
+        params.set_no_timestamps(true);
+        params.set_single_segment(true);
+        params.set_suppress_blank(true);
+        params.set_suppress_nst(true);
         // whisper.cpp's own default (used if this is never called) is
         // `min(4, hardware_concurrency())` - a conservative cap that
         // leaves real parallelism on the table on any machine with more
@@ -1020,13 +1031,13 @@ mod tests {
     }
 
     #[test]
-    fn interim_decode_fires_exactly_at_the_minimum_buffered_duration() {
-        assert!(should_attempt_interim_decode(MIN_VAD_FLUSH_SAMPLES, false));
+    fn interim_decode_is_disabled_for_live_performance() {
+        assert!(!should_attempt_interim_decode(MIN_VAD_FLUSH_SAMPLES, false));
     }
 
     #[test]
-    fn interim_decode_fires_past_the_minimum_buffered_duration_too() {
-        assert!(should_attempt_interim_decode(
+    fn interim_decode_stays_disabled_for_longer_buffers() {
+        assert!(!should_attempt_interim_decode(
             MIN_VAD_FLUSH_SAMPLES + 1000,
             false
         ));

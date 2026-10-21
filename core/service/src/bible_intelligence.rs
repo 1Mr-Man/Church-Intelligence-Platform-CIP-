@@ -63,15 +63,19 @@ const MIN_PARAPHRASE_SIGNIFICANT_WORDS: usize = 4;
 /// five actual matched words before surfacing a lexical paraphrase.
 const MIN_PARAPHRASE_MATCHED_WORDS: usize = 5;
 
-/// A contiguous run of four significant words is enough to recognize a
-/// short, exact quotation even when the verse contains many stopwords.
+/// A contiguous run of four significant words can recognize a short quotation
+/// only when the whole segment is nearly an exact lexical match. This keeps
+/// genuine short quotations while rejecting noisy four-word ASR overlaps.
 const MIN_PARAPHRASE_QUOTE_RUN: usize = 4;
+
+/// Minimum overlap for the short-quotation exception. A noisy live segment
+/// may share four consecutive generic words with a verse without quoting it.
+const MIN_EXACT_QUOTE_SCORE: f32 = 0.95;
 
 /// Fuller 12-20s transcript windows provide more vocabulary, but they also
 /// contain more opportunities for unrelated words to overlap a verse. Keep
 /// the same five-word lexical floor as the live path; the separate contiguous
 /// quote-run exception still recognizes a genuine short quotation.
-const MIN_CONTEXT_PARAPHRASE_MATCHED_WORDS: usize = MIN_PARAPHRASE_MATCHED_WORDS;
 
 /// How much of a segment's significant vocabulary must be found in a
 /// candidate verse before it's trusted as a paraphrase of that verse,
@@ -89,19 +93,36 @@ const MAX_PARAPHRASE_CANDIDATES: usize = 25;
 /// semantic fallback: a two- or three-word utterance can score a spuriously
 /// high cosine similarity against some verse purely by chance, since
 /// there's so little of it to be wrong about.
-const MIN_SEMANTIC_SIGNIFICANT_WORDS: usize = 4;
+const MIN_SEMANTIC_SIGNIFICANT_WORDS: usize = 5;
+
+/// Short prayer/declaration fragments are common in live sermons and are
+/// especially vulnerable to ASR substitutions. They often share generic
+/// words such as "Lord", "Father", "say", and "declare" with many verses,
+/// but do not contain enough distinctive wording to justify a paraphrase
+/// suggestion. Keep the explicit-reference path unaffected; this guard only
+/// suppresses the fallback matchers when the input is both short and generic.
+fn is_generic_prayer_fragment(normalized_text: &str) -> bool {
+    let words: Vec<&str> = normalized_text.split_whitespace().collect();
+    if words.len() >= 8 {
+        return false;
+    }
+    let generic = ["declare", "decree", "father", "lord", "pray", "prayer", "say"];
+    let marker_count = words.iter().filter(|word| generic.contains(word)).count();
+    marker_count >= 2
+}
 
 /// The cosine-similarity floor a candidate verse must clear before
 /// `try_semantic` trusts it enough to surface as a `Pending` suggestion.
 /// Documented rather than empirically calibrated: no real model inference
 /// was available to tune this against a labeled dataset in this
 /// environment (see `docs/phase-4-4-semantic-bible-search.md`) - chosen
-/// conservatively (published `all-MiniLM-L6-v2` benchmarks put closely
-/// related sentence pairs in the `0.6`-`0.9` range and unrelated pairs
-/// below `0.3`) so a mismatch is far more likely to be silently dropped
-/// than to reach an operator as a false suggestion. Revisit once real
-/// operator feedback on live services is available.
-const MIN_SEMANTIC_SIMILARITY: f32 = 0.55;
+/// conservatively. A live-service report showed several unrelated ASR
+/// fragments scoring between 0.65 and 0.71, so that earlier floor was not
+/// safe enough for operator-facing suggestions. A semantic match must now
+/// clear 0.72; explicit citations and strong lexical paraphrases keep their
+/// separate, higher-recall paths. Revisit only with a labelled false-
+/// positive/true-positive evaluation set.
+const MIN_SEMANTIC_SIMILARITY: f32 = 0.72;
 
 /// One reference candidate after context resolution and Bible validation -
 /// the pipeline's per-candidate output.
@@ -227,16 +248,13 @@ pub fn process_transcript_segment_with_semantic_search(
 /// and only when its raw ~3s sub-windows produced no suggestion at all via
 /// [`process_transcript_segment`]/[`process_transcript_segment_with_semantic_search`].
 ///
-/// Deliberately narrower than either of those: never re-runs citation
-/// detection (`detect_candidates`) - a raw ~3s window (roughly 8-15 spoken
-/// words) is already enough for `detect_candidates` to catch an explicit
-/// "book chapter verse" citation, so re-attempting it here on the same
-/// underlying speech would only ever rediscover what the raw-window pass
-/// already found (or already correctly found nothing), real but wasted
-/// work exactly as `finalize_and_route_segment`'s own docs describe for why
-/// Bible detection does not re-run there. What a single ~3s window
-/// genuinely lacks is *vocabulary*: `MIN_PARAPHRASE_SIGNIFICANT_WORDS`/
-/// `MIN_SEMANTIC_SIGNIFICANT_WORDS` (4 distinct words) is a low bar, but a
+/// Re-runs the explicit-reference parser because overload handling can
+/// discard a short raw window that contained the only clearly spoken
+/// citation. The caller invokes this only when raw windows produced no
+/// suggestion, so a reference found here is not a duplicate of an emitted
+/// suggestion. What a single ~3s window genuinely lacks is *vocabulary*:
+/// `MIN_PARAPHRASE_SIGNIFICANT_WORDS`/`MIN_SEMANTIC_SIGNIFICANT_WORDS` is a
+/// deliberately conservative bar, but a
 /// short fragment ("understand the Word of God") often doesn't clear it at
 /// all, and even when it does, `try_paraphrase`'s overlap ratio is
 /// computed against only that fragment's few words rather than the full
@@ -245,14 +263,9 @@ pub fn process_transcript_segment_with_semantic_search(
 /// the vocabulary - materially raises the odds of a genuine match without
 /// touching either threshold.
 ///
-/// Never mutates `context` beyond what `try_paraphrase`/`try_semantic`
-/// themselves already guarantee (same as every other fallback in this
-/// module - a paraphrase/semantic match is never treated as an explicit
-/// citation). Returns a [`ProcessedSegment`] whose `detections` contains,
-/// at most, one `Paraphrase` and one `Semantic` entry (mirroring
-/// `process_transcript_segment_inner`'s own "only when nothing already
-/// found a suggestion" gating between the two fallbacks) - never a
-/// citation-shaped detection, since this function never attempts one.
+/// Explicit citations may update `context`; paraphrase and semantic matches
+/// retain their existing non-context-mutating behavior through the normal
+/// processing path.
 pub fn retry_paraphrase_or_semantic_with_fuller_context(
     service_id: Uuid,
     segment_text: &str,
@@ -261,47 +274,14 @@ pub fn retry_paraphrase_or_semantic_with_fuller_context(
     context: &mut DefaultScriptureContextManager,
     semantic: Option<&SemanticSearch>,
 ) -> ProcessedSegment {
-    let normalized = normalize_text(segment_text);
-    let mut detections = Vec::new();
-    let mut suggestions = Vec::new();
-
-    if let Some(detection) = try_paraphrase_with_minimum(
+    process_transcript_segment_inner(
+        service_id,
+        segment_text,
         translation_id,
         provider,
-        &normalized,
-        segment_text,
         context,
-        MIN_CONTEXT_PARAPHRASE_MATCHED_WORDS,
-    ) {
-        if let Some(suggestion) = suggestion_for(service_id, &detection) {
-            suggestions.push(suggestion);
-        }
-        detections.push(detection);
-    }
-
-    if suggestions.is_empty() {
-        if let Some(semantic) = semantic {
-            if let Some(detection) = try_semantic(
-                translation_id,
-                provider,
-                semantic,
-                &normalized,
-                segment_text,
-                context,
-            ) {
-                if let Some(suggestion) = suggestion_for(service_id, &detection) {
-                    suggestions.push(suggestion);
-                }
-                detections.push(detection);
-            }
-        }
-    }
-
-    ProcessedSegment {
-        service_id,
-        detections,
-        suggestions,
-    }
+        semantic,
+    )
 }
 
 fn process_transcript_segment_inner(
@@ -350,7 +330,7 @@ fn process_transcript_segment_inner(
     // suggestion at all through the normal citation-based path, so an
     // explicit "Romans 8:28" is never second-guessed by a lexical-overlap
     // heuristic.
-    if suggestions.is_empty() {
+    if suggestions.is_empty() && candidates.is_empty() {
         if let Some(detection) =
             try_paraphrase(translation_id, provider, &normalized, segment_text, context)
         {
@@ -367,7 +347,7 @@ fn process_transcript_segment_inner(
     // paraphrase fallback, only when nothing else produced a suggestion at
     // all - a real citation or a confident lexical match is never
     // second-guessed by this.
-    if suggestions.is_empty() {
+    if suggestions.is_empty() && candidates.is_empty() {
         if let Some(semantic) = semantic {
             if let Some(detection) = try_semantic(
                 translation_id,
@@ -408,6 +388,9 @@ fn try_paraphrase(
     raw_text: &str,
     context: &DefaultScriptureContextManager,
 ) -> Option<ScriptureDetection> {
+    if is_generic_prayer_fragment(normalized_text) {
+        return None;
+    }
     try_paraphrase_with_minimum(
         translation_id,
         provider,
@@ -434,21 +417,25 @@ fn try_paraphrase_with_minimum(
         .find_similar_verses(translation_id, normalized_text, MAX_PARAPHRASE_CANDIDATES)
         .ok()?;
 
-    let mut best: Option<(f32, usize, cip_core_bible::BibleVerse)> = None;
+    let mut best: Option<(f32, usize, usize, cip_core_bible::BibleVerse)> = None;
     for verse in candidates {
         let score = paraphrase::score_overlap(normalized_text, &verse.text);
         let matched_words =
             paraphrase::matched_significant_word_count(normalized_text, &verse.text);
         let quote_run = paraphrase::longest_significant_word_run(normalized_text, &verse.text);
-        let is_better = best.as_ref().map(|(s, _, _)| score > *s).unwrap_or(true);
+        let is_better = best
+            .as_ref()
+            .map(|(s, _, _, _)| score > *s)
+            .unwrap_or(true);
         if is_better {
-            best = Some((score, matched_words.max(quote_run), verse));
+            best = Some((score, matched_words, quote_run, verse));
         }
     }
 
-    let (score, matched_words, verse) = best?;
+    let (score, matched_words, quote_run, verse) = best?;
     if score < MIN_PARAPHRASE_SCORE
-        || (matched_words < minimum_matched_words && matched_words < MIN_PARAPHRASE_QUOTE_RUN)
+        || (matched_words < minimum_matched_words
+            && (quote_run < MIN_PARAPHRASE_QUOTE_RUN || score < MIN_EXACT_QUOTE_SCORE))
     {
         return None;
     }
@@ -490,6 +477,9 @@ fn try_semantic(
     raw_text: &str,
     context: &DefaultScriptureContextManager,
 ) -> Option<ScriptureDetection> {
+    if is_generic_prayer_fragment(normalized_text) {
+        return None;
+    }
     if !semantic.engine.is_ready() {
         return None;
     }
@@ -634,7 +624,8 @@ fn resolve_direct(
         );
     };
 
-    let reference = ScriptureReference::single(translation_id, &book, chapter, verse);
+    let mut reference = ScriptureReference::single(translation_id, &book, chapter, verse);
+    reference.verse_end = candidate.partial.verse_end;
     match provider.get_verse(&reference) {
         Ok(Some(_)) => {
             let resolution = context.resolve(candidate.partial.clone());
@@ -1491,6 +1482,13 @@ mod tests {
             "young man in Legos called",
             "God is faithful, therefore I can",
             "and God can walk together.",
+            // Generic prayer/declaration fragments must not become a verse
+            // merely because a Bible translation shares words like
+            // "declare", "Lord", or "Father" with them.
+            "to declare to the Lord and say Father",
+            // Regression from the 2026-10-13 live report: noisy food-related
+            // ASR text reached DEU 2:28 through a four-word overlap.
+            "through how deep food that you can eat it.",
         ] {
             let mut context = DefaultScriptureContextManager::new("KJV");
             let result = process(&provider, &mut context, text);
@@ -1650,6 +1648,27 @@ mod tests {
         );
         assert_eq!(result.suggestions.len(), 1);
         assert_eq!(result.suggestions[0].status, SuggestionStatus::Pending);
+    }
+
+    #[test]
+    fn a_low_confidence_semantic_match_is_suppressed_for_live_safety() {
+        let provider = matthew_provider();
+        let segment_text = "The congregation is preparing for the evening service today.";
+        let engine = FakeEmbeddingEngine::new("test-model", 2, &[(segment_text, vec![0.70, 0.71414214])]);
+        let store = FakeVerseEmbeddingStore::new(vec![
+            ("test-model", VerseEmbedding {
+                reference: ScriptureReference::single("KJV", "MAT", 5, 44),
+                vector: vec![1.0, 0.0],
+            }),
+        ]);
+        let semantic = SemanticSearch { engine: &engine, store: &store };
+        let mut context = DefaultScriptureContextManager::new("KJV");
+        let result = process_transcript_segment_with_semantic_search(
+            Uuid::new_v4(), segment_text, "KJV", &provider, &mut context, &semantic,
+        );
+
+        assert!(result.suggestions.is_empty());
+        assert!(result.detections.is_empty());
     }
 
     // 26. Without semantic search configured at all, the exact same
@@ -1854,10 +1873,8 @@ mod tests {
         );
     }
 
-    // 31. The fuller-context retry never attempts citation detection - it
-    // is deliberately narrower than `process_transcript_segment` (see its
-    // own docs for why re-running `detect_candidates` here would only
-    // ever rediscover what the raw ~3s window's own pass already found).
+    // 31. The fuller-context retry also recovers explicit citations when
+    // overload handling discarded the short raw window that contained them.
     #[test]
     fn fuller_context_retry_never_produces_a_citation_detection() {
         let provider = FakeBibleProvider::kjv_fixture();
@@ -1872,13 +1889,9 @@ mod tests {
             None,
         );
 
-        assert!(
-            result
-                .detections
-                .iter()
-                .all(|d| d.kind != ReferenceKind::Direct),
-            "the fuller-context retry must never attempt citation detection"
-        );
+        assert_eq!(result.detections.len(), 1);
+        assert_eq!(result.detections[0].kind, ReferenceKind::Direct);
+        assert_eq!(result.suggestions.len(), 1);
     }
 
     // 32. Like every other fallback in this module, the fuller-context

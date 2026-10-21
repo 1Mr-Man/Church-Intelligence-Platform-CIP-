@@ -10,6 +10,9 @@ apps/desktop/node_modules/.tmp/
 # Tauri
 apps/desktop/src-tauri/gen/schemas/
 
+# Local build tools and model cache (reprovisioned by build scripts)
+/.tmp/
+
 # Editor / OS
 .DS_Store
 .vscode/

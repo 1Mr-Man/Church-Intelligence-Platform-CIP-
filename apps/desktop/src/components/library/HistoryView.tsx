@@ -31,6 +31,7 @@ import * as commands from "../../lib/commands";
 import { formatClockTime } from "../../lib/format";
 import { presentationHeading } from "../../lib/libraryHelpers";
 import { describeTimelineEntry } from "../../lib/timelineFormat";
+import { buildSermonDraftPack, type SermonDraftPack } from "../../lib/draftSermonContent";
 
 export function HistoryView() {
   const [services, setServices] = useState<ServiceSession[]>([]);
@@ -46,6 +47,7 @@ export function HistoryView() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [draftPack, setDraftPack] = useState<SermonDraftPack | null>(null);
 
   useEffect(() => {
     commands
@@ -72,6 +74,7 @@ export function HistoryView() {
     setError(null);
     setNotice(null);
     setReport(null);
+    setDraftPack(null);
     Promise.all([
       commands.listTimeline(100, service.id),
       commands.listTranscript(200, service.id),
@@ -190,6 +193,11 @@ export function HistoryView() {
                         </>
                       )}
                     </p>
+                    <p className="library-card__meta">
+                      Correction rate: {accuracy.overallCorrectionRate !== null
+                        ? `${(accuracy.overallCorrectionRate * 100).toFixed(0)}% of decided suggestions needed editing or rejection`
+                        : "not enough decided suggestions yet"}
+                    </p>
                   </li>
                   <li className="library-card library-card--bible">
                     <div className="library-card__header">
@@ -236,6 +244,26 @@ export function HistoryView() {
                           method (e.g. a manually corrected reference) and are not counted above.
                         </p>
                       )}
+                    </li>
+                  )}
+                  {accuracy.serviceTrend.length > 0 && (
+                    <li className="library-card library-card--bible">
+                      <div className="library-card__header">
+                        <strong>Recent service trend</strong>
+                        <span className="library-card__meta">oldest to newest</span>
+                      </div>
+                      <ul className="library-card__sublist">
+                        {accuracy.serviceTrend.slice(-5).map((service) => {
+                          const decided = service.counts.approved + service.counts.edited + service.counts.rejected;
+                          const rate = decided > 0 ? Math.round((service.counts.approved / decided) * 100) : null;
+                          return (
+                            <li key={service.serviceId}>
+                              <span>{service.serviceTitle}</span>
+                              <span>{rate === null ? "pending" : `${rate}% approved`} · {service.counts.total} total</span>
+                            </li>
+                          );
+                        })}
+                      </ul>
                     </li>
                   )}
                 </ul>
@@ -474,6 +502,18 @@ export function HistoryView() {
 
           <section className="library-panel">
             <h2>Saved Content ({savedContent.length})</h2>
+            <p className="live-brain__hint">Create local, review-only drafts from this service. CIP never publishes these automatically.</p>
+            <button type="button" onClick={() => setDraftPack(buildSermonDraftPack(selected.title, transcript, savedContent))}>
+              Generate draft content pack
+            </button>
+            {draftPack && (
+              <div className="library-card-list" style={{ marginTop: "0.75rem" }}>
+                <article className="library-card library-card--bible"><strong>Notes</strong><pre className="library-draft">{draftPack.notes}</pre></article>
+                <article className="library-card library-card--bible"><strong>Slides</strong><pre className="library-draft">{draftPack.slides.join("\n")}</pre></article>
+                <article className="library-card library-card--bible"><strong>Devotional</strong><pre className="library-draft">{draftPack.devotional}</pre></article>
+                <article className="library-card library-card--bible"><strong>Newsletter</strong><pre className="library-draft">{draftPack.newsletter}</pre></article>
+              </div>
+            )}
             {savedContent.length === 0 ? (
               <p className="live-brain__hint">Nothing was accepted as content from this service.</p>
             ) : (

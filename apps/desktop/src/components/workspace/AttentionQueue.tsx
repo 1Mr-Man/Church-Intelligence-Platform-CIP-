@@ -33,6 +33,8 @@
  */
 import { IntelligenceCard } from "./IntelligenceCard";
 import { actionsFor, type UnifiedItemAction } from "./actions";
+import { VoiceCommandBar } from "./VoiceCommandBar";
+import type { OperatorVoiceCommand } from "../../lib/operatorVoiceCommands";
 import { shortcutLegend } from "../../lib/attentionQueue";
 import type { UnifiedIntelligenceItem } from "../../lib/unifiedFeed";
 
@@ -51,6 +53,7 @@ export interface AttentionQueueProps {
   onEditValueChange?: (value: string) => void;
   onSaveEdit?: (id: string) => void;
   onCancelEdit?: () => void;
+  onVoiceCommand?: (command: OperatorVoiceCommand) => void;
 }
 
 export function AttentionQueue({
@@ -63,8 +66,10 @@ export function AttentionQueue({
   onEditValueChange,
   onSaveEdit,
   onCancelEdit,
+  onVoiceCommand,
 }: AttentionQueueProps) {
   const legend = shortcutLegend(items);
+  const topActions = items[0] ? actionsFor(items[0].domain) : [];
   return (
     <section className="live-brain__panel workspace-attention">
       <h2>
@@ -73,23 +78,26 @@ export function AttentionQueue({
       {items.length === 0 ? (
         <p className="live-brain__hint">Nothing needs attention right now.</p>
       ) : (
-        <ul className="workspace-card-list">
-          {items.map((item) => (
-            <IntelligenceCard
-              key={`${item.domain}-${item.id}`}
-              item={item}
-              actions={actionsFor(item.domain)}
-              busy={busy}
-              onAction={onAction}
-              confirmingKey={confirmingKey}
-              editingId={editingId}
-              editValue={editValue}
-              onEditValueChange={onEditValueChange}
-              onSaveEdit={onSaveEdit}
-              onCancelEdit={onCancelEdit}
-            />
-          ))}
-        </ul>
+        <>
+          {onVoiceCommand && <VoiceCommandBar availableActions={topActions} onCommand={onVoiceCommand} />}
+          <ul className="workspace-card-list">
+            {items.map((item) => (
+              <IntelligenceCard
+                key={`${item.domain}-${item.id}`}
+                item={item}
+                actions={actionsFor(item.domain)}
+                busy={busy}
+                onAction={onAction}
+                confirmingKey={confirmingKey}
+                editingId={editingId}
+                editValue={editValue}
+                onEditValueChange={onEditValueChange}
+                onSaveEdit={onSaveEdit}
+                onCancelEdit={onCancelEdit}
+              />
+            ))}
+          </ul>
+        </>
       )}
     </section>
   );

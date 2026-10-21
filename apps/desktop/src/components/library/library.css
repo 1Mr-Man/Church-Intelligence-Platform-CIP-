@@ -102,6 +102,29 @@
   background: var(--bg-elevated);
 }
 
+.library-card__sublist {
+  list-style: none;
+  padding: 0;
+  margin: 0.65rem 0 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.library-card__sublist li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+
+.library-card__sublist li span:last-child {
+  color: var(--text);
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
 .library-page__result-count {
   margin: 0.8rem 0 0;
   color: var(--text);
@@ -280,6 +303,31 @@
 
 .library-card__text {
   margin: 0.35rem 0 0;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.library-card__comparison {
+  margin-top: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border-left: 2px solid var(--status-scripture-border);
+  background: var(--bg-elevated);
+  border-radius: 0 6px 6px 0;
+}
+
+.library-card__comparison-label {
+  margin: 0;
+  color: var(--status-scripture);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.library-draft {
+  margin: 0.55rem 0 0;
+  white-space: pre-wrap;
+  font: inherit;
   color: var(--text);
   line-height: 1.5;
 }

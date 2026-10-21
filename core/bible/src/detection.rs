@@ -160,8 +160,9 @@ fn book_pattern() -> Regex {
 static BOOK_PATTERN: LazyLock<Regex> = LazyLock::new(book_pattern);
 
 /// Shape patterns tried, in priority order, against the text immediately
-/// following a matched book name. Each captures either (chapter, verse) or
-/// (chapter,) alone.
+/// following a matched book name. Captures are chapter, verse-start, and an
+/// optional verse-end. The range forms also accept common spoken punctuation
+/// such as "chapter 8, verse 28" and "8:28 through 30".
 struct Shape {
     pattern: LazyLock<Regex>,
     kind: ReferenceKind,
@@ -182,17 +183,17 @@ macro_rules! shape {
 static SHAPES: [Shape; 6] = [
     // "Romans 8:28" / "Romans 8 : 28"
     shape!(
-        r"(?i)^[.,]?\s*(\d{1,3})\s*:\s*(\d{1,3})\b",
+        r"(?i)^[.,]?\s*(\d{1,3})\s*:\s*(\d{1,3})(?:\s*(?:-|–|through|to)\s*(\d{1,3}))?\b",
         ReferenceKind::Direct
     ),
     // "Romans chapter 8 verse 28"
     shape!(
-        r"(?i)^[.,]?\s*chapter\s+(\d{1,3})\s+verse\s+(\d{1,3})\b",
+        r"(?i)^[.,]?\s*chapter\s+(\d{1,3})\s*[,;:]?\s+verse(?:s)?\s+(\d{1,3})(?:\s*(?:-|–|through|to)\s*(\d{1,3}))?\b",
         ReferenceKind::Direct
     ),
     // "Romans 8 verse 28"
     shape!(
-        r"(?i)^[.,]?\s*(\d{1,3})\s+verse\s+(\d{1,3})\b",
+        r"(?i)^[.,]?\s*(\d{1,3})\s+verse(?:s)?\s+(\d{1,3})(?:\s*(?:-|–|through|to)\s*(\d{1,3}))?\b",
         ReferenceKind::Direct
     ),
     // "Romans 8 28" (spoken without "chapter"/"verse" at all)
@@ -253,12 +254,13 @@ pub fn detect_candidates(text: &str) -> Vec<DetectedCandidate> {
 
             let chapter: u32 = captures[1].parse().unwrap_or(0);
             let verse: Option<u32> = captures.get(2).map(|m| m.as_str().parse().unwrap_or(0));
+            let verse_end: Option<u32> = captures.get(3).map(|m| m.as_str().parse().unwrap_or(0));
 
             let partial = PartialScriptureReference {
                 book: Some(canonical.code.to_string()),
                 chapter: Some(chapter),
                 verse_start: verse,
-                verse_end: None,
+                verse_end,
             };
 
             candidates.push((
@@ -311,6 +313,7 @@ pub fn detect_candidates(text: &str) -> Vec<DetectedCandidate> {
 
             let chapter: u32 = captures[1].parse().unwrap_or(0);
             let verse: u32 = captures[2].parse().unwrap_or(0);
+            let verse_end: Option<u32> = captures.get(3).map(|m| m.as_str().parse().unwrap_or(0));
 
             candidates.push((
                 start,
@@ -320,7 +323,7 @@ pub fn detect_candidates(text: &str) -> Vec<DetectedCandidate> {
                         book: Some(book.code.to_string()),
                         chapter: Some(chapter),
                         verse_start: Some(verse),
-                        verse_end: None,
+                        verse_end,
                     },
                     raw_text: text[start..end].to_string(),
                     fuzzy_score: Some(score),
@@ -392,6 +395,14 @@ mod tests {
         let c = only("Romans 8 : 28");
         assert_eq!(c.partial.chapter, Some(8));
         assert_eq!(c.partial.verse_start, Some(28));
+    }
+
+    #[test]
+    fn detects_spoken_punctuation_and_ranges() {
+        let c = only("Romans chapter 8, verses 28 through 30");
+        assert_eq!(c.partial.chapter, Some(8));
+        assert_eq!(c.partial.verse_start, Some(28));
+        assert_eq!(c.partial.verse_end, Some(30));
     }
 
     #[test]

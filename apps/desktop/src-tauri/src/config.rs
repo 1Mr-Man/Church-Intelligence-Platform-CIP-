@@ -11,11 +11,14 @@ use serde::Serialize;
 use std::path::PathBuf;
 use thiserror::Error;
 
-/// Expected filename of a local ggml/gguf Whisper model under
-/// `AppConfig::model_dir`, if one has been installed. Not bundled with
-/// CIP and never downloaded automatically - see `docs/live-speech.md` for
-/// where to get one, its license, and why this environment could not
-/// verify one end to end.
+/// Preferred filename of the CPU-friendly quantized Whisper model under
+/// `AppConfig::model_dir`. When present, it is selected automatically to
+/// reduce memory pressure and inference time on consumer hardware.
+pub const WHISPER_QUANTIZED_MODEL_FILENAME: &str = "ggml-tiny.en-q5_1.bin";
+
+/// Compatibility filename for an existing unquantized tiny English model.
+/// CIP falls back to this file when the quantized model has not been
+/// provisioned yet, so upgrading never breaks an existing installation.
 pub const WHISPER_MODEL_FILENAME: &str = "ggml-tiny.en.bin";
 
 /// Phase 24.3 (true dual-tier Whisper): the expected filename of a second,
@@ -212,7 +215,7 @@ impl AppConfig {
         let acoustic = AcousticConfig::resolve(model_dir.join(ACOUSTIC_MODEL_DIR_NAME));
         let whisper_model_path = std::env::var("CIP_WHISPER_MODEL_PATH")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| model_dir.join(WHISPER_MODEL_FILENAME));
+            .unwrap_or_else(|_| resolve_whisper_model_path(&model_dir));
         let whisper_quality_model_path = std::env::var("CIP_WHISPER_QUALITY_MODEL_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|_| model_dir.join(WHISPER_QUALITY_MODEL_FILENAME));
@@ -234,6 +237,15 @@ impl AppConfig {
             acoustic,
             data_dir,
         }
+    }
+}
+
+fn resolve_whisper_model_path(model_dir: &std::path::Path) -> PathBuf {
+    let quantized = model_dir.join(WHISPER_QUANTIZED_MODEL_FILENAME);
+    if quantized.is_file() {
+        quantized
+    } else {
+        model_dir.join(WHISPER_MODEL_FILENAME)
     }
 }
 
@@ -289,6 +301,23 @@ mod tests {
             config.whisper_model_path,
             PathBuf::from("/tmp/cip-test-default-whisper/models/ggml-tiny.en.bin")
         );
+    }
+
+    #[test]
+    fn prefers_the_quantized_whisper_model_when_it_is_provisioned() {
+        let data_dir = std::env::temp_dir().join(format!("cip-quantized-preference-{}", std::process::id()));
+        let model_dir = data_dir.join("models");
+        std::fs::create_dir_all(&model_dir).expect("create test model directory");
+        std::fs::write(model_dir.join(WHISPER_QUANTIZED_MODEL_FILENAME), b"test model")
+            .expect("create quantized model marker");
+
+        let config = AppConfig::from_data_dir(data_dir.clone());
+        assert_eq!(
+            config.whisper_model_path,
+            model_dir.join(WHISPER_QUANTIZED_MODEL_FILENAME)
+        );
+
+        std::fs::remove_dir_all(data_dir).expect("remove test model directory");
     }
 
     #[test]

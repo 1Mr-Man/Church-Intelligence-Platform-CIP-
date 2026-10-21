@@ -29,6 +29,7 @@ export function BibleLibrary() {
   const [tab, setTab] = useState<Tab>("browse");
   const [translations, setTranslations] = useState<BibleTranslation[]>([]);
   const [translationId, setTranslationId] = useState<string>("");
+  const [compareTranslationId, setCompareTranslationId] = useState<string>("");
   const [books, setBooks] = useState<BibleBook[]>([]);
   const [selectedBook, setSelectedBook] = useState<BibleBook | null>(null);
   const [bookFilter, setBookFilter] = useState("");
@@ -38,6 +39,7 @@ export function BibleLibrary() {
   const [rangeTo, setRangeTo] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<BibleSearchResult[]>([]);
+  const [comparisonResults, setComparisonResults] = useState<BibleSearchResult[]>([]);
   const [searchHasRun, setSearchHasRun] = useState(false);
   const [saved, setSaved] = useState<SavedScripture[]>([]);
   const [previews, setPreviews] = useState<Record<string, PresentationPreview>>({});
@@ -94,13 +96,18 @@ export function BibleLibrary() {
     setSearchHasRun(true);
     void withBusy("search", async () => {
       const results = await commands.searchBible(searchQuery.trim(), translationId || undefined);
+      const comparison = compareTranslationId
+        ? await commands.searchBible(searchQuery.trim(), compareTranslationId)
+        : [];
       setSearchResults(results);
+      setComparisonResults(comparison);
     });
   };
 
   const clearSearch = () => {
     setSearchQuery("");
     setSearchResults([]);
+    setComparisonResults([]);
     setSearchHasRun(false);
     setError(null);
   };
@@ -182,6 +189,11 @@ export function BibleLibrary() {
 
   function renderVerseCard(result: BibleSearchResult) {
     const key = `${result.translationId}-${result.book}-${result.chapter}-${result.verse}`;
+    const comparison = comparisonResults.find((candidate) =>
+      candidate.book === result.book &&
+      candidate.chapter === result.chapter &&
+      candidate.verse === result.verse,
+    );
     return (
       <li key={key} className="library-card library-card--bible">
         <div className="library-card__header">
@@ -189,6 +201,12 @@ export function BibleLibrary() {
           <span className="library-card__meta">{result.translationId}</span>
         </div>
         <p className="library-card__text">{result.text}</p>
+        {comparison && (
+          <div className="library-card__comparison">
+            <p className="library-card__comparison-label">{comparison.translationId} comparison</p>
+            <p className="library-card__text">{comparison.text}</p>
+          </div>
+        )}
         <p className="live-brain__hint">Cross-references are not available in this installed Bible dataset.</p>
         <div className="library-card__actions">
           <button type="button" disabled={isBusy(`preview-${result.reference}`)} onClick={() => preview(result.reference)}>
@@ -242,6 +260,26 @@ export function BibleLibrary() {
               {t.name}
             </option>
           ))}
+          </select>
+        </label>
+        <label className="library-select-field">
+          <span>Compare with</span>
+          <select
+            value={compareTranslationId}
+            onChange={(e) => {
+              setCompareTranslationId(e.target.value);
+              setComparisonResults([]);
+            }}
+            aria-label="Compare with translation"
+          >
+            <option value="">No comparison</option>
+            {translations
+              .filter((t) => t.id !== translationId)
+              .map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
           </select>
         </label>
       </header>

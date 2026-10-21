@@ -39,6 +39,7 @@ import * as liveEvents from "../lib/liveEvents";
 import { describeAudioSignal, formatClockTime } from "../lib/format";
 import { describeTimelineEntry } from "../lib/timelineFormat";
 import { resolveUnifiedShortcutAction, shouldHandleShortcut } from "../lib/keyboardShortcuts";
+import type { OperatorVoiceCommand } from "../lib/operatorVoiceCommands";
 import { buildAttentionQueue } from "../lib/attentionQueue";
 import { CONFIRM_WINDOW_MS, decideConfirmClick, type PendingConfirm } from "../lib/confirmGuard";
 import { humanizeBusyKey } from "../lib/errorContext";
@@ -55,6 +56,8 @@ import { AttentionQueue } from "./workspace/AttentionQueue";
 import { IntelligenceFeed } from "./workspace/IntelligenceFeed";
 import { ServiceControlBar } from "./workspace/ServiceControlBar";
 import { SystemStatusStrip } from "./workspace/SystemStatusStrip";
+import { ReadinessCenter } from "./workspace/ReadinessCenter";
+import { NowNextWhy } from "./workspace/NowNextWhy";
 import { PresentationCard } from "./workspace/PresentationCard";
 import { LivePreviewStage } from "./workspace/LivePreviewStage";
 import { DisplayRegistryPanel } from "./workspace/DisplayRegistryPanel";
@@ -719,6 +722,7 @@ export function LiveChurchBrain() {
     [suggestions, musicFindings, sermonFindings, serviceTransitions, serviceAnomalies, contentCandidates, crossDomainCorrelations],
   );
   const attentionQueue = useMemo(() => buildAttentionQueue(unifiedFeed), [unifiedFeed]);
+
   // Phase 6.6 (Operator Ergonomics: onboarding): computed from LiveStatus
   // fields SystemStatusStrip already fetches and displays - no new
   // command, no new fetch. `null` until the first status poll resolves,
@@ -797,6 +801,23 @@ export function LiveChurchBrain() {
       }
     },
     [withBusy, pendingConfirm, setEditingId, setEditValue],
+  );
+
+  const handleVoiceCommand = useCallback(
+    (command: OperatorVoiceCommand) => {
+      if (command.kind === "open-diagnostics") {
+        setMode("diagnostics");
+        return;
+      }
+      if (command.kind === "focus-search") {
+        searchInputRef.current?.focus();
+        return;
+      }
+      const topItem = attentionQueue[0];
+      if (!topItem || !actionsFor(topItem.domain).includes(command.action)) return;
+      handleUnifiedAction(topItem, command.action);
+    },
+    [attentionQueue, handleUnifiedAction],
   );
 
   // Phase 6.2: whichever confirm-guard arm is currently pending
@@ -999,6 +1020,18 @@ export function LiveChurchBrain() {
 
       <WorkspaceHeader status={status} sermonFoundation={sermonFoundation} serviceIntel={serviceIntel} />
       <SystemStatusStrip status={status} deviceCount={devices.length} displayWindowOpen={anyScreenOpen} />
+      <ReadinessCenter
+        bible={status?.bible ?? null}
+        deviceCount={devices.length}
+        speechReady={status?.speechStatus === "ready"}
+        displayOpen={anyScreenOpen}
+        onOpenDiagnostics={() => setMode("diagnostics")}
+      />
+      <NowNextWhy
+        activeDisplayItem={activeDisplayItem}
+        preparedItems={preparedItems}
+        attentionItems={attentionQueue}
+      />
 
       {mode === "operator" && setupGaps.length > 0 && (
         // Phase 6.6: SystemStatusStrip already names these as "Not
@@ -1026,6 +1059,7 @@ export function LiveChurchBrain() {
         items={attentionQueue}
         busy={busy}
         onAction={handleUnifiedAction}
+        onVoiceCommand={handleVoiceCommand}
         confirmingKey={pendingConfirm?.key ?? null}
         editingId={editingId}
         editValue={editValue}
@@ -2970,6 +3004,11 @@ function SuggestionCard({
   const isEditing = editingId === suggestion.id;
   const confidencePercent = Math.round(suggestion.confidence.score * 100);
   const preview = previews[suggestion.id];
+  const matchMethod = suggestion.confidence.source === "model"
+    ? "Semantic/model match"
+    : suggestion.confidence.source === "human"
+      ? "Operator-confirmed"
+      : "Reference/phrase match";
 
   return (
     <li className="live-brain__suggestion-card">
@@ -2997,6 +3036,7 @@ function SuggestionCard({
               </span>
             )}
           </div>
+          <p className="live-brain__confidence-reason">Evidence: {matchMethod}</p>
           {suggestion.sourceText && <p className="live-brain__source-text">&ldquo;{suggestion.sourceText}&rdquo;</p>}
           {suggestion.confidence.reason && (
             <p className="live-brain__confidence-reason">{suggestion.confidence.reason}</p>
